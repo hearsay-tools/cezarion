@@ -13,7 +13,8 @@ export const SQUEAL_WAIT_MS = 120_000;
 /** Judge one `squeal status --wait <ms> <paths> --json` result (exit code and parsed stdout). */
 export function judgeSqueal(exitCode, status) {
   const selection = status?.selection ?? {};
-  const files = selection.testFiles ?? [];
+  // Browser specs are CI's: Squeal runs them only on request.
+  const files = (selection.testFiles ?? []).filter(f => !f.path.endsWith('.e2e.ts'));
   const failed = files.filter(f => f.state === 'current' && f.verdict !== 'pass').map(f => f.path);
   const failures = selection.verdict?.failures ?? {};
   if (exitCode === 1 || failed.length || failures.tests || failures.testFiles) {
@@ -99,7 +100,7 @@ export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS } = 
   } else if (squeal.state === 'fail') {
     note(false, `Squeal: ${squeal.failed.length ? `failing test files: ${squeal.failed.join(', ')}` : squeal.lint.failing ? `${squeal.lint.failing} lint finding(s)` : 'known test failures'} (\`squeal failures\`, \`squeal status\`)`);
   } else if (squeal.state === 'incomplete') {
-    const names = [...squeal.missing, ...(squeal.lint.unfinished ? [`lint (${squeal.lint.unfinished} file(s) not done)`] : [])];
+    const names = [...squeal.missing.slice(0, 10), ...(squeal.missing.length > 10 ? [`and ${squeal.missing.length - 10} more`] : []), ...(squeal.lint.unfinished ? [`lint (${squeal.lint.unfinished} file(s) not done)`] : [])];
     lines.push(`- pass, incomplete: Squeal had no result within ${Math.round(waitMs / 1000)} s for: ${names.join(', ')}. No failure was seen. CI runs these.`);
   } else {
     note(true, `Squeal: ${squeal.count} affected test file(s) current and passing; lint clean`);

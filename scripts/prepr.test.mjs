@@ -38,3 +38,8 @@ test('only a live daemon counts', () => {
   assert.equal(daemonAlive({ available: false }), false);
   assert.equal(daemonAlive(undefined), false);
 });
+
+test('browser specs without a result do not count as missing', () => {
+  const r = judgeSqueal(3, status([file('packages/web/e2e/a.e2e.ts', 'pending'), file('a.test.ts', 'current', 'pass')]));
+  assert.equal(r.state, 'pass');
+});
