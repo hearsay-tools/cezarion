@@ -44,11 +44,9 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
     expect(await probePort(port)).toBe(true);
     await host.open(ctx, fakeViewer(), { port });
     if (action === 'replacement') run.previewServers = [{ ...registration, command: 'changed' }];
-    let settled = false;
-    cleanup = (action === 'release' ? host.release(run.id) : host.replaced(run.id, port)).then(() => { settled = true; });
-    // bound: negative window. The child holds the port until KILL, so a release that settled early would do so within a few event-loop turns; 25 ms covers them.
-    await new Promise(resolve => setTimeout(resolve, 25));
-    expect(settled).toBe(false);
+    cleanup = action === 'release' ? host.release(run.id) : host.replaced(run.id, port);
+    // The child holds the port until KILL: a cleanup that settled before the teardown finished
+    // would find the port still taken.
     await cleanup;
     expect(await probePort(port)).toBe(false);
     expect(await stopping).toMatchObject({ ok: false });

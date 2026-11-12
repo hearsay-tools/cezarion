@@ -29,6 +29,21 @@ async function fixture() {
   return { source, metadata, entry: join(dir, metadata.id) };
 }
 
+/** Resolves once the lock loop has refused a held lock `retries` times, or once `publication`
+ *  settles. Each refusal ends in a reclaim attempt that opens the lock, so the next open after
+ *  `retries` of them proves those reclaims returned without taking the lock. */
+function refusedRetries(retries: number, publication: Promise<unknown>): Promise<unknown> {
+  let opens = 0;
+  let reached!: () => void;
+  const enough = new Promise<void>(resolve => { reached = resolve; });
+  const open = fs.open;
+  vi.spyOn(fs, 'open').mockImplementation((...args: Parameters<typeof fs.open>) => {
+    if (String(args[0]).endsWith('.publish.lock') && ++opens > retries) reached();
+    return open(...args);
+  });
+  return Promise.race([enough, publication.catch(() => undefined)]);
+}
+
 describe('publication limits and locking', () => {
   it('rejects a source above the file cap before reading its bytes', async () => {
     const source = join(root, 'huge'); await writeFile(source, '');
@@ -92,9 +107,7 @@ describe('publication limits and locking', () => {
     const source = join(root, 'report.md'); await writeFile(source, 'original');
     let completed = false;
     const publication = publishArtifact(dir, runId, source).then(value => { completed = true; return value; });
-    // bound: negative window. publishArtifact retries a held lock every 20 ms (the delay in its
-    // lock loop), so 75 ms spans at least three retries; the case proves they all refuse.
-    await new Promise(resolve => setTimeout(resolve, 75));
+    await refusedRetries(3, publication);
     const publishedEarly = completed;
     await rm(join(dir, '.publish.lock'), { recursive: true, force: true });
     await publication;
@@ -106,9 +119,7 @@ describe('publication limits and locking', () => {
     const source = join(root, 'report.md'); await writeFile(source, 'original');
     let completed = false;
     const publication = publishArtifact(dir, runId, source).then(value => { completed = true; return value; });
-    // bound: negative window. publishArtifact retries a held lock every 20 ms (the delay in its
-    // lock loop), so 75 ms spans at least three retries; the case proves they all refuse.
-    await new Promise(resolve => setTimeout(resolve, 75));
+    await refusedRetries(3, publication);
     const publishedEarly = completed;
     await rm(join(dir, '.publish.lock'), { recursive: true });
     await publication;

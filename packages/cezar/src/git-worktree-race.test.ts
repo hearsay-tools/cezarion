@@ -1,6 +1,6 @@
 import { projectPaths } from './project-paths.ts';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,27 @@ async function fixture() {
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <dirent.h>
+/* One byte per scan of the mutation claim directory, in a file named for the scanning keeper's pid. */
+static void note_scan(const char *p) {
+  const char *signals = getenv("RACE_SIGNALS");
+  const char *suffix = "/cezar-worktree-mutations";
+  size_t n = strlen(p), m = strlen(suffix);
+  if (!signals || n < m || strcmp(p + n - m, suffix) != 0) return;
+  char marker[4096]; snprintf(marker, sizeof marker, "%s/scans/%d", signals, (int)getpid());
+  int fd = open(marker, O_WRONLY | O_CREAT | O_APPEND, 0600);
+  if (fd >= 0) { if (write(fd, ".", 1) < 0) {} close(fd); }
+}
+int scandir(const char *p, struct dirent ***list, int (*filter)(const struct dirent *), int (*compare)(const struct dirent **, const struct dirent **)) {
+  int (*original)(const char *, struct dirent ***, int (*)(const struct dirent *), int (*)(const struct dirent **, const struct dirent **)) = dlsym(RTLD_NEXT, "scandir");
+  note_scan(p);
+  return original(p, list, filter, compare);
+}
+int scandir64(const char *p, struct dirent64 ***list, int (*filter)(const struct dirent64 *), int (*compare)(const struct dirent64 **, const struct dirent64 **)) {
+  int (*original)(const char *, struct dirent64 ***, int (*)(const struct dirent64 *), int (*)(const struct dirent64 **, const struct dirent64 **)) = dlsym(RTLD_NEXT, "scandir64");
+  note_scan(p);
+  return original(p, list, filter, compare);
+}
 int mkdir(const char *p, mode_t mode) {
   int (*original)(const char *, mode_t) = dlsym(RTLD_NEXT, "mkdir");
   int result = original(p, mode);
@@ -64,6 +85,7 @@ int mkdir(const char *p, mode_t mode) {
   return result;
 }
 `);
+  mkdirSync(join(root, 'scans'));
   const preload = join(root, 'pause.so');
   await exec('cc', ['-shared', '-fPIC', '-Wall', '-o', preload, c, '-ldl']);
   const driver = join(root, 'driver.mjs');
@@ -96,7 +118,15 @@ try {
     child.stderr!.on('data', data => { stderr += String(data); });
     return { child, result, stderr: () => stderr };
   }
-  return { root, linked, start };
+  const scanning = () => new Set(readdirSync(join(root, 'scans')));
+  /** Ends when `peer` has a result, or when a lock keeper absent from `before` has scanned the claim
+   *  directory five times: one scan picks its ticket, and each later one follows a refusal. */
+  function settledOrRefused(peer: { result: string }, before: ReadonlySet<string>) {
+    const scans = join(root, 'scans');
+    const refused = () => readdirSync(scans).some(pid => !before.has(pid) && readFileSync(join(scans, pid), 'utf8').length >= 5);
+    return until(() => existsSync(peer.result) || refused(), 'peer completed or refused a held claim three times');
+  }
+  return { root, linked, start, scanning, settledOrRefused };
 }
 
 // This probes actual libc/Git interleaving on Linux; other platforms retain the
@@ -106,7 +136,7 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     ['create', false, false], ['remove', false, false], ['orphans', false, false],
     ['create', true, false], ['create', false, true],
   ] as const)('protects add from %s (fresh=%s, reattach=%s) across processes/common-dir aliases', async (operation, fresh, reattach) => {
-    const { root, linked, start } = await fixture();
+    const { root, linked, start, scanning, settledOrRefused } = await fixture();
     if (reattach) {
       const path = join(projectPaths(root).write, 'worktrees/victim000000');
       await exec('git', ['worktree', 'add', '-b', 'cez/victim00', path, 'main'], { cwd: root });
@@ -114,11 +144,12 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     }
     const victim = start(root, 'create', 'victim', 'victim000000', fresh);
     await until(() => existsSync(join(root, 'paused')), 'Git paused after admin mkdir');
+    const before = scanning();
     const peer = start(linked, operation, 'peer', operation === 'create' ? 'peer00000000' : join(root, 'absent'));
     await until(() => existsSync(peer.result + '.started'), 'peer entered helper');
     // Wait for the uncoordinated peer to finish, or for the coordinated waiter to
     // remain blocked. The held add is released explicitly, never by a Git timeout.
-    await Promise.race([until(() => existsSync(peer.result), 'peer completed'), pause(1000)]);
+    await settledOrRefused(peer, before);
     const preserved = existsSync(join(root, '.git/worktrees/victim000000'));
     writeFileSync(join(root, 'release'), '');
     await until(() => existsSync(victim.result) && existsSync(peer.result), 'both operations completed');
@@ -130,7 +161,7 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
   }, 25_000);
 
   it('keeps an active Git child protected when the keeper itself dies', async () => {
-    const { root, linked, start } = await fixture();
+    const { root, linked, start, scanning, settledOrRefused } = await fixture();
     const victim = start(root, 'create', 'victim', 'victim000000');
     await until(() => existsSync(join(root, 'paused')), 'Git paused');
     const directory = join(root, '.git/cezar-worktree-mutations');
@@ -138,11 +169,9 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     const claim = JSON.parse(readFileSync(join(directory, claimFile), 'utf8')) as { pid: number };
     process.kill(claim.pid, 'SIGKILL');
     await until(() => existsSync(victim.result), 'caller observed keeper failure');
+    const before = scanning();
     const peer = start(linked, 'create', 'peer', 'peer00000000');
-    await until(() => existsSync(peer.result + '.started'), 'peer entered helper');
-    // bound: negative window. The lock helper re-checks a held claim every 25 ms, so 1 s spans some
-    // 40 checks; the case proves each one refuses while the surviving Git holds the checkout.
-    await pause(1000);
+    await settledOrRefused(peer, before);
     const preserved = existsSync(join(root, '.git/worktrees/victim000000'));
     const waited = !existsSync(peer.result);
     writeFileSync(join(root, 'release'), '');
@@ -152,16 +181,14 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
   }, 25_000);
 
   it('keeps Git protected after its calling Cezar process dies, then releases for restart adoption', async () => {
-    const { root, linked, start } = await fixture();
+    const { root, linked, start, scanning, settledOrRefused } = await fixture();
     const victim = start(root, 'create', 'victim', 'victim000000');
     await until(() => existsSync(join(root, 'paused')), 'Git paused');
     victim.child.kill('SIGKILL');
     await new Promise<void>(resolve => victim.child.once('exit', () => resolve()));
+    const before = scanning();
     const peer = start(linked, 'create', 'peer', 'peer00000000');
-    await until(() => existsSync(peer.result + '.started'), 'peer entered helper');
-    // bound: negative window. The lock helper re-checks a held claim every 25 ms, so 1 s spans some
-    // 40 checks; the case proves each one refuses while the orphaned Git holds the checkout.
-    await pause(1000);
+    await settledOrRefused(peer, before);
     expect(existsSync(join(root, '.git/worktrees/victim000000'))).toBe(true);
     expect(existsSync(peer.result)).toBe(false);
     writeFileSync(join(root, 'release'), '');

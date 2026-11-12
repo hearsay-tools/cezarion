@@ -5,7 +5,6 @@ import { existsSync } from 'node:fs';
 import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
 
 
-import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 
 import { workerCleanupInternals } from './service.testkit.ts';
@@ -13,6 +12,12 @@ import { workerCleanupInternals } from './service.testkit.ts';
 import { DelegationService } from './service.ts';
 
 import { f, linux, cadence, settled, destroyOf, useDestroyBackoffFixture } from './service-destroy-backoff.testkit.ts';
+
+/** Resolves once every operation already queued on the service's serialization `key` settled. */
+function serializedAfter(service: DelegationService, key: string): Promise<void> {
+  const serialized = Reflect.get(service, 'serialized') as (key: string, operation: () => Promise<void>) => Promise<void>;
+  return serialized.call(service, key, async () => {});
+}
 
 describe('destroy backoff recovery', { timeout: 30_000 }, () => {
   useDestroyBackoffFixture();
@@ -57,9 +62,15 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
     const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
+      const [cleanup] = workerCleanupInternals(restarted);
+      const timers = vi.spyOn(globalThis, 'setTimeout');
       restarted.armDestroyRetries('project');
-      // bound: negative window. The persisted next attempt is 2 s out; a restart that ignored it would tick at the 40 ms floor and reach attempt 8 well within 300 ms.
-      await sleep(300);
+      const armed = cleanup?.destroyRetryTimers.get('project')?.get(workerId);
+      const delay = timers.mock.calls[timers.mock.results.findIndex(result => result.value === armed)]?.[1];
+      timers.mockRestore();
+      // The first tick waits out the persisted next attempt, 2 s out, not the 40 ms floor.
+      expect(delay).toBeGreaterThan(1_000);
+      expect(delay).toBeLessThanOrEqual(2_000);
       expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', retry: { attempts: 7 } });
       expect(existsSync(workspace.path)).toBe(true);
     } finally { detach(); }
@@ -105,8 +116,9 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     const writes = vi.spyOn(f.store, 'commitDelegation'), retries = vi.spyOn(f.store, 'commitDestroyRetry');
     try {
       release(true);
-      // bound: negative window. The released attempt continues into real Git work and then writes; on an idle host 300 ms is long enough to see that write, and a miss under load hides a regression without failing a good run.
-      await sleep(300);
+      // The cut-off tick holds the worker's serialization key until it returns; the next operation
+      // on that key runs after every write the tick could make.
+      await serializedAfter(f.service, `worker:project:${workerId}`);
       expect(writes).not.toHaveBeenCalled();
       expect(retries).not.toHaveBeenCalled();
       expect(destroyOf(workerId)).toEqual(before);

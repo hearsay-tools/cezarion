@@ -7,7 +7,7 @@ import { dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 
-import { scheduledDestroyAttempts } from './service.testkit.ts';
+import { scheduledDestroyAttempts, workerCleanupInternals } from './service.testkit.ts';
 import { WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
 
@@ -112,11 +112,16 @@ describe('destroy backoff cadence', { timeout: 30_000 }, () => {
     // The first tick reaches attention at once; the next one is four seconds out.
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 10_000 });
     const reads = vi.spyOn(f.store, 'readEventsAsync');
+    const timers = vi.spyOn(globalThis, 'setTimeout');
     expect(await f.service.destroyForHuman('project', workerId)).toMatchObject({ state: 'incomplete' });
+    const [cleanup] = workerCleanupInternals(f.service);
+    const armed = cleanup?.destroyRetryTimers.get('project')?.get(workerId);
+    const delay = timers.mock.calls[timers.mock.results.findIndex(result => result.value === armed)]?.[1];
+    timers.mockRestore();
     expect(reads).toHaveBeenCalledOnce();
     expect(destroyOf(workerId)?.retry).toBeUndefined();
-    const reset = Date.now();
+    // The re-armed tick runs at the 1 s fast cadence, not four seconds out.
+    expect(delay).toBe(1_000);
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBe(1), { timeout: 10_000, interval: 20 });
-    expect(Date.now() - reset).toBeLessThan(2_500);
   });
 });

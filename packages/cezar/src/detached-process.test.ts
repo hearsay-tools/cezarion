@@ -293,12 +293,20 @@ describe.runIf(posix)('watchGroup', () => {
     strays.push(starter.pid!);
     const { leader } = await startLeader(IDLE);
     let asked = 0;
+    // Each poll looks at the starter first; the seventh look ends six polls that found it running.
+    let looks = 0;
+    let sixPolls!: () => void;
+    const polled = new Promise<void>(resolve => { sixPolls = resolve; });
+    const readStart = (pid: number) => {
+      if (pid === starter.pid && ++looks === 7) sixPolls();
+      return processStartToken(pid);
+    };
     // The handle the starter writes once the boot finishes: an interrupted boot never writes it.
     const watching = watchGroup({
-      leader, intervalMs: 50, starter: { pid: starter.pid!, start: processStartToken(starter.pid!) },
+      leader, intervalMs: 50, readStart, starter: { pid: starter.pid!, start: processStartToken(starter.pid!) },
       decide: () => { asked += 1; return existsSync(join(dir, 'descriptor')) ? undefined : { reason: 'unowned' }; },
     });
-    await delay(300); // bound: proves a negative; six polls while the starter runs must decide nothing.
+    await Promise.race([polled, watching]);
     expect(asked).toBe(0);
     expect(alive(leader.pid)).toBe(true);
     starter.kill('SIGKILL');
