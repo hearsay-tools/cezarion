@@ -74,7 +74,7 @@ evidence block for the PR body. It reads Squeal's results for the changed files 
 lint, and runs typecheck (not for a docs-only change), citations, clones and the
 [GitHub patch limits](#github-patch-limits). Run it on the committed head. Its exit code
 is non-zero on a failing test, a lint finding, a type error, a bare citation, a new clone,
-or a committed file diff that GitHub would return without a patch.
+or a committed file diff over the per-file patch limit or with a NUL byte.
 
 - The Squeal wait is bounded at 2 minutes (`--wait-ms`). When it ends with no failure,
   the command names the files with no result and passes. CI runs them.
