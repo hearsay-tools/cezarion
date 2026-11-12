@@ -20,5 +20,5 @@ export function paintClasses(el: Element, property: PaintedProperty): string[] {
 
 /** Present and not see-through: at least one class, none transparent, none at zero opacity. */
 export function isPainted(classes: readonly string[]): boolean {
-  return classes.length > 0 && classes.every((cls) => !/-(?:transparent|none)$/.test(cls) && !/\/0$/.test(cls))
+  return classes.length > 0 && classes.every((cls) => !/-(?:transparent|none)$/.test(cls) && !cls.endsWith('/0'))
 }
