@@ -16,12 +16,19 @@ const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', '-c', '
   '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/',
   '--dst-prefix=b/', '--submodule=short', '--ignore-submodules=none', '-l1000', `-O${devNull}`]);
 
+// The environment for a patch read: without the variables `git help git` lists as changing
+// diff output, so they cannot override PATCH_DIFF.
+function patchEnv(env = process.env) {
+  const { GIT_DIFF_OPTS, GIT_EXTERNAL_DIFF, ...rest } = env;
+  return rest;
+}
+
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 << 20, stdio: 'pipe' });
 }
 
 function gitBytes(cwd, ...args) {
-  return execFileSync('git', args, { cwd, maxBuffer: 256 << 20, stdio: 'pipe' });
+  return execFileSync('git', args, { cwd, env: patchEnv(), maxBuffer: 256 << 20, stdio: 'pipe' });
 }
 
 /** Size and NUL presence of one file's local patch (a Buffer). */
@@ -166,4 +173,4 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   return report(core, missingPatches(files, stats, pr.changed_files, local));
 }
 
-module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, diffStats, numstatRows, statusLetters, splitPatches, localPatches, patchFacts, patchCause, missingPatches, checkPullRequest };
+module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, patchEnv, diffStats, numstatRows, statusLetters, splitPatches, localPatches, patchFacts, patchCause, missingPatches, checkPullRequest };

@@ -289,6 +289,10 @@ test('numstat rows keep tabs in a path and read a rename row as two paths', () =
 });
 
 test('patch limits measure GitHub\'s patch shape, whatever the user\'s diff settings', async t => {
+  const saved = { GIT_DIFF_OPTS: process.env.GIT_DIFF_OPTS, GIT_EXTERNAL_DIFF: process.env.GIT_EXTERNAL_DIFF };
+  t.after(() => { for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  process.env.GIT_DIFF_OPTS = '--unified=100000';
+  process.env.GIT_EXTERNAL_DIFF = 'false';
   const io = fixtureRepo(t, (cwd, git) => {
     const settings = [['diff.context', '0'], ['diff.interHunkContext', '100000'], ['diff.noprefix', 'true'],
       ['color.diff', 'always'], ['diff.algorithm', 'patience'], ['diff.relative', 'true'], ['diff.suppressBlankEmpty', 'true']];

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { isDocsPath } = require('../.github/scripts/change-surface.cjs');
-const { GITHUB_PATCH_LIMITS, localPatches } = require('../.github/scripts/missing-patches.cjs');
+const { GITHUB_PATCH_LIMITS, localPatches, patchEnv } = require('../.github/scripts/missing-patches.cjs');
 
 export const SQUEAL_WAIT_MS = 120_000;
 
@@ -65,12 +65,12 @@ const KILL_GRACE_MS = 10_000;
 const LINTED = /^packages\/.*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const NO_SQUEAL = { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
 
-/** Git readers for one checkout: `git` returns text, `gitBytes` a Buffer. */
+/** Git readers for one checkout: `git` returns text, `gitBytes` a patch read's Buffer. */
 export const gitIo = (cwd = undefined) => ({
   git: (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' }).stdout,
   // A failed read throws: an empty patch from a failed command is not an empty change.
   gitBytes: (...a) => {
-    const r = spawnSync('git', a, { cwd, maxBuffer: 256 << 20 });
+    const r = spawnSync('git', a, { cwd, env: patchEnv(), maxBuffer: 256 << 20 });
     if (r.status === 0) return r.stdout;
     const args = a.filter((x, i) => x !== '-c' && a[i - 1] !== '-c' && !x.startsWith('--')).join(' ');
     throw new Error(`git ${args} failed (exit ${r.status ?? r.signal ?? r.error?.code}): ${String(r.stderr ?? r.error).trim()}`);
