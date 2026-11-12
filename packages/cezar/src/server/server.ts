@@ -148,7 +148,6 @@ import {
   taskWebhooks as taskWebhookList,
 } from '../workspace/webhooks.ts';
 import { detectEnvironment } from '../core/backend-detect.ts';
-
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
