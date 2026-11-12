@@ -9,7 +9,7 @@ import { workspaceQueryKeys } from '@/api/queries'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { resetToasts } from '@/components/ui/toaster'
 import { resetDraft, writeDraft } from './new-task-draft'
-import { cssRules, targets } from '@/test/css-rules'
+import { cssRules, paintsBefore, targets } from '@/test/css-rules'
 
 beforeAll(() => {
   // cmdk scrolls the selected item into view; jsdom has no scrollIntoView.
@@ -1204,6 +1204,6 @@ describe('field chrome (#267)', () => {
   })
 
   it('does not paint a Runner ::before on agent-option pills (#272)', () => {
-    expect(rules.filter((rule) => /pill'\]::before/.test(rule.selector)).map((rule) => rule.selector)).toEqual([])
+    expect(rules.filter((rule) => paintsBefore(rule.selector, "pill']")).map((rule) => rule.selector)).toEqual([])
   })
 })

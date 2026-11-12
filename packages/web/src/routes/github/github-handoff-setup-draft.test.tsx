@@ -11,7 +11,7 @@ import { resetToasts } from '@/components/ui/toaster'
 import { githubTaskRef } from '@/lib/github-task'
 
 import { ListViewportResizeObserver } from './github-geometry.testkit'
-import { cssRules, targets } from '@/test/css-rules'
+import { cssRules, paintsBefore, targets } from '@/test/css-rules'
 import { readFollowupPrompt, readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
 
 beforeAll(() => {
@@ -84,7 +84,7 @@ describe('GitHub handoff field chrome (#243)', () => {
   })
 
   it('does not paint in-button Model/Runner/Effort ::before labels — PickerPill fieldLabel owns the name (#272)', () => {
-    const painted = rules.filter((rule) => /pill'\]::before/.test(rule.selector) && (rule.declarations.content ?? 'none') !== 'none')
+    const painted = rules.filter((rule) => paintsBefore(rule.selector, "pill']") && (rule.declarations.content ?? 'none') !== 'none')
     expect(painted.map((rule) => rule.selector)).toEqual([])
   })
 

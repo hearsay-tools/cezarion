@@ -275,6 +275,7 @@ describe('provider status workspace query', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     await tickFake(2_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     await refocus()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })

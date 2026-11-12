@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { cssRules, targets } from './css-rules'
+import { cssRules, paintsBefore, targets } from './css-rules'
 
 describe('cssRules', () => {
   it('reads each selector of a list with its at-rule chain, ignoring spacing, quotes and comments', () => {
@@ -14,6 +14,24 @@ describe('cssRules', () => {
       { selector: ':is(.c, .d)', at: ['@media (max-width:767px)', '@container x (min-width: 1px)'], declarations: { color: 'red', content: "'}'" } },
       { selector: '.e', at: [], declarations: { margin: '0' } },
     ])
+  })
+
+  it('resolves nested rules and nested conditions against their parent selector', () => {
+    const rules = cssRules(`.e, .f { color: red; &:focus { border: 0 } .g { margin: 0 } @media (max-width: 767px) { border: none!important } }`)
+    expect(rules.map(({ selector, at, declarations }) => [selector, at, declarations])).toEqual([
+      ['.e', [], { color: 'red' }],
+      ['.f', [], { color: 'red' }],
+      ['.e:focus', [], { border: '0' }],
+      ['.f:focus', [], { border: '0' }],
+      ['.e .g', [], { margin: '0' }],
+      ['.f .g', [], { margin: '0' }],
+      ['.e', ['@media (max-width: 767px)'], { border: 'none !important' }],
+      ['.f', ['@media (max-width: 767px)'], { border: 'none !important' }],
+    ])
+  })
+
+  it('carries no declaration for statements such as @apply', () => {
+    expect(cssRules('.a { @apply hover:bg-muted; color: red }')[0]?.declarations).toEqual({ color: 'red' })
   })
 
   it('throws on a sheet it cannot balance rather than returning a partial read', () => {
@@ -34,5 +52,19 @@ describe('targets', () => {
     expect(targets("[data-route='new'] .editor:focus-within", '.editor')).toBe(true)
     expect(targets(".editor > [data-slot='x y']", '.editor')).toBe(false)
     expect(targets(".editor [data-slot='x y']", "[data-slot='x y']")).toBe(true)
+  })
+
+  it('reads attribute spacing as one form and never matches a longer class name', () => {
+    expect(targets("[data-slot = 'gh-issue-filters' ]", "[data-slot='gh-issue-filters']")).toBe(true)
+    expect(targets('.editor-extra', '.editor')).toBe(false)
+    expect(targets('.editor.x', '.editor')).toBe(true)
+  })
+})
+
+describe('paintsBefore', () => {
+  it('finds ::before on the subject behind state pseudo-classes, but not on a descendant', () => {
+    expect(paintsBefore("[data-slot='model-pill']:hover::before", "pill']")).toBe(true)
+    expect(paintsBefore("[data-slot=\"runner-pill\"]:before", "pill']")).toBe(true)
+    expect(paintsBefore("[data-slot='model-pill'] span::before", "pill']")).toBe(false)
   })
 })

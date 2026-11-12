@@ -14,7 +14,15 @@ export type CssRule = {
 }
 
 const normalize = (text: string) =>
-  text.replace(/"/g, "'").replace(/\s*([>+~,])(?!=)\s*/g, ' $1 ').replace(/\s+/g, ' ').replace(/ , /g, ', ').trim()
+  text
+    .replace(/"/g, "'")
+    .replace(/\s*([>+~,])(?!=)\s*/g, ' $1 ')
+    .replace(/\s+/g, ' ')
+    // `[data-slot = 'x' ]` reads as `[data-slot='x']`.
+    .replace(/\[ ?([\w-]+) ?([~|^$*]?=) ?/g, '[$1$2')
+    .replace(/ \]/g, ']')
+    .replace(/ , /g, ', ')
+    .trim()
 
 /** Splits a selector list on its top-level commas, leaving `:is(a, b)` whole. */
 export function splitSelectorList(list: string): string[] {
@@ -37,17 +45,32 @@ export function splitSelectorList(list: string): string[] {
 /** Drops comments, leaving strings such as `@source "dist/*.js"` intact. */
 const stripComments = (css: string) => css.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\/\*[\s\S]*?\*\//g, (_, string?: string) => string ?? '')
 
+/**
+ * Nested rules resolve against their parents: `.a { &:focus { … } }` reads as `.a:focus`,
+ * `.a { .b { … } }` as `.a .b`, and `.a { @media (…) { border: 0 } }` as a `.a` rule inside
+ * that `@media`. Statements such as `@apply` and `@import` carry no declaration.
+ */
 export function cssRules(css: string): CssRule[] {
   const src = stripComments(css)
   const rules: CssRule[] = []
   const declare = (into: Record<string, string> | null, text: string) => {
     const colon = text.indexOf(':')
-    if (!into || colon < 0) return
+    if (!into || colon < 0 || text.trim().startsWith('@')) return
     const prop = text.slice(0, colon).trim().toLowerCase()
-    if (prop) into[prop] = normalize(text.slice(colon + 1))
+    if (prop) into[prop] = normalize(text.slice(colon + 1)).replace(/ ?! ?important$/i, ' !important')
   }
-  // Reads one block body from `from`; returns the index of its closing brace (or src.length at top level).
-  const block = (from: number, at: readonly string[], declarations: Record<string, string> | null): number => {
+  const open = (selectors: readonly string[], at: readonly string[]) => {
+    const own: Record<string, string> = {}
+    for (const selector of selectors) rules.push({ selector, at, declarations: own })
+    return own
+  }
+  const resolve = (parents: readonly string[] | null, prelude: string) => {
+    const selectors = splitSelectorList(prelude)
+    if (!parents) return selectors
+    return parents.flatMap((parent) => selectors.map((selector) => (selector.includes('&') ? selector.replaceAll('&', parent) : `${parent} ${selector}`)))
+  }
+  // Reads one block body from `from`; returns the index of its closing brace (or src.length at the top level).
+  const block = (from: number, at: readonly string[], parents: readonly string[] | null, declarations: Record<string, string> | null): number => {
     let token = from
     for (let i = from; i < src.length; i++) {
       const ch = src[i]
@@ -59,17 +82,17 @@ export function cssRules(css: string): CssRule[] {
         declare(declarations, src.slice(token, i))
         token = i + 1
         if (ch === '}') {
-          if (at.length === 0 && declarations === null) throw new Error(`unbalanced "}" at offset ${i}`)
+          if (from === 0) throw new Error(`unbalanced "}" at offset ${i}`)
           return i
         }
       } else if (ch === '{') {
         const prelude = normalize(src.slice(token, i))
         if (prelude.startsWith('@')) {
-          i = block(i + 1, [...at, prelude], null)
+          const inner = [...at, prelude]
+          i = block(i + 1, inner, parents, parents ? open(parents, inner) : null)
         } else {
-          const own: Record<string, string> = {}
-          for (const selector of splitSelectorList(prelude)) rules.push({ selector, at, declarations: own })
-          i = block(i + 1, at, own)
+          const selectors = resolve(parents, prelude)
+          i = block(i + 1, at, selectors, open(selectors, at))
         }
         if (i >= src.length) throw new Error(`unclosed block "${prelude}"`)
         token = i + 1
@@ -77,16 +100,25 @@ export function cssRules(css: string): CssRule[] {
     }
     return src.length
   }
-  block(0, [], null)
+  block(0, [], null, null)
   return rules
 }
+
+/** Escapes `text` for a RegExp source. */
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * True when `selector`'s subject (its last compound, ignoring trailing pseudo-classes and
  * pseudo-elements) contains `compound`. `.a .b` targets `.b`, not `.a`.
  */
 export function targets(selector: string, compound: string): boolean {
-  const parts = selector.split(/ [>+~] | (?![^[(]*[\])])/)
+  const parts = normalize(selector).split(/ [>+~] | (?![^[(]*[\])])/)
   const subject = parts.at(-1) ?? ''
-  return subject.includes(normalize(compound))
+  // A whole token: `.editor` is not `.editor-extra`.
+  return new RegExp(`${literal(normalize(compound))}(?![\\w-])`).test(subject)
+}
+
+/** True when `selector` puts a `::before` (or legacy `:before`) on a subject whose compound contains `compound`. */
+export function paintsBefore(selector: string, compound: string): boolean {
+  return new RegExp(`${literal(normalize(compound))}[^ >+~]*::?before(?![\\w-])`).test(normalize(selector))
 }
