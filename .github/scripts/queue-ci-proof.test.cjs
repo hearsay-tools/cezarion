@@ -164,7 +164,7 @@ for (const [label, change] of Object.entries({
 })) test(`skipped queue suites force full CI fallback: ${label}`, async () => {
   const h = fixture(); skippedSuites(h.state); h.options.surfaceOf = () => 'docs-only';
   change(h.state, h.options);
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'incomplete-gate' });
 });
 
 test('mainCommitSurface classifies the queued commit from its group base with the base classifier', () => {
@@ -229,7 +229,7 @@ test('a push of a group head based on the previous group head reuses its own que
 });
 test('a push over two group heads cannot reuse the skipped head\'s run', async () => {
   const { h, second } = speculative(); h.options.sha = second; h.state.runs[1].conclusion = 'failure';
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'source-not-successful' });
   assert.ok(!h.state.calls.some(({ args }) => args.run_id === 20));
 });
 test('a push of entry 1 ignores the newer queue run of entry 2', async () => {
