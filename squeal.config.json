@@ -173,6 +173,11 @@
     ".github/scripts/vitest-actions-report.test.cjs": [
       "vitest.config.ts"
     ],
+    ".github/scripts/vitest-rerun-reset.test.cjs": [
+      "vitest.config.ts",
+      "packages/*/vitest.config.ts",
+      "packages/web/e2e/vitest.config.ts"
+    ],
     ".github/scripts/transcript-facts-responsiveness.workflow.test.cjs": [
       "packages/cezar/scripts/measure-transcript-facts-*.mjs"
     ],
