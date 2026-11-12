@@ -588,7 +588,7 @@ function queuedResumeSession(context: RunModuleContext, host: QueuedRevivalHost,
   let resumeIdentity: WorkerStepIdentity | undefined;
   try { resumeIdentity = host.workerStep(run.id, continuationDefStep(context.store, run, sessionStep.sessionId)?.id); }
   catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
-  const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
+  const backend = resumeIdentity?.account.provider ?? retryInFlightRunner(run) ?? run.runner ?? 'claude';
   const sessionBackend = sessionStep.backend ?? backend;
   const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
   const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
@@ -658,6 +658,12 @@ function heldWorkflowStepId(run: RunRecord): string | undefined {
 /** The runner the held workflow step ran on, which its retry keeps (hearsay-tools/squawk#3337). */
 function heldStepRunner(run: RunRecord): RunnerId | undefined {
   return run.steps.find(step => step.id === run.workflowResumeStepId)?.backend;
+}
+
+/** A provider-error retry still in flight (queued or running, its attempt counted) keeps the held
+ *  step's runner across a restart, as its admission chose (hearsay-tools/squawk#3337). */
+function retryInFlightRunner(run: RunRecord): RunnerId | undefined {
+  return run.autoResumeReason === 'provider-error' && run.autoResumeAttempts !== undefined ? heldStepRunner(run) : undefined;
 }
 
 function ciWorkflowResumeStepIndex(run: RunRecord): number {

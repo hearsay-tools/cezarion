@@ -214,3 +214,11 @@ it('sends the held step\'s prompt with every provider retry, a launch id alone i
   for (const run of [held, launched]) expect(retryPrompt(run)).toContain('Review this change: add the parser. Do not edit files.');
   expect(retryPrompt({ ...launched, autoResumeReason: 'usage-limit' })).not.toContain('Review this change');
 });
+it('keeps a queued provider retry on the held step\'s runner across a restart', () => {
+  const host = { workerStep: () => undefined, resumableSessionId: () => 'claude-session' } as unknown as Parameters<typeof atTaskHead.queuedResumeSession>[1];
+  const step = makeStepState({ id: 'review', kind: STEP_KIND.agent, status: STEP_STATUS.failed, sessionId: 'claude-session', backend: 'claude' });
+  const retry = makeRunRecord({ status: RUN_STATUS.queued, runner: 'codex', steps: [step], workflowResumeStepId: 'review', autoResumeReason: 'provider-error', autoResumeAttempts: 1 });
+  expect(atTaskHead.queuedResumeSession(context, host, retry, step)).toMatchObject({ backend: 'claude', recoveredSessionId: 'claude-session' });
+  // Any other queued Continue keeps the run's runner, as before.
+  expect(atTaskHead.queuedResumeSession(context, host, { ...retry, autoResumeAttempts: undefined }, step)).toMatchObject({ backend: 'codex', recoveredSessionId: undefined });
+});

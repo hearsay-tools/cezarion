@@ -37,5 +37,6 @@ it('native ask routes only after synchronous release withdraws expired parent ho
     expect.objectContaining({ reason: 'parent-stopped' }),
   ]);
   expect(events.filter(event => event.type === 'worker-question-routed')).toEqual([]);
-  expect(f.store.getRun(worker.id)?.status).toBe('cancelled');
+  // A failed parent leaves its worker running (hearsay-tools/squawk#3337): its question closed above.
+  expect(f.store.getRun(worker.id)?.status).not.toBe('cancelled');
 });
