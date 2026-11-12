@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 import { linuxBootId, processStartToken, pidExists, sameIncarnation, recordedProcessLive, type RecordedProcess } from '../core/process-stat.ts';
