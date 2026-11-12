@@ -17,7 +17,8 @@ function context(event = 'merge_group', result = 'success', verified = 'true') {
     preflight: { result: 'success' }, 'review-result': { result: 'success' },
     'change-surface': { outputs: { surface: 'full-matrix' } }, 'classify-pr': { outputs: { bump_pr: 'false' } },
     vitest: { result: 'success' }, 'cockpit-browser': { result: 'success' } },
-  steps: { 'resolve-dispatch': { outputs: { valid: '' } }, collect: { outcome: 'success' }, upload: { outcome: 'success' } },
+  steps: { 'resolve-dispatch': { outputs: { valid: '' } }, collect: { outcome: 'success' }, upload: { outcome: 'success' },
+    record: { outcome: 'skipped' }, e2e: { outcome: 'skipped' } },
   inputs: {}, cancelled: () => false, always: () => true, failure: () => false, hashFiles: () => 'lock' };
 }
 function evaluate(raw, ctx) {

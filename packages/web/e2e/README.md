@@ -203,7 +203,10 @@ its line text moves with a moved line; an edited line is a new site, and gets a 
 ## Reading a failure bundle
 
 A red spec leaves `.ai/qa/failures/<spec>/<test>-<n>/` behind (#408), and CI uploads the
-directory as the `cockpit-failures-shard-<n>` artifact and lists it in the job's step summary:
+directory as the `cockpit-failures-shard-<n>` artifact and lists it in the job's step summary.
+In a merge group whose first run fails, the shard runs again, and the first run's bundles
+upload first as `cockpit-failures-first-run-shard-<n>`
+([docs/sdlc/ci.md § Rerun of a failed queue shard](../../../docs/sdlc/ci.md#rerun-of-a-failed-queue-shard)):
 
 | File | What it holds |
 | --- | --- |

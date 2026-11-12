@@ -77,7 +77,11 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
     }
   }
   assert.equal(record.env.VITEST_FILE_DURATION_CAP, collect.env.VITEST_FILE_DURATION_CAP);
-  assert.equal(record['continue-on-error'], undefined, 'test failures must block');
+  // Test failures block: a merge group continues past them only to its rerun, which blocks
+  // (ci-queue-rerun.workflow.test.cjs); a trial dispatch never continues.
+  for (const [event, inputs] of runs) {
+    assert.equal(expression(record['continue-on-error'], context(event, inputs)), event === 'merge_group', `${event} ${JSON.stringify(inputs)}`);
+  }
   assert.equal(step(vitest, 'squeal')['continue-on-error'], true, 'a failed fetch must not fail the shard');
   // The recorded command is the shard command without its own V8 coverage, which only the plain
   // command adds: Squeal's provider yields to a project's coverage (squeal spec 020 D13.1).
@@ -88,7 +92,9 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
   const upload = step(vitest, 'Upload Squeal parts');
   assert.equal(upload['continue-on-error'], true);
   assert.equal(upload.with.name, 'squeal-parts-shard-${{ matrix.shard }}');
-  assert.equal(upload.with.path, '${{ runner.temp }}/squeal-parts/');
+  // The first run's parts, unless a merge-group rerun recorded its own (ci-queue-rerun.workflow.test.cjs).
+  assert.equal(upload.with.path, "${{ runner.temp }}/${{ steps.rerun.outcome == 'skipped' && 'squeal-parts' || 'squeal-parts-rerun' }}/");
+  assert.equal(record.env.PARTS_DIR, 'squeal-parts');
   assert.equal(upload.with['retention-days'], 3);
   assert.match(upload.if, /steps\.squeal\.outcome == 'success'/);
   // A shard whose tests failed still uploads its parts: the condition carries its own status
@@ -107,7 +113,7 @@ test('the merge-group step returns the test command\'s exit code and output, rec
     }
     const run = (fetched) => spawnSync('bash', ['-e', '-c', script(record.run, 'merge_group', 2)], {
       encoding: 'utf8',
-      env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: fetched },
+      env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: fetched, PARTS_DIR: record.env.PARTS_DIR },
     });
     const recorded = run('success');
     assert.equal(recorded.status, 7, 'squeal ci record returns the command\'s code');
@@ -118,7 +124,7 @@ test('the merge-group step returns the test command\'s exit code and output, rec
     assert.match(plain.stdout, /^npm test -- --shard=2\/4 --maxWorkers=4$/m);
     // A trial dispatch records the same command, with no --coverage.enabled for Squeal's provider to yield to.
     const trial = spawnSync('bash', ['-e', '-c', script(record.run, 'workflow_dispatch', 2)], {
-      encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: 'success' },
+      encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: 'success', PARTS_DIR: record.env.PARTS_DIR },
     });
     assert.equal(trial.stdout, recorded.stdout);
   } finally {
