@@ -711,7 +711,7 @@ jobs:
           node .github/scripts/release-packages.cjs pack-check
 
   vitest:
-    name: Vitest shard ${{ matrix.shard }}/4
+    name: Vitest shard ${{ matrix.shard }}/8
     # Docs-only and infra-only changes, and verified manifest-only bot release
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
@@ -722,7 +722,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [ 1, 2, 3, 4 ]
+        shard: [ 1, 2, 3, 4, 5, 6, 7, 8 ]
     runs-on: ubuntu-24.04
     # Coverage now shares the required test run on PRs and dispatches. Keep the
     # previous coverage job bound there; main gets 20 minutes. A merge group gets 40,
@@ -776,7 +776,7 @@ jobs:
         id: collect
         env:
           VITEST_FILE_DURATION_CAP: '1'
-        run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
+        run: npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && github.event_name != 'merge_group' && !(github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == '')
 
       # Merge groups (the run whose SHA becomes main) run the same command under
@@ -804,11 +804,11 @@ jobs:
           SQUEAL_FETCHED: ${{ steps.squeal.outcome }}
           PARTS_DIR: squeal-parts
         run: &record-shard |
-          set -- npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4
+          set -- npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4
           if [ "$SQUEAL_FETCHED" = success ]; then
             exec node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" ci record --out "$RUNNER_TEMP/$PARTS_DIR" -- "$@"
           fi
-          echo "::warning title=Squeal release not fetched::Shard ${{ matrix.shard }}/4 runs its tests without recording Squeal results."
+          echo "::warning title=Squeal release not fetched::Shard ${{ matrix.shard }}/8 runs its tests without recording Squeal results."
           exec "$@"
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == ''))
 
@@ -881,8 +881,8 @@ jobs:
           else
             reason="the upload ended as $UPLOAD"
           fi
-          echo "::warning title=Vitest coverage shard $SHARD/4 missing::No coverage report from shard $SHARD: $reason. The test verdict comes from the Vitest shard job."
-          echo "Vitest coverage shard $SHARD/4: no report, $reason." >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Vitest coverage shard $SHARD/8 missing::No coverage report from shard $SHARD: $reason. The test verdict comes from the Vitest shard job."
+          echo "Vitest coverage shard $SHARD/8: no report, $reason." >> "$GITHUB_STEP_SUMMARY"
 
   # Squeal shared results, after passing merge-group shards: squeal-export keys the shard
   # parts in a read-only checkout, squeal-publish pushes them as refs/squeal/<sha> for
@@ -1155,7 +1155,7 @@ jobs:
           retention-days: 14
           overwrite: true
 
-  # Merges the four shard reports into one repo-relative Istanbul `coverage-final.json` and
+  # Merges the eight shard reports into one repo-relative Istanbul `coverage-final.json` and
   # uploads it as `vitest-coverage-<head SHA>`. See docs/sdlc/ci.md § Vitest coverage artifact.
   vitest-coverage-merge:
     name: Merge Vitest coverage
@@ -1203,7 +1203,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          node .github/scripts/merge-vitest-coverage.mjs --input shards --output merged --shards 4 --root "$GITHUB_WORKSPACE" \
+          node .github/scripts/merge-vitest-coverage.mjs --input shards --output merged --shards 8 --root "$GITHUB_WORKSPACE" \
             --meta "headSha=$HEAD_SHA" --meta "testedRef=$TESTED_REF" --meta "baseSha=$BASE_SHA" \
             --meta "runId=$RUN_ID" --meta "runAttempt=$RUN_ATTEMPT" 2> merge.err || { cat merge.err >&2; exit 1; }
 
@@ -1250,7 +1250,7 @@ jobs:
   # green the required aggregate. This job opts into skip-exit-0 with
   # --allow-skip, then checks the marker through require-e2e-passed.cjs.
   cockpit-browser:
-    name: Cockpit browser E2E shard ${{ matrix.shard }}/4
+    name: Cockpit browser E2E shard ${{ matrix.shard }}/8
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
     needs: [ queue-proof, change-surface, classify-pr, preflight, pr-test-input, pr-test-proof ]
     if: >-
@@ -1258,7 +1258,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [ 1, 2, 3, 4 ]
+        shard: [ 1, 2, 3, 4, 5, 6, 7, 8 ]
     runs-on: ubuntu-latest
     # A merge group gets room for the shard to run twice (§ Rerun of a failed queue shard).
     timeout-minutes: ${{ github.event_name == 'merge_group' && 40 || 30 }}
@@ -1304,7 +1304,7 @@ jobs:
         continue-on-error: ${{ github.event_name == 'merge_group' }}
         run: &browser-shard |
           set -o pipefail
-          npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
+          npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/8 2>&1 | tee e2e.log
           node .github/scripts/require-e2e-passed.cjs < e2e.log
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
@@ -1360,14 +1360,14 @@ jobs:
         run: |
           if [ -d .ai/qa/failures ]; then
             {
-              echo "### Cockpit failure bundles (shard $SHARD/4)"
+              echo "### Cockpit failure bundles (shard $SHARD/8)"
               echo
               echo "Artifact \`cockpit-failures-shard-$SHARD\` holds each bundle's screenshot.png, snapshot.txt and probe.json."
               echo
               find .ai/qa/failures -mindepth 2 -maxdepth 2 -type d | sort | sed 's/^/- `/; s/$/`/'
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Cockpit failure bundles (shard $SHARD/4): none written" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Cockpit failure bundles (shard $SHARD/8): none written" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # Keep this aggregate job's name stable: branch protection uses it as the

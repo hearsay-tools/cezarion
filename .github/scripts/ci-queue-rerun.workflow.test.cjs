@@ -96,7 +96,7 @@ test('the Vitest rerun records into a new parts directory, and only its parts up
     const result = spawnSync('bash', ['-e', '-c', script], {
       encoding: 'utf8', env: { PATH: `${temp}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: 'success', PARTS_DIR: rerun.env.PARTS_DIR },
     });
-    assert.equal(result.stdout.trim(), 'node /runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci record --out /runner/temp/squeal-parts-rerun -- npm test -- --shard=2/4 --maxWorkers=4');
+    assert.equal(result.stdout.trim(), 'node /runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci record --out /runner/temp/squeal-parts-rerun -- npm test -- --shard=2/8 --maxWorkers=4');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

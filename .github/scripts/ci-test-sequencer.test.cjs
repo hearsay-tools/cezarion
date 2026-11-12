@@ -103,7 +103,7 @@ test('the actual workflow command loads all unit projects and a sequencer constr
   const job = workflow.jobs.vitest;
   const step = job.steps.find(step => step.name === 'Run server and cockpit unit suites');
   const npmTest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.test;
-  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4, 5, 6, 7, 8]);
   let specifications;
   const selected = [];
   const identity = spec => JSON.stringify([spec.project.name, spec.moduleId]);
@@ -115,14 +115,14 @@ test('the actual workflow command loads all unit projects and a sequencer constr
     try {
       const Sequencer = vitest.config.sequence.sequencer;
       assert.equal(typeof Sequencer, 'function', 'Vitest must receive a constructor, not a CLI path string');
-      assert.deepEqual(vitest.config.shard, { index, count: 4 });
+      assert.deepEqual(vitest.config.shard, { index, count: 8 });
       assert.equal(vitest.config.maxWorkers, 4);
       assert.deepEqual(vitest.projects.map(project => project.name).sort(), ['api-client', 'contract', 'server', 'web']);
       specifications ??= await vitest.globTestSpecifications();
       const slice = await new Sequencer(vitest).shard(specifications);
       assert.ok(slice.length > 0);
       selected.push(...slice);
-      t.diagnostic(`shard ${index}/4: ${slice.length} of ${specifications.length} discovered specifications`);
+      t.diagnostic(`shard ${index}/8: ${slice.length} of ${specifications.length} discovered specifications`);
     } finally {
       await vitest.close();
     }

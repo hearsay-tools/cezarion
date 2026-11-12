@@ -4,7 +4,7 @@
 const { execFile } = require('node:child_process');
 const { parseArgs } = require('node:util');
 const { setTimeout: delay } = require('node:timers/promises');
-const { REQUIRED_QUEUE_JOBS, successfulJobs } = require('./queue-ci-proof.cjs');
+const { requiredQueueJobs, REQUIRED_QUEUE_JOBS, successfulJobs } = require('./queue-ci-proof.cjs');
 
 const PROOF_JOB = 'Verify exact queue CI evidence';
 // On a main push, Typecheck runs only when the queue proof did not verify.
@@ -360,6 +360,13 @@ function mergeMetrics(raw) {
     enqueueMax: waits.length ? Math.max(...waits) : null };
 }
 
+// The proof at a main commit reads the roster of that commit's ci.yml, so a queue run from before
+// a shard-count change is judged by the count its own Vitest shard jobs name.
+function rosterOf(jobs) {
+  const count = jobs.map(job => /^Vitest shard [1-9]\d?\/([1-9]\d?)$/.exec(job.name)?.[1]).find(Boolean);
+  return count ? requiredQueueJobs(Number(count)) : REQUIRED_QUEUE_JOBS;
+}
+
 // The proof's own reason is in its job summary, which the API does not return.
 // This rebuilds it from the evidence queue-ci-proof.cjs reads.
 function proofReason(push) {
@@ -371,7 +378,8 @@ function proofReason(push) {
   const queueRun = attemptAt(push.evidence.queueRun, push.evidence.attempts, Date.parse(proof.completed_at));
   if (queueRun.status !== 'completed' || Date.parse(queueRun.updated_at) > Date.parse(proof.completed_at)) return 'source-pending';
   if (queueRun.conclusion !== 'success') return 'source-not-successful';
-  if (!successfulJobs(queueJobs.filter(job => job.run_attempt === queueRun.run_attempt), REQUIRED_QUEUE_JOBS)) return 'incomplete-gate';
+  const attempt = queueJobs.filter(job => job.run_attempt === queueRun.run_attempt);
+  if (!successfulJobs(attempt, rosterOf(attempt))) return 'incomplete-gate';
   return 'unexplained';
 }
 

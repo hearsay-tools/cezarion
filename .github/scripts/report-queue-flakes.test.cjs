@@ -20,7 +20,7 @@ test('a shard that passed only on its rerun files one flake-report issue that na
   assert.deepEqual(issue.labels, ['flake-report'], 'no main-ci-failure label: the repair automation never takes it');
   assert.equal(issue.title, 'Flaky test in the merge queue: manager.test.ts');
   for (const text of [MARK.report, MARK.occurrence(KEY), MARK.file(MANAGER), `\`${MANAGER}\``,
-    '[Vitest shard 2/4](https://github.com/hearsay-tools/squawk/actions/runs/501/job/102)',
+    '[Vitest shard 2/8](https://github.com/hearsay-tools/squawk/actions/runs/501/job/102)',
     `https://github.com/hearsay-tools/squawk/commit/${SHA}`, 'hearsay-tools/squawk#3300', '`flaky-test`']) {
     assert.ok(issue.body.includes(text), text);
   }
@@ -40,8 +40,23 @@ test('one merge group with several flaked shards files one issue that names ever
   const [issue] = h.state.issues;
   assert.equal(issue.title, 'Flaky test in the merge queue: manager.test.ts and 2 more');
   for (const name of [MANAGER, BOARD, SPEC]) assert.ok(issue.body.includes(MARK.file(name)), name);
-  assert.ok(issue.body.includes('Cockpit browser E2E shard 3/4'));
+  assert.ok(issue.body.includes('Cockpit browser E2E shard 3/8'));
   assert.ok(!issue.body.includes('never.test.ts'), 'a shard that failed its rerun too is a failure, not a flake');
+});
+
+test('the eighth shard of each suite reports, and a run from before eight shards still reports', async () => {
+  const h = harness({
+    jobs: [vitestJob(8), browserJob(8), { ...vitestJob(3), id: 303, name: 'Vitest shard 3/4' }],
+    artifacts: {
+      'failed-test-files-vitest-shard-8': listArchive([MANAGER]),
+      'failed-test-files-cockpit-browser-shard-8': listArchive([SPEC]),
+      'failed-test-files-vitest-shard-3': listArchive([BOARD]),
+    },
+  });
+  assert.deepEqual(await reportQueueFlakes(h.options()), { flakes: 3, reported: 1 });
+  const [issue] = h.state.issues;
+  for (const name of [MANAGER, SPEC, BOARD]) assert.ok(issue.body.includes(MARK.file(name)), name);
+  for (const shard of ['Vitest shard 8/8', 'Cockpit browser E2E shard 8/8', 'Vitest shard 3/4']) assert.ok(issue.body.includes(shard), shard);
 });
 
 test('a later merge group that flakes on a reported file comments on that issue', async () => {
@@ -176,7 +191,7 @@ test('without usable names the report is filed without names and says why', asyn
     const h = harness({ artifacts });
     assert.deepEqual(await reportQueueFlakes(h.options()), { flakes: 1, reported: 1 }, label);
     const [issue] = h.state.issues;
-    assert.equal(issue.title, 'Flaky merge-queue shard without test names: Vitest shard 2/4', label);
+    assert.equal(issue.title, 'Flaky merge-queue shard without test names: Vitest shard 2/8', label);
     assert.match(issue.body, note, label);
     assert.ok(!issue.body.includes('cez-flake-file'), label);
   }
@@ -236,7 +251,7 @@ test('only a completed merge-group CI run of this repository is read', async () 
 });
 
 test('a job name or a step name outside the CI shards is not read as a flake', async () => {
-  const forged = { ...vitestJob(2), name: 'Vitest shard 2/4 extra' };
+  const forged = { ...vitestJob(2), name: 'Vitest shard 2/8 extra' };
   const renamed = vitestJob(3);
   renamed.steps[3].name = 'Rerun something else';
   const h = harness({ jobs: [forged, renamed] });

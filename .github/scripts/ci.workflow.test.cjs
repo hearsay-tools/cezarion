@@ -95,15 +95,15 @@ function runClassification({ apiOutput, fileObjects, changedFiles, apiFails = fa
 test('pull request CI runs npm run test:e2e as a Cockpit browser E2E job', () => {
   const job = workflow().jobs['cockpit-browser'];
   assert.ok(job, 'expected a cockpit-browser job');
-  assert.equal(job.name, 'Cockpit browser E2E shard ${{ matrix.shard }}/4');
-  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.equal(job.name, 'Cockpit browser E2E shard ${{ matrix.shard }}/8');
+  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.equal(job.strategy['fail-fast'], false);
   assert.equal(job['runs-on'], 'ubuntu-latest');
   const setup = job.steps.find((step) => step.name === 'Set up Node.js');
   assert.equal(setup.with['node-version'], 'lts/*');
   assert.equal(setup.with['check-latest'], true);
   const steps = stepsText(job);
-  assert.ok(steps.includes('npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/4'));
+  assert.ok(steps.includes('npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/8'));
   assert.match(steps, /require-e2e-passed\.cjs/);
 });
 
@@ -457,12 +457,12 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.ok(!commands.includes('npm run test:e2e:local'));
   const vitest = workflow().jobs.vitest;
   const shards = vitest.strategy.matrix.shard;
-  assert.deepEqual(shards, [1, 2, 3, 4]);
-  assert.equal(vitest.name, 'Vitest shard ${{ matrix.shard }}/4');
+  assert.deepEqual(shards, [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(vitest.name, 'Vitest shard ${{ matrix.shard }}/8');
   assert.equal(vitest.strategy['fail-fast'], false);
   const run = vitest.steps.map((step) => step.run).find((cmd) => /^npm test -- --shard=/.test(cmd ?? ''));
   assert.ok(run, 'expected the Vitest job to run sharded npm test');
-  assert.ok(run.startsWith('npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4'));
+  assert.ok(run.startsWith('npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4'));
   const shardCommands = shards.map((n) => run.replace('${{ matrix.shard }}', String(n)).replace(/ \$\{\{.*?\}\}/g, ''));
   assert.deepEqual(commands.filter((cmd) => cmd.startsWith('npm test')), shardCommands,
     'validation.commands must list exactly the Vitest shards CI runs (hearsay-tools/cezarion#981)');
@@ -472,6 +472,7 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.ok(row, 'expected a Verification bindings row');
   assert.match(row[1], /npm run test:package/);
   assert.match(row[1], /Full gate in CI:.*`npm run test:e2e`/);
+  assert.match(row[1], new RegExp(`\`npm test -- --shard=N/${shards.length} --maxWorkers=4\` \\(N=1\\.\\.${shards.length}\\)`));
   assert.match(agents.match(/^\| Verification \|([^|]+)\|/m)?.[1] ?? '', /Full gate in CI:.*`npm run test:e2e`/);
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   assert.equal(typeof manifest.scripts['test:e2e:local'], 'string');

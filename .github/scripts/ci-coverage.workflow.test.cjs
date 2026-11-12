@@ -14,7 +14,7 @@ const yaml = require('yaml');
 const repoRoot = path.join(__dirname, '..', '..');
 const ci = () => yaml.parse(fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8'));
 const COVERAGE_JOBS = ['vitest-coverage-merge'];
-const SHARD_RUN = 'npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4';
+const SHARD_RUN = 'npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4';
 const named = (job, name) => job.steps.find((step) => step.name === name);
 
 function expression(raw, context) {
@@ -89,7 +89,7 @@ test('no coverage job is a required check, a verify dependency or a merge-queue 
     assert.equal(jobs.verify.needs.includes(id), false, `${id} in verify.needs`);
     assert.equal(jobs.verify.if, 'always()');
     const label = jobs[id].name.replace('${{ matrix.shard }}', '1');
-    assert.equal(REQUIRED_QUEUE_JOBS.some((job) => job.startsWith(label.replace('1/4', ''))), false, `${id} in the queue roster`);
+    assert.equal(REQUIRED_QUEUE_JOBS.some((job) => job.startsWith(label.replace(/1\/\d+$/, ''))), false, `${id} in the queue roster`);
     for (const [other, job] of Object.entries(jobs)) {
       if (other !== id && !COVERAGE_JOBS.includes(other)) assert.equal([job.needs ?? []].flat().includes(id), false, `${other} needs ${id}`);
     }
@@ -133,7 +133,9 @@ test('the shards keep producing one merged artifact named for the head commit', 
   assert.equal(shardUpload.with['if-no-files-found'], 'error');
 
   const merge = named(jobs['vitest-coverage-merge'], 'Merge shard coverage');
-  assert.match(merge.run, /merge-vitest-coverage\.mjs --input shards --output merged --shards 4 /);
+  // The merge reads shards 1 to N and ignores the rest, so N is the matrix's shard count.
+  assert.match(merge.run, /merge-vitest-coverage\.mjs --input shards --output merged --shards 8 /);
+  assert.equal(jobs.vitest.strategy.matrix.shard.length, 8);
   assert.match(named(jobs['vitest-coverage-merge'], 'Download shard coverage').with.pattern, /^vitest-coverage-shard-\*$/);
   const upload = named(jobs['vitest-coverage-merge'], 'Upload merged coverage');
   assert.equal(upload.with.name, 'vitest-coverage-${{ github.event.pull_request.head.sha || github.sha }}');
@@ -172,18 +174,19 @@ test('the merge step writes the merged report, and fails with the missing shard 
   shard(3, entry('/home/runner/work/r/r/b.ts'));
   const failed = runStep(directory, step, env);
   assert.notEqual(failed.status, 0);
-  assert.match(failed.stderr, /Missing coverage for shard 2, shard 4\./);
-  assert.equal(fs.readFileSync(path.join(directory, 'merge.err'), 'utf8').trim(), 'Missing coverage for shard 2, shard 4.');
-  shard(2, entry('/home/runner/work/r/r/a.ts'));
-  const missingFourth = runStep(directory, step, env);
-  assert.notEqual(missingFourth.status, 0);
-  assert.match(missingFourth.stderr, /Missing coverage for shard 4\./);
-  shard(4, entry('/home/runner/work/r/r/fourth.ts'));
+  const absent = 'Missing coverage for shard 2, shard 4, shard 5, shard 6, shard 7, shard 8.';
+  assert.ok(failed.stderr.includes(absent), failed.stderr);
+  assert.equal(fs.readFileSync(path.join(directory, 'merge.err'), 'utf8').trim(), absent);
+  for (const number of [2, 4, 5, 6, 7]) shard(number, entry('/home/runner/work/r/r/a.ts'));
+  const missingEighth = runStep(directory, step, env);
+  assert.notEqual(missingEighth.status, 0);
+  assert.match(missingEighth.stderr, /Missing coverage for shard 8\./);
+  shard(8, entry('/home/runner/work/r/r/eighth.ts'));
   const done = runStep(directory, step, env);
   assert.equal(done.status, 0, done.stderr);
-  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(directory, 'merged', 'coverage-final.json'), 'utf8'))), ['a.ts', 'b.ts', 'fourth.ts']);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(directory, 'merged', 'coverage-final.json'), 'utf8'))), ['a.ts', 'b.ts', 'eighth.ts']);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'merged', 'provenance.json'), 'utf8')), {
-    headSha: env.HEAD_SHA, testedRef: env.TESTED_REF, baseSha: env.BASE_SHA, runId: '99', runAttempt: '2', shards: 4, files: 3,
+    headSha: env.HEAD_SHA, testedRef: env.TESTED_REF, baseSha: env.BASE_SHA, runId: '99', runAttempt: '2', shards: 8, files: 3,
     paths: 'relative to the repository root' });
 });
 
@@ -215,8 +218,8 @@ test('a shard that produced no report warns with its number and says where the v
   const directory = sandbox(t);
   const timedOut = runStep(directory, step, { SHARD: '2', COLLECT: 'failure', UPLOAD: 'skipped' });
   assert.equal(timedOut.status, 0);
-  assert.match(timedOut.stdout, /^::warning title=Vitest coverage shard 2\/4 missing::No coverage report from shard 2: the test run ended as failure .*Vitest shard job\.$/m);
-  assert.match(timedOut.summary, /Vitest coverage shard 2\/4: no report/);
+  assert.match(timedOut.stdout, /^::warning title=Vitest coverage shard 2\/8 missing::No coverage report from shard 2: the test run ended as failure .*Vitest shard job\.$/m);
+  assert.match(timedOut.summary, /Vitest coverage shard 2\/8: no report/);
   const upload = runStep(directory, step, { SHARD: '3', COLLECT: 'success', UPLOAD: 'failure' });
   assert.match(upload.stdout, /shard 3: the upload ended as failure/);
 });

@@ -268,6 +268,13 @@ test('fallback reasons rebuild the checks queue-ci-proof.cjs makes', () => {
   assert.equal(proofReason(push([proof('success')], { queueRun: { ...done, conclusion: 'failure' }, queueJobs: gate })), 'source-not-successful');
   assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: gate.slice(1) })), 'incomplete-gate');
   assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: gate })), 'unexplained');
+  // A queue run from before the eight-shard matrices is judged by the roster of its own shard count.
+  const four = REQUIRED_QUEUE_JOBS.filter(name => !/ shard \d+\/8$/.test(name))
+    .concat(['Vitest shard', 'Cockpit browser E2E shard'].flatMap(prefix => [1, 2, 3, 4].map(n => `${prefix} ${n}/4`)))
+    .map((name, i) => ({ id: 100 + i, name, run_attempt: 1, status: 'completed', conclusion: 'success' }));
+  assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: four })), 'unexplained');
+  const missing = four.filter(job => job.name !== 'Cockpit browser E2E shard 4/4');
+  assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: missing })), 'incomplete-gate');
 });
 
 test('a main push counts as a fallback only when Typecheck ran', () => {

@@ -8,10 +8,14 @@
   "validation": {
     "commands": [
       "npm run typecheck",
-      "npm test -- --shard=1/4 --maxWorkers=4",
-      "npm test -- --shard=2/4 --maxWorkers=4",
-      "npm test -- --shard=3/4 --maxWorkers=4",
-      "npm test -- --shard=4/4 --maxWorkers=4",
+      "npm test -- --shard=1/8 --maxWorkers=4",
+      "npm test -- --shard=2/8 --maxWorkers=4",
+      "npm test -- --shard=3/8 --maxWorkers=4",
+      "npm test -- --shard=4/8 --maxWorkers=4",
+      "npm test -- --shard=5/8 --maxWorkers=4",
+      "npm test -- --shard=6/8 --maxWorkers=4",
+      "npm test -- --shard=7/8 --maxWorkers=4",
+      "npm test -- --shard=8/8 --maxWorkers=4",
       "npm run test:unit",
       "npm run build",
       "npm run test:package",

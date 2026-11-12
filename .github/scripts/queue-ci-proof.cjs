@@ -6,16 +6,20 @@ const { setTimeout: delay } = require('node:timers/promises');
 const CI_PATH = '.github/workflows/ci.yml';
 const VERIFY = 'Unit, build, E2E, and package';
 const REVIEW = 'Automated Code Review';
-// Workflow parity tests expand matrices and compare this complete roster.
-const REQUIRED_QUEUE_JOBS = [
-  'Classify pull request change surface', 'Classify PR shape', 'Check function complexity', 'Check new code clones', 'Review preflight', 'Typecheck', 'Unit, build, and package',
-  ...[1, 2, 3, 4].map(n => `Vitest shard ${n}/4`),
-  ...[1, 2, 3, 4].map(n => `Cockpit browser E2E shard ${n}/4`), VERIFY, REVIEW, 'Validate reviewed queue entry',
-];
+// The shard count of ci.yml's vitest and cockpit-browser matrices.
+const SHARDS = 8;
 // A matrix job that its `if` skipped is listed once, under its unexpanded name.
-const SUITES = ['Vitest shard', 'Cockpit browser E2E shard'].map(prefix => ({
-  shards: [1, 2, 3, 4].map(n => `${prefix} ${n}/4`), skipped: `${prefix} \${{ matrix.shard }}/4` }));
+const suitesOf = count => ['Vitest shard', 'Cockpit browser E2E shard'].map(prefix => ({
+  shards: Array.from({ length: count }, (_, i) => `${prefix} ${i + 1}/${count}`),
+  skipped: `${prefix} \${{ matrix.shard }}/${count}` }));
+const requiredQueueJobs = (count = SHARDS) => [
+  'Classify pull request change surface', 'Classify PR shape', 'Check function complexity', 'Check new code clones', 'Review preflight', 'Typecheck', 'Unit, build, and package',
+  ...suitesOf(count).flatMap(suite => suite.shards), VERIFY, REVIEW, 'Validate reviewed queue entry',
+];
+const SUITES = suitesOf(SHARDS);
 const SUITE_JOBS = SUITES.flatMap(suite => suite.shards);
+// Workflow parity tests expand matrices and compare this complete roster.
+const REQUIRED_QUEUE_JOBS = requiredQueueJobs();
 const SKIPPED_SUITE_JOBS = SUITES.map(suite => suite.skipped);
 const SKIPPABLE_SURFACES = ['docs-only', 'infra-only'];
 const QUEUE_BASE = /^gh-readonly-queue\/main\/pr-[1-9][0-9]*-([a-f0-9]{40})$/;
@@ -162,5 +166,5 @@ async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Da
     return fallback('proof-unavailable');
   }
 }
-module.exports = { queueCiProof, mainCommitSurface, REQUIRED_QUEUE_JOBS, SKIPPED_SUITE_JOBS, VERIFY, REVIEW, CI_PATH,
+module.exports = { queueCiProof, mainCommitSurface, requiredQueueJobs, REQUIRED_QUEUE_JOBS, SUITE_JOBS, SKIPPED_SUITE_JOBS, VERIFY, REVIEW, CI_PATH,
   validSha, positive, reader, pages, readCiRuns, readCiJobs, successfulJobs, newest };
