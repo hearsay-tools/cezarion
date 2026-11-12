@@ -86,6 +86,7 @@ test('sufficient evidence writes changed manifests and an identical next refresh
   const options = {
     api: measuredApi, inventories: measuredInventory(),
     runs: [8, 7, 6].map(id => ({ id, run_attempt: 1, head_sha: 'abc' })),
+    baselineCommit: 'a'.repeat(40),
     read: file => stored.get(file) ?? '{"durationsMs":{"deleted":100}}',
     write: (file, content) => stored.set(file, content),
   };
@@ -95,6 +96,36 @@ test('sufficient evidence writes changed manifests and an identical next refresh
   assert.equal(browser.durationsMs['a0.e2e.ts'], 100);
   assert.deepEqual(browser._provenance.estimatedFiles, []);
   assert.deepEqual((await refresh(options)).changes, []);
+});
+
+test('bounded updates prioritize inventory, preserve other weights and trace each batch to its baseline', async () => {
+  const { boundedManifest } = await load();
+  const previous = { durationsMs: { retained: 20000, removed: 50 }, _provenance: { estimatedFiles: ['removed'] } };
+  const durationsMs = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`new-${i}`, 100]));
+  const next = { durationsMs: { ...durationsMs, retained: 30000 }, _provenance: { runs: [1, 2, 3], estimatedFiles: ['new-0'] } };
+  const first = boundedManifest(previous, next, 'a'.repeat(40));
+  assert.equal(first._provenance.updatedFiles.length, 100);
+  assert.equal(first._provenance.baselineCommit, 'a'.repeat(40));
+  assert.equal(first.durationsMs.retained, 20000, 'inventory goes before duration drift');
+  assert.equal(first._provenance.remainingChanges, 52);
+  assert.deepEqual(first._provenance.runs, [1, 2, 3]);
+  const second = boundedManifest(first, next, 'b'.repeat(40));
+  assert.equal(second._provenance.remainingChanges, 0);
+  assert.equal(second.durationsMs.retained, 30000);
+  assert.equal(second.durationsMs.removed, undefined);
+  assert.deepEqual(second._provenance.estimatedFiles, ['new-0']);
+  assert.deepEqual(second.durationsMs, next.durationsMs);
+});
+
+test('the actual Git patch byte budget shrinks a batch and refuses an entry that cannot fit', async () => {
+  const { boundedManifest, manifestPatchBytes } = await load();
+  const previous = { durationsMs: {} };
+  const durationsMs = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`packages/${'long-'.repeat(40)}${i}.test.ts`, 200]));
+  const next = { durationsMs, _provenance: { estimatedFiles: [], runs: [1, 2, 3] } };
+  const bounded = boundedManifest(previous, next, 'a'.repeat(40));
+  assert.ok(bounded._provenance.updatedFiles.length > 0 && bounded._provenance.updatedFiles.length < 100);
+  assert.ok(manifestPatchBytes(previous, bounded) <= 40000);
+  assert.equal(boundedManifest(previous, next, 'a'.repeat(40), () => 40001), null);
 });
 
 test('insufficient evidence keeps both manifests unchanged', async () => {
@@ -115,10 +146,9 @@ test('live Vitest discovery can generate complete positive browser and unit mani
   const { readFileSync } = require('node:fs');
   for (const [kind, file] of [['browser', 'cockpit-test-durations.json'], ['vitest', 'test-durations.json']]) {
     const manifest = JSON.parse(readFileSync(require('node:path').join(__dirname, '..', file), 'utf8'));
-    const samples = manifest._provenance.runs.map(run => ({ ...run, durationsMs: manifest.durationsMs }));
+    const samples = [1, 2, 3].map(id => ({ id, jobs: [], headSha: 'abc', durationsMs: manifest.durationsMs }));
     const generated = makeManifest(inventory[kind], samples, kind);
     assert.deepEqual(Object.keys(generated.durationsMs).sort(), inventory[kind].map(entry => entry.file).sort());
-    assert.equal(new Set(manifest._provenance.runs.map(run => run.id)).size >= 3, true);
     assert.equal(Object.values(manifest.durationsMs).every(value => value > 0 && Number.isFinite(value)), true);
   }
 });

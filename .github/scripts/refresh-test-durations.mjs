@@ -1,12 +1,14 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { readFileSync, writeFileSync, appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { relative, resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { fallbackDuration } from './ci-test-sequencer.mjs';
 
 const execute = promisify(execFile);
 const SAMPLE_COUNT = 3;
+const PATCH_BUDGET_BYTES = 40000;
 const manifests = { browser: '.github/cockpit-test-durations.json', vitest: '.github/test-durations.json' };
 
 /** Read suite summaries, never individual tests. A retry must not count twice. */
@@ -55,13 +57,57 @@ export function makeManifest(inventory, samples, kind) {
   };
 }
 
-export function needsRefresh(previous, next) {
+export function changedFiles(previous, next) {
   const old = previous.durationsMs;
   const fresh = next.durationsMs;
-  if (Object.keys(old).length !== Object.keys(fresh).length) return true;
-  return Object.entries(fresh).some(([file, duration]) => !Object.hasOwn(old, file)
-    || !Number.isFinite(old[file]) || old[file] <= 0
-    || (Math.abs(duration - old[file]) >= 5000 && Math.abs(duration - old[file]) / old[file] >= 0.25));
+  const inventory = [...new Set([...Object.keys(old), ...Object.keys(fresh)])]
+    .filter(file => !Object.hasOwn(old, file) || !Object.hasOwn(fresh, file)).sort();
+  const drift = Object.keys(fresh).filter(file => Object.hasOwn(old, file)
+    && (!Number.isFinite(old[file]) || old[file] <= 0
+      || (Math.abs(fresh[file] - old[file]) >= 5000 && Math.abs(fresh[file] - old[file]) / old[file] >= 0.25))).sort();
+  // Inventory changes go first so small fluctuations cannot starve new files.
+  return [...inventory, ...drift];
+}
+
+export function needsRefresh(previous, next) {
+  return changedFiles(previous, next).length > 0;
+}
+
+export function manifestPatchBytes(previous, next) {
+  const directory = mkdtempSync(join(tmpdir(), 'test-duration-patch-'));
+  try {
+    const paths = ['before.json', 'after.json'].map(file => join(directory, file));
+    [previous, next].forEach((value, i) => writeFileSync(paths[i], typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`));
+    const diff = spawnSync('git', ['diff', '--no-index', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=3', '--', ...paths],
+      { maxBuffer: 4 * 1024 * 1024 });
+    if (![0, 1].includes(diff.status)) throw new Error(`Cannot measure manifest patch: ${diff.error?.message ?? diff.stderr}`);
+    return diff.stdout.length;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** Keep each generated manifest patch well below GitHub's omitted-patch boundary. */
+export function boundedManifest(previous, next, baselineCommit, measure = manifestPatchBytes) {
+  const pending = changedFiles(previous, next);
+  for (let count = Math.min(100, pending.length); count > 0; count = Math.floor(count / 2)) {
+    const updatedFiles = pending.slice(0, count);
+    const durationsMs = { ...previous.durationsMs };
+    const estimated = new Set(previous._provenance?.estimatedFiles ?? []);
+    for (const file of updatedFiles) {
+      estimated.delete(file);
+      if (Object.hasOwn(next.durationsMs, file)) durationsMs[file] = next.durationsMs[file];
+      else delete durationsMs[file];
+      if (next._provenance.estimatedFiles.includes(file)) estimated.add(file);
+    }
+    const candidate = { _provenance: { ...next._provenance,
+      aggregation: 'Only updatedFiles use these runs and their per-file medians (milliseconds); other weights retain the baselineCommit manifest. Removed paths are listed too.',
+      baselineCommit, updatedFiles, remainingChanges: pending.length - count,
+      estimatedFiles: [...estimated].sort(),
+    }, durationsMs };
+    if (measure(previous, candidate) <= PATCH_BUDGET_BYTES) return candidate;
+  }
+  return null;
 }
 
 export function trustedRun(run) {
@@ -117,7 +163,7 @@ export async function discoverInventory() {
   return result;
 }
 
-export async function refresh({ api, inventories, runs, read = readFileSync, write = writeFileSync }) {
+export async function refresh({ api, inventories, runs, baselineCommit, read = readFileSync, write = writeFileSync }) {
   const samples = await collectSamples(runs, inventories, api);
   const changes = [];
   const skipped = [];
@@ -127,8 +173,15 @@ export async function refresh({ api, inventories, runs, read = readFileSync, wri
       continue;
     }
     const next = makeManifest(inventories[kind], samples[kind], kind);
-    if (!needsRefresh(JSON.parse(read(file, 'utf8')), next)) continue;
-    write(file, `${JSON.stringify(next, null, 2)}\n`);
+    const previousText = read(file, 'utf8');
+    const previous = JSON.parse(previousText);
+    if (!needsRefresh(previous, next)) continue;
+    const bounded = boundedManifest(previous, next, baselineCommit, (_, candidate) => manifestPatchBytes(previousText, candidate));
+    if (!bounded) {
+      skipped.push(`${kind}: even one entry exceeds the ${PATCH_BUDGET_BYTES}-byte patch budget`);
+      continue;
+    }
+    write(file, `${JSON.stringify(bounded, null, 2)}\n`);
     changes.push(file);
   }
   return { changes, skipped, runs: Object.fromEntries(Object.entries(samples).map(([kind, entries]) => [kind, entries.map(run => run.id)])) };
@@ -142,8 +195,9 @@ async function main() {
     return raw ? stdout : JSON.parse(stdout);
   };
   const { workflow_runs: runs } = await api('/actions/workflows/ci.yml/runs?status=success&per_page=100');
+  const { stdout: baselineCommit } = await execute('git', ['rev-parse', 'HEAD']);
   const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
-  const summary = await refresh({ api, inventories: await discoverInventory(),
+  const summary = await refresh({ api, inventories: await discoverInventory(), baselineCommit: baselineCommit.trim(),
     runs: runs.filter(run => trustedRun(run) && Date.parse(run.created_at) >= cutoff) });
   console.log(JSON.stringify(summary));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `changed=${summary.changes.length > 0}\n`);

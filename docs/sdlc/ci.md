@@ -337,11 +337,20 @@ annotations, and takes each current file's median available duration. Browser
 keys are relative to `packages/web/e2e`; unit keys are repository-relative.
 `_provenance.runs` records run IDs, commits and job IDs. A new file without a
 measurement gets the measured upper quartile and appears in `estimatedFiles`.
-Deleted files leave the manifest. Fewer than three measured runs leave that
+Deleted files leave the manifest through the bounded batches below. Fewer than three measured runs leave that
 suite's manifest unchanged and appear in the run summary.
 
 The workflow opens one ready PR when the file inventory changes, or when any
-median changes by at least **25% and 5 seconds**. It leaves an existing refresh
+median changes by at least **25% and 5 seconds**. Each manifest batch changes
+at most 100 entries. It measures the actual Git patch and halves the batch until
+the patch fits **40,000 bytes**, well below GitHub's omitted-patch boundary.
+Inventory changes go first. Each batch records `baselineCommit`, `updatedFiles`,
+its three source runs and `remainingChanges`; weights outside that batch retain
+the baseline manifest's measurements. A later run proposes the next batch after
+the current PR lands. An entry that cannot fit leaves that manifest unchanged
+and appears in the summary. The initial unit backlog therefore converges through
+normal reviewed PRs; this browser fix leaves the unit data unchanged.
+It leaves an existing refresh
 PR for normal CI and review instead of pushing over it. The existing release
 App creates the PR so native PR CI and CodeRabbit run. It does not merge the PR.
 A manual dispatch defaults to `dry_run: true`; branch dispatches and PR proofs

@@ -118,7 +118,7 @@ jobs:
         run: |
           test "${APP_SLUG}[bot]" = "$EXPECTED_LOGIN"
           cat > "$RUNNER_TEMP/refresh-pr.md" <<'BODY'
-          Refresh browser and Vitest shard weights from three recent successful eight-shard CI runs. Each manifest records its source runs and any estimates.
+          Refresh browser and Vitest shard weights from three recent successful eight-shard CI runs. Each manifest records its source runs, any estimates, the baseline commit and the entries updated in this bounded batch.
 
           The refresh opens a PR when files are added or removed, or when a per-file median changes by at least 25% and 5 seconds. Required CI and review apply. This workflow does not enable auto-merge.
 

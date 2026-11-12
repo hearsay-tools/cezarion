@@ -26,7 +26,8 @@ positive fallback even when no measurement exists. Removed specs are ignored.
 The daily **Refresh test durations** workflow takes per-spec medians from three
 recent successful full eight-shard CI runs on `main` or its merge queue. It opens
 a normal PR for added or removed specs, or a duration change of at least 25% and
-5 seconds. Each manifest records its source runs and any estimates. The
+5 seconds. Each manifest records its source runs and any estimates. Updates use bounded
+batches with a baseline commit so GitHub can return every patch. The
 [CI guide](../../../docs/sdlc/ci.md) describes the sample rules and read-only
 dispatch proof. Browser spec count, shard count and test behavior stay unchanged.
 
