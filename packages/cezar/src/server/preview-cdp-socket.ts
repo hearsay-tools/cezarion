@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { previewToolEnabled } from '../ci-wait/tools.ts';
+import { previewToolEnabled } from '../ci-wait/tool-catalog.ts';
 import type { AgentCdpLink } from '../preview/cdp-proxy.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { isLoopbackHostHeader } from './capabilities.ts';
