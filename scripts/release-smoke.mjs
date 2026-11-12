@@ -58,7 +58,7 @@ export function bootEnv(env, home) {
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 // A version published seconds ago can be missing from a registry mirror for a while.
-async function install(prefix, spec) {
+async function registryInstall(prefix, spec) {
   mkdirSync(prefix, { recursive: true });
   for (let attempt = 1; ; attempt++) {
     try {
@@ -164,7 +164,8 @@ async function checkCockpit(base) {
   if (script.status !== 200 || !/javascript/.test(script.type)) throw new Error(`The cockpit script ${asset} answered HTTP ${script.status} (${script.type})`);
 }
 
-async function run({ name, version, upgradeFrom }) {
+// `install` is the registry install; tests pass a local one.
+export async function run({ name, version, upgradeFrom }, { install = registryInstall } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'release-smoke-'));
   try {
     const repository = name => {
