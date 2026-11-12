@@ -95,7 +95,7 @@ function copyManagedInstall(legacy: Home, target: Home, env: NodeJS.ProcessEnv):
 /** Replace the PATH line the removed `cez install` marked; never append one. */
 function updateManagedPath(legacy: Home, target: Home, env: NodeJS.ProcessEnv): void {
   if (process.platform === 'win32' || !env.HOME) return;
-  const { file: profile, line, marker } = pathHook(target.bin, env);
+  const { file: profile, line, marker } = pathHook(target.bin, { ...env, HOME: env.HOME });
   if (!existsSync(profile)) return;
   const path = realpathSync(profile), bytes = readBytes(path);
   if (!bytes) return;

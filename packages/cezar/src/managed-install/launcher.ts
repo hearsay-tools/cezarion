@@ -11,7 +11,6 @@ import type { Home } from '../home/home.ts';
 
 import { closeSync, fchmodSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join, win32 } from 'node:path';
 
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
@@ -128,10 +127,10 @@ export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home,
 }
 
 /** The POSIX rc file and its marked PATH line. The home migration replaces exactly this line. */
-export function pathHook(dir: string, env: NodeJS.ProcessEnv = process.env): { file: string; line: string; marker: string } {
+export function pathHook(dir: string, env: NodeJS.ProcessEnv & { HOME: string }): { file: string; line: string; marker: string } {
   // The user's home comes from `env`, like every other path in this module: a caller (or a
   // test) that points HOME elsewhere must never reach the real shell profile.
-  const home = env.HOME || homedir();
+  const home = env.HOME;
   const shell = env.SHELL ?? '';
   const rc = shell.endsWith('/zsh') ? '.zshrc' : shell.endsWith('/bash') ? '.bashrc' : '.profile';
   return { file: join(home, rc), line: `export PATH=${shellQuote(dir)}:"$PATH" ${PATH_MARKER}`, marker: PATH_MARKER };
