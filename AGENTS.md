@@ -102,21 +102,15 @@ unless `worktreeSetup` already did.
   `// bound: <reason>` comment at the call site. A test that proves something did not happen
   uses fake timers or states at the call site why it needs real time.
 - `npm run typecheck`: no build or `dist` writes; after a build: `npm run typecheck:package`.
-- CLI E2E: `npm run test:package -- <repo-root paths>`; parity: `npm run test:parity`.
-- Browser: `npm run test:e2e:affected`, `npm run test:e2e` / `npm run test:e2e:local`;
-  see [e2e guide](packages/web/e2e/README.md).
+- CLI E2E: `npm run test:package -- <repo-root paths>`. Parity and browser specs run in CI;
+  to debug one, see the [e2e guide](packages/web/e2e/README.md) and `npm run test:parity`.
 - Selection: `npm run test:changed -- --help`.
 
 ### Before opening a PR
 
-1. Finish the reader sweep for every shared name, value or default the change alters.
-2. For a change to wait, turn-end, failure or step-settlement paths in
-   `packages/cezar/src/workflows/run.ts` or `workflows/run/`, run `npm run test:parity`.
-3. Before the first push of a `packages/**` source or test change, require `npm run lint`
-   to pass. If a pinned source shrinks, first run `FILE_LENGTH_UPDATE=1 npm run lint`.
-4. Run the root `npm run typecheck` once when declarations matter.
-5. Run the code-quality check and the auto-merge decision that the Dev flow bindings
-   name.
+Finish the reader sweep for every shared name, value or default the change alters. Then run
+`npm run prepr` ([the gate](docs/sdlc/ci.md#before-the-pr)), the code-quality check and the
+auto-merge decision that the Dev flow bindings name.
 
 ## Related documents
 
