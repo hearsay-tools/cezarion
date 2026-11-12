@@ -72,7 +72,7 @@ remote grants, server instance state and install locks. Existing tolerant reader
 keep their schema and error behavior. Merge writers hold one short per-root lock
 across the read, mutation and replacement. The lock lives in `<home>/.locks/write.lock/`.
 It uses unique process claims; stale claims use the process identity checks in
-`delegation/process-liveness.ts`. Serving cockpits hold independent
+`core/process-stat.ts`. Serving cockpits hold independent
 `<home>/.locks/cockpits/<pid>.lease` files. A lease does not block a CLI writer.
 Mutual exclusion requires one PID namespace; cross-container bind-mounted homes
 are a stated limit. An unconfirmed process claim expires after 30 seconds to recover

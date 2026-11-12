@@ -1,4 +1,4 @@
-import { processStartToken } from '../delegation/process-liveness.ts';
+import { processStartToken } from '../core/process-stat.ts';
 
 let identity: { token: string | undefined } | undefined;
 

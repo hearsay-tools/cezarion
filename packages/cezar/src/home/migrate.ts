@@ -1,4 +1,4 @@
-import { POWERSHELL, powershellEnv } from '../detached-process.ts';
+import { POWERSHELL, powershellEnv } from '../core/process-stat.ts';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

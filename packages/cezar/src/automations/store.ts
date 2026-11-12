@@ -17,7 +17,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 import { join, resolve, sep } from 'node:path';
-import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
+import { assertProjectWritable, projectWriteRefused } from '../project-fence.ts';
 import {
   automationDefinitionSchema,
   automationDefinitionsFileSchema,

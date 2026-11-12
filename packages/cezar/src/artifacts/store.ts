@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { publishedArtifactSchema, type PublishedArtifact } from '@open-mercato/cezar-contract/artifacts';
-import { assertProjectAdmitted, projectWriteRefused } from '../server/cockpit-ownership.ts';
+import { assertProjectAdmitted, projectWriteRefused } from '../project-fence.ts';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_METADATA_BYTES = 32 * 1024;

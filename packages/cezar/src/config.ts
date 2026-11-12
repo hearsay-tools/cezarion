@@ -1,5 +1,5 @@
 import { projectPaths, readDataPath, readProjectPath } from './project-paths.ts';
-import { assertProjectWritable, projectAdmissionRefusal } from './server/cockpit-ownership.ts';
+import { assertProjectWritable, projectAdmissionRefusal } from './project-fence.ts';
 import type { Home } from './home/home.ts';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';

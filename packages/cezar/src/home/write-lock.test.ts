@@ -1,13 +1,13 @@
 import { existsSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { processStartToken } from '../delegation/process-liveness.ts';
+import { processStartToken } from '../core/process-stat.ts';
 import { Home } from './home.ts';
 import { withHomeLock } from './write-lock.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 
-vi.mock('../delegation/process-liveness.ts', async original => ({
-  ...await original<typeof import('../delegation/process-liveness.ts')>(),
+vi.mock('../core/process-stat.ts', async original => ({
+  ...await original<typeof import('../core/process-stat.ts')>(),
   recordedProcessLive: vi.fn(() => true),
   processStartToken: vi.fn(() => 'confirmed'),
 }));
