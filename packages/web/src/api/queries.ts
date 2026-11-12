@@ -117,7 +117,7 @@ import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-api-client/contract/github'
 import { runnerDiscoversModels } from '@open-mercato/cezar-api-client/contract/workspace'
 import { useProjectScope } from './project-scope-context'
-import { githubRepoBase } from '@/lib/tasks-table'
+import { githubRepoBase } from '@/lib/github-repo-base'
 import { normalizeTagsForDisplay } from '@/lib/project-tags'
 import type { ContinueOptions } from './client'
 import type {
