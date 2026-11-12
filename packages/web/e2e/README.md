@@ -369,7 +369,8 @@ commit. Without a download it uses the newest cached map. Without a usable map i
 
 An edit outside recorded function ranges selects every spec. Insertions at function boundaries
 include both neighbouring lines. Cockpit coverage stays per file. A selected pass is iteration
-feedback. CI's required checks still run every spec.
+feedback. PR CI uses the same map rules with full fallback for unsafe or empty
+selection. Merge-group jobs run every spec.
 
 ## The project the shared env serves
 

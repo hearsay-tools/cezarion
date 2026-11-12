@@ -194,8 +194,9 @@ runs still require `TEST_E2E_STATUS=passed`; missing browsers fail verification.
 The token used to download the map has read-only Actions and repository scopes.
 
 Docs-only, infra-only and verified release-stamp skips remain as before. Merge
-groups, main pushes and manual dispatches run full suites, including the queue's
-whole-shard rerun, trusted flake reports and Squeal recording. The local selectors
+groups and manual dispatches run full suites. Main pushes reuse eligible exact-SHA
+queue proof or run full CI as a fallback. Merge groups retain the whole-shard
+rerun, trusted flake reports and Squeal recording. The local selectors
 without `--ci` retain their iteration behavior, including an error on unmatched
 unit changes and a skip when no browser spec reaches a change.
 
@@ -227,7 +228,7 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-On merge groups, pushes and dispatches, the full Vitest suite runs once across the eight LTS shards. PRs select tests as described below. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
 comparison, runner cost, failures and coverage investigation. Four workers per shard,
