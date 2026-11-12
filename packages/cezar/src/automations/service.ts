@@ -6,7 +6,7 @@ import { automationCreateSchema, automationUpdateSchema, type AutomationEditable
 import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner } from '@open-mercato/cezar-contract/workspace';
 import { loadConfig } from '../config.ts';
-import { missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
+import { missingModelChoices, type HostDiscovery } from '../discovery/choices.ts';
 import type { RunStore } from '../runs/store.ts';
 import type { ForgeAvailability } from '../server/forge/index.ts';
 import type { RunManager } from '../workflows/run.ts';
