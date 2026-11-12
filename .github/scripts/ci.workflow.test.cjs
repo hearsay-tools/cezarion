@@ -100,8 +100,8 @@ test('pull request CI runs npm run test:e2e as a Cockpit browser E2E job', () =>
   assert.equal(job.strategy['fail-fast'], false);
   assert.equal(job['runs-on'], 'ubuntu-latest');
   const setup = job.steps.find((step) => step.name === 'Set up Node.js');
-  assert.equal(setup.with['node-version'], 'lts/*');
-  assert.equal(setup.with['check-latest'], true);
+  assert.equal(setup.with['node-version-file'], '.node-version', 'the exact Node developers run, not lts/*');
+  assert.equal(setup.with['check-latest'], undefined, 'check-latest always reads the manifest through the GitHub API');
   const steps = stepsText(job);
   assert.ok(steps.includes('npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/8'));
   assert.match(steps, /require-e2e-passed\.cjs/);
@@ -532,38 +532,22 @@ test('build and package verifies the engines minimum without a second full unit 
   }
 });
 
-test('a stalled minimum Node setup times out and retries once inside the job budget (#1214)', () => {
-  const { runInNewContext } = require('node:vm');
+test('a stalled minimum Node download is bounded and retried once inside the job budget (#1214)', () => {
+  const { ATTEMPTS, ATTEMPT_TIMEOUT_MS } = require('../actions/node-dist/index.cjs');
   const job = workflow().jobs['build-and-package'];
   assert.equal(job['timeout-minutes'], 15);
   const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@'));
-  assert.equal(setups.length, 2, 'one setup and exactly one retry');
-  const [setup, retry] = setups;
-  for (const step of setups) {
-    assert.equal(typeof step['timeout-minutes'], 'number', step.name);
-    assert.ok(step['timeout-minutes'] < 5, `${step.name} must not spend the job budget on a stalled download`);
-  }
-  assert.equal(setup['continue-on-error'], true, 'a stalled first attempt must hand over to the retry');
-  assert.equal(retry['continue-on-error'], undefined, 'a second failure must fail the job');
-  assert.equal(retry.uses, setup.uses);
-  assert.deepEqual(retry.with, setup.with);
-  const index = job.steps.indexOf(setup);
-  assert.equal(job.steps.indexOf(retry), index + 1);
+  assert.equal(setups.length, 1, 'setup-node downloads nothing, so it needs no retry step');
+  assert.equal(setups[0]['continue-on-error'], undefined, 'a failed setup must fail the job');
+  const install = job.steps.findIndex(s => s.uses === './.github/actions/node-dist');
+  assert.ok(install >= 0 && install < job.steps.indexOf(setups[0]), 'the download happens before setup-node looks it up');
+  assert.equal(job.steps[install].with['node-version'], setups[0].with['node-version']);
+  assert.equal(job.steps[install]['continue-on-error'], undefined, 'a second failed download fails the job');
+  assert.equal(ATTEMPTS, 2, 'one retry');
+  // SHASUMS256.txt and the archive each get ATTEMPTS tries of at most ATTEMPT_TIMEOUT_MS.
+  assert.ok(2 * ATTEMPTS * ATTEMPT_TIMEOUT_MS <= 5 * 60_000, 'a stalled download must not spend the job budget');
   const firstInstall = job.steps.findIndex(s => /^(?:npm ci|pnpm install)/.test(s.run || ''));
-  assert.ok(firstInstall > index + 1, 'the retry must finish before anything installs');
-  // A step without a status function runs under an implicit success(), so a first
-  // attempt skipped after an earlier failure must keep the retry skipped too.
-  assert.ok(setup.id, 'the retry reads the first attempt by id');
-  assert.doesNotMatch(retry.if, /\b(?:success|failure|cancelled|always)\(/);
-  // continue-on-error reports a failed attempt's conclusion as success; only outcome tells.
-  const runs = (outcome, jobOk = true) => runInNewContext(`success() && (${retry.if})`, {
-    steps: { [setup.id]: { outcome, conclusion: outcome === 'skipped' ? 'skipped' : 'success' } }, success: () => jobOk,
-  });
-  assert.equal(runs('success'), false);
-  // A timeout fails the first attempt; a cancelled attempt must retry too.
-  assert.equal(runs('failure'), true);
-  assert.equal(runs('cancelled'), true);
-  assert.equal(runs('skipped', false), false);
+  assert.ok(firstInstall > job.steps.indexOf(setups[0]), 'Node is ready before anything installs');
 });
 
 test('genuine failure and cancellation never green the aggregate', () => {

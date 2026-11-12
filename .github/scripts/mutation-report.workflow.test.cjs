@@ -99,7 +99,7 @@ test('the pull request job checks out the merge revision without credentials and
   assert.equal(checkout.with['persist-credentials'], false);
   assert.equal(checkout.with.ref, undefined, 'the default merge revision, so HEAD^1 is the base');
   assert.equal(checkout.with['fetch-depth'], 2);
-  for (const action of [...uses(reportJob), ...uses(commentJob)]) assert.match(action, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, action);
+  for (const action of [...uses(reportJob), ...uses(commentJob)]) assert.match(action, /^(?:[\w.-]+\/[\w.-]+@[0-9a-f]{40}|\.\/\.github\/actions\/node-dist)$/, action);
 });
 
 test('the pull request job installs and mutates only when the scope step found a product line, and always uploads', () => {

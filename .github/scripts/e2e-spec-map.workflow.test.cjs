@@ -46,7 +46,7 @@ test('each job reads the repository and nothing else, with pinned actions and no
   for (const job of [capture, merge]) assert.deepEqual(job.permissions, { contents: 'read' });
   assert.doesNotMatch(source, /secrets\.|id-token|github\.token|GITHUB_TOKEN|continue-on-error/);
   const actions = [capture, merge].flatMap(job => job.steps.filter(item => item.uses));
-  for (const { uses } of actions) assert.match(uses, /^[\w-]+\/[\w-]+@[0-9a-f]{40}$/, uses);
+  for (const { uses } of actions) assert.match(uses, /^(?:[\w-]+\/[\w-]+@[0-9a-f]{40}|\.\/\.github\/actions\/node-dist)$/, uses);
   for (const checkout of actions.filter(({ uses }) => uses.startsWith('actions/checkout@'))) {
     assert.equal(checkout.with['persist-credentials'], false);
     assert.equal(checkout.with.ref, undefined, 'map the event commit, never an interpolated ref');

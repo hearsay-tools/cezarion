@@ -361,10 +361,15 @@ jobs:
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version: '24.21.0'
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies without lifecycle scripts
@@ -446,10 +451,15 @@ jobs:
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version: '24.21.0'
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies without lifecycle scripts
@@ -555,24 +565,16 @@ jobs:
         with:
           version: '12.11.2'
 
-      - name: Set up Node.js
-        id: setup-node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
-        continue-on-error: true
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
         with:
           node-version: '24.21.0'
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
-          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
-      # Keep the bounded download retry from the former floor job
-      # (hearsay-tools/cezarion#1214). A second failure fails this job.
-      - name: Retry Node.js setup
-        if: steps['setup-node'].outcome != 'success'
+      - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
         with:
           node-version: '24.21.0'
+          token: ''
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
@@ -678,31 +680,25 @@ jobs:
       # Select the installer from the checked-out merge result: this trusted-base
       # workflow must support a PR that replaces the npm lockfile with pnpm.
       # The build and packaged CLI tests verify the exact engines.node minimum.
-      # Vitest and browser shards follow current LTS without repeating the suites.
+      # Vitest and browser shards run the .node-version developers use, without repeating the
+      # suites; whoever bumps .node-version moves them. Only the nightly release-candidate
+      # install leg follows lts/* (docs/sdlc/ci.md § Node setup without GitHub API calls).
       - name: Set up pnpm
         if: hashFiles('pnpm-lock.yaml') != ''
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
 
-      - name: Set up Node.js
-        id: setup-node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
-        continue-on-error: true
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
         with:
           node-version: '24.21.0'
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
-          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
-      # Keep the bounded download retry from the former floor job
-      # (hearsay-tools/cezarion#1214). A second failure fails this job.
-      - name: Retry Node.js setup
-        if: steps['setup-node'].outcome != 'success'
+      - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
         with:
           node-version: '24.21.0'
+          token: ''
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
@@ -744,31 +740,25 @@ jobs:
       # Select the installer from the checked-out merge result: this trusted-base
       # workflow must support a PR that replaces the npm lockfile with pnpm.
       # The build and packaged CLI tests verify the exact engines.node minimum.
-      # Vitest and browser shards follow current LTS without repeating the suites.
+      # Vitest and browser shards run the .node-version developers use, without repeating the
+      # suites; whoever bumps .node-version moves them. Only the nightly release-candidate
+      # install leg follows lts/* (docs/sdlc/ci.md § Node setup without GitHub API calls).
       - name: Set up pnpm
         if: hashFiles('pnpm-lock.yaml') != ''
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
 
-      - name: Set up Node.js
-        id: setup-node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
-        continue-on-error: true
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
         with:
           node-version: '24.21.0'
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
-          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
-      # Keep the bounded download retry from the former floor job
-      # (hearsay-tools/cezarion#1214). A second failure fails this job.
-      - name: Retry Node.js setup
-        if: steps['setup-node'].outcome != 'success'
+      - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
         with:
           node-version: '24.21.0'
+          token: ''
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
@@ -843,12 +833,18 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
+
       # One exact Node version in .node-version, shared with developers, so Squeal's
       # shared results (merge groups) carry the environment developers key on.
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          token: ''
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
@@ -1000,10 +996,16 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -1057,10 +1059,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The only contents-write job runs no repository code, so it skips the node-dist
+      # action. Without a token, setup-node's manifest read is unauthenticated or falls
+      # back to nodejs.org and spends none of the repository's API quota.
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          token: ''
           package-manager-cache: false
 
       # Squeal's action, as in the shards; a refusal or crash of the Squeal command is a
@@ -1169,12 +1175,19 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        continue-on-error: true
+        with:
+          node-version-file: .node-version
+
       # The shards' Node: a part's evidence counts only where the environment matches.
       - name: Set up Node.js
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -1326,12 +1339,19 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        continue-on-error: true
+        with:
+          node-version-file: .node-version
+
       # The shards' Node, so the three runs and a Vitest shard see the same V8.
       - name: Set up Node.js
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -1411,13 +1431,22 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions/node-dist
+
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        continue-on-error: true
+        with:
+          node-version-file: .node-version
 
       - name: Set up Node.js
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
 
       - name: Download the proof runs
         continue-on-error: true
@@ -1549,6 +1578,12 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        continue-on-error: true
+        with:
+          node-version-file: .node-version
+
       # After the trial commits: the measured tree's Node and lockfile.
       - name: Set up Node.js
         id: node
@@ -1556,6 +1591,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -1677,12 +1713,20 @@ jobs:
           sparse-checkout: |
             .github/scripts
             .ai/skills/check-code-quality/scripts
+            .github/actions/node-dist
+
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        continue-on-error: true
+        with:
+          node-version-file: .node-version
 
       - name: Set up Node.js
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
 
       - name: Download shard coverage
         id: download
@@ -1783,12 +1827,16 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
-          # Runner images can cache different LTS patch versions.
-          check-latest: true
+          node-version-file: .node-version
+          token: ''
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
@@ -2094,10 +2142,16 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
           registry-url: https://registry.npmjs.org
@@ -2162,9 +2216,15 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
       - name: Install dependencies
         if: hashFiles('pnpm-lock.yaml') == ''
         run: npm ci
