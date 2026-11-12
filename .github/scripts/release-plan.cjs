@@ -165,10 +165,24 @@ async function verifiedMainCommit({ github, repo, git, head }) {
   return sha;
 }
 
-function npmView(name) {
-  const out = execFileSync('npm', ['view', name, 'versions', 'time', 'dist-tags', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+// `optional` answers null for a name the registry does not have yet (E404); every other
+// registry error still throws. Release gating reads the package strictly.
+function npmView(name, { optional = false } = {}) {
+  let out;
+  try {
+    out = execFileSync('npm', ['view', name, 'versions', 'time', 'dist-tags', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    if (optional && /\bE404\b/.test(`${error.stdout ?? ''}${error.stderr ?? ''}`)) return null;
+    throw error;
+  }
   const data = JSON.parse(out);
   return { versions: data.versions ?? [], time: data.time ?? {}, distTags: data['dist-tags'] ?? {} };
+}
+
+// The version an upgrade test starts from: what the target dist-tag holds now, so a
+// maintenance candidate upgrades from its own line, never "upgrades" down from latest.
+function upgradeBaseline(registry, stableTag) {
+  return registry.distTags[stableTag] ?? '';
 }
 
 function sourceVersion({ git, sha, bump, branch, registry }) {
@@ -200,7 +214,7 @@ async function releaseSource({ github, context, git, registry, bump, branch, now
   return { sourceSha, version: sourceVersion({ git, sha: sourceSha, bump, branch, registry }) };
 }
 
-function planOutputs({ rollback, packageName, aliasName, sourceSha, version, registry, context, inputs, branch, ignore }) {
+function planOutputs({ rollback, packageName, aliasName, names, sourceSha, version, registry, context, inputs, branch, ignore }) {
   const candidate = nextCandidateVersion(version, registry.versions);
   return {
     mode: rollback ? 'rollback' : 'release',
@@ -213,6 +227,8 @@ function planOutputs({ rollback, packageName, aliasName, sourceSha, version, reg
     candidate,
     candidate_tag: candidateDistTag(candidate, registry.distTags),
     previous: registry.distTags.latest ?? '',
+    upgrade_from: upgradeBaseline(registry, stableDistTag(version, registry.distTags)),
+    names: (names ?? [packageName]).join(','),
     needs_suite: String(!rollback && branch !== 'main'),
     ignore_blockers: ignore.join(','),
     // The bump PR records the version on the dispatched branch: from the candidate commit,
@@ -223,7 +239,7 @@ function planOutputs({ rollback, packageName, aliasName, sourceSha, version, reg
   };
 }
 
-async function planRelease({ github, context, inputs, packageName, aliasName, now = Date.now(), git, view = npmView }) {
+async function planRelease({ github, context, inputs, packageName, aliasName, names, now = Date.now(), git, view = npmView }) {
   const branch = context.ref.replace(/^refs\/heads\//, '');
   if (branch !== 'main' && !branch.startsWith('release/')) throw new Error('Dispatch the Release workflow from main or a release/** branch.');
   const rollback = inputs.rollback === true || inputs.rollback === 'true';
@@ -236,7 +252,7 @@ async function planRelease({ github, context, inputs, packageName, aliasName, no
   if (!SHA.test(sourceSha)) throw new Error('The candidate commit did not resolve.');
   const reasons = await readGates({ github, repo: context.repo, rollback, latest: registry.distTags.latest, ignore });
   if (reasons.length) throw new Error(`Release refused:\n- ${reasons.join('\n- ')}`);
-  return planOutputs({ rollback, packageName, aliasName, sourceSha, version, registry, context, inputs, branch, ignore });
+  return planOutputs({ rollback, packageName, aliasName, names, sourceSha, version, registry, context, inputs, branch, ignore });
 }
 
 // A plan is only good for the registry it read. A rerun of an older run reuses its plan,
@@ -252,10 +268,23 @@ function tagRegression(registry, version, tag) {
     : null;
 }
 
+// Every name a publication moves: a publish that failed partway can leave one name ahead.
+function namesRegression({ names, version, tag, view }) {
+  return names.map(name => {
+    const registry = view(name, { optional: true });
+    const reason = registry && tagRegression(registry, version, tag);
+    return reason && `${name}: ${reason}`;
+  }).filter(Boolean);
+}
+
+function splitNames(names) {
+  return String(names ?? '').split(',').filter(Boolean);
+}
+
 // Called right before the candidate is staged.
-function checkCandidateTag({ packageName, version, tag, view = npmView }) {
-  const reason = tagRegression(view(packageName), version, tag);
-  if (reason) throw new Error(`Staging refused: ${reason}`);
+function checkCandidateTag({ names, version, tag, view = npmView }) {
+  const reasons = namesRegression({ names: splitNames(names), version, tag, view });
+  if (reasons.length) throw new Error(`Staging refused:\n- ${reasons.join('\n- ')}`);
 }
 
 function registryChanges({ registry, previous, version, stableTag, rollback, now }) {
@@ -272,9 +301,11 @@ function registryChanges({ registry, previous, version, stableTag, rollback, now
 
 // Called again immediately before the promotion: a blocker opened during the candidate
 // tests stops the release, and so does a registry that changed since the plan.
-async function recheckGates({ github, context, mode, previous, ignoreBlockers, packageName, version, stableTag, now = Date.now(), view = npmView }) {
+async function recheckGates({ github, context, mode, previous, ignoreBlockers, packageName, names, version, stableTag, now = Date.now(), view = npmView }) {
   const rollback = mode === 'rollback';
   const reasons = registryChanges({ registry: view(packageName), previous: previous ?? '', version, stableTag, rollback, now });
+  const others = splitNames(names).filter(name => name !== packageName);
+  reasons.push(...namesRegression({ names: others, version, tag: stableTag, view }));
   reasons.push(...await readGates({ github, repo: context.repo, rollback, latest: previous || undefined, ignore: parseIssueNumbers(ignoreBlockers) }));
   if (reasons.length) throw new Error(`Promotion refused:\n- ${reasons.join('\n- ')}`);
 }
@@ -282,5 +313,5 @@ async function recheckGates({ github, context, mode, previous, ignoreBlockers, p
 module.exports = {
   compareVersions, nextCandidateVersion, candidateDistTag, stableDistTag, lastStablePublish, rollbackVersion, rollbackTag,
   parseIssueNumbers, blockingIssues, rehearsalOutcome, rehearsalVerdict, newestVerifiedCommit, verifiedMainCommit, npmView,
-  planRelease, tagRegression, checkCandidateTag, registryChanges, recheckGates, COOLDOWN_MS,
+  upgradeBaseline, planRelease, tagRegression, checkCandidateTag, registryChanges, recheckGates, COOLDOWN_MS,
 };

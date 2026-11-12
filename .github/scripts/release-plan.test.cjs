@@ -205,7 +205,7 @@ test('the promotion re-check refuses a blocker opened during the candidate tests
     } },
   };
   const registry = { versions: ['1.2.0', '1.2.1-rc.1'], time: { '1.2.0': '2026-11-10T00:00:00Z' }, distTags: { latest: '1.2.0' } };
-  const recheck = () => plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '', packageName: '@scope/pkg', version: '1.2.1', stableTag: 'latest', now: NOW, view: () => registry });
+  const recheck = () => plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '', packageName: '@scope/pkg', names: '@scope/pkg,pkg', version: '1.2.1', stableTag: 'latest', now: NOW, view: () => registry });
   await assert.rejects(recheck(), /Promotion refused:\n- Open release-blocker issue #11/);
   open = [];
   await recheck();
@@ -232,11 +232,42 @@ test('no publish from a stale plan moves a dist-tag backwards', () => {
   const registry = { versions: [], time: { '1.2.0': '2026-11-01T00:00:00Z', '1.1.6': '2026-11-02T00:00:00Z' },
     distTags: { latest: '1.2.0', 'latest-1.1': '1.1.6', next: '1.3.0-rc.1' } };
   // A rerun stage of an old 1.2.1-rc.1 plan after 1.3.0-rc.1 took next.
-  assert.throws(() => plan.checkCandidateTag({ packageName: 'p', version: '1.2.1-rc.1', tag: 'next', view: () => registry }), /next points to 1\.3\.0-rc\.1/);
-  plan.checkCandidateTag({ packageName: 'p', version: '1.3.0-rc.2', tag: 'next', view: () => registry });
-  plan.checkCandidateTag({ packageName: 'p', version: '1.3.0-rc.1', tag: 'next', view: () => registry });
+  assert.throws(() => plan.checkCandidateTag({ names: 'p', version: '1.2.1-rc.1', tag: 'next', view: () => registry }), /p: next points to 1\.3\.0-rc\.1/);
+  plan.checkCandidateTag({ names: 'p', version: '1.3.0-rc.2', tag: 'next', view: () => registry });
+  plan.checkCandidateTag({ names: 'p', version: '1.3.0-rc.1', tag: 'next', view: () => registry });
   // An old maintenance plan for 1.1.5 after 1.1.6 took latest-1.1.
   const stale = plan.registryChanges({ registry, previous: '1.2.0', version: '1.1.5', stableTag: 'latest-1.1', rollback: false, now: NOW });
   assert.match(stale.join('\n'), /latest-1\.1 points to 1\.1\.6/);
   assert.deepEqual(plan.registryChanges({ registry, previous: '1.2.0', version: '1.1.7', stableTag: 'latest-1.1', rollback: false, now: NOW }), []);
+});
+
+test('every published name is checked, and a name the registry lacks has no tag to regress', () => {
+  // A publish that failed partway left the alias ahead of the package.
+  const views = { '@scope/pkg': { distTags: { next: '1.2.0-rc.1' } }, alias: { distTags: { next: '1.3.0-rc.1' } }, fresh: null };
+  const view = (name, options) => { assert.deepEqual(options, { optional: true }); return views[name]; };
+  assert.throws(() => plan.checkCandidateTag({ names: '@scope/pkg,alias,fresh', version: '1.2.1-rc.1', tag: 'next', view }), /alias: next points to 1\.3\.0-rc\.1/);
+  plan.checkCandidateTag({ names: '@scope/pkg,fresh', version: '1.2.1-rc.1', tag: 'next', view });
+});
+
+test('a maintenance candidate upgrades from its own line, a main candidate from latest', async () => {
+  assert.equal(plan.upgradeBaseline({ distTags: { latest: '1.2.0', 'latest-1.1': '1.1.6' } }, 'latest-1.1'), '1.1.6');
+  assert.equal(plan.upgradeBaseline({ distTags: { latest: '1.2.0' } }, 'latest-1.1'), '');
+  const result = await fixture({ ref: 'refs/heads/release/1.1.x', base: '1.1.6', distTags: { latest: '1.2.0', 'latest-1.1': '1.1.6' } }).run({ bump: 'patch' });
+  assert.equal(result.upgrade_from, '1.1.6');
+  assert.equal(result.previous, '1.2.0', 'the promotion re-check still compares against latest');
+  assert.equal((await fixture().run({ bump: 'patch' })).upgrade_from, '1.2.0');
+});
+
+test('an optional registry read answers null for a missing package and throws on any other error', async t => {
+  const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+  const { join } = require('node:path');
+  const dir = mkdtempSync(join(require('node:os').tmpdir(), 'npm-view-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'npm'), '#!/bin/sh\nif [ "$2" = missing ]; then echo "npm error code E404" >&2; exit 1; fi\necho "npm error code ETIMEDOUT" >&2; exit 1\n', { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${dir}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+  assert.equal(plan.npmView('missing', { optional: true }), null);
+  assert.throws(() => plan.npmView('missing'), /Command failed/);
+  assert.throws(() => plan.npmView('other', { optional: true }), /Command failed/);
 });

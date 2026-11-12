@@ -100,7 +100,8 @@ jobs:
             const { releasePackages, installAlias } = require('./.github/scripts/release-packages.cjs');
             const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
             const sha = await verifiedMainCommit({ github, repo: context.repo, git, head: context.sha });
-            const previous = npmView(releasePackages().publication.cezar.name).distTags.latest ?? '';
+            // A package not on the registry yet has nothing to upgrade from.
+            const previous = npmView(releasePackages().publication.cezar.name, { optional: true })?.distTags.latest ?? '';
             core.setOutput('sha', sha);
             core.setOutput('previous', previous);
             core.setOutput('alias', installAlias());

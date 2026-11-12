@@ -28,6 +28,12 @@ function installAlias(root = repoRoot, rebrand) {
   return (publication.alias ?? publication.legacyAlias)?.name ?? '';
 }
 
+// Every name a release publishes, in publication order.
+function publishedNames(root = repoRoot, rebrand) {
+  const { publication } = releasePackages(root, rebrand);
+  return Object.values(publication).filter(manifest => manifest && manifest.private !== true).map(manifest => manifest.name);
+}
+
 function packChecks({ root = repoRoot, rebrand, execute = execFileSync } = {}) {
   const { dirs, source, publication } = releasePackages(root, rebrand);
   const options = { cwd: root, stdio: 'inherit' };
@@ -67,4 +73,4 @@ if (require.main === module) {
   } else throw new Error('Expected pack-check or cleanup');
 }
 
-module.exports = { releasePackages, installAlias, packChecks, cleanupTags };
+module.exports = { releasePackages, installAlias, publishedNames, packChecks, cleanupTags };

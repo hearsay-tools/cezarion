@@ -23,7 +23,7 @@ test('one candidate commit goes plan, suite, stage, candidate tests, then promot
   assert.deepEqual(jobs.candidate.needs, ['plan', 'stage']);
   assert.equal(jobs.candidate.with.version, '${{ needs.plan.outputs.candidate }}');
   assert.equal(jobs.candidate.with.ref, '${{ needs.plan.outputs.source_sha }}');
-  assert.equal(jobs.candidate.with.previous, '${{ needs.plan.outputs.previous }}');
+  assert.equal(jobs.candidate.with.previous, '${{ needs.plan.outputs.upgrade_from }}', 'a maintenance candidate upgrades from its own line');
   // No stable version is published before the tests of its published candidate pass.
   assert.deepEqual(jobs.release.needs, ['plan', 'candidate']);
   assert.match(jobs.release.if, /needs\.candidate\.result == 'success'/);
@@ -66,6 +66,8 @@ test('a failed candidate or promoted install files the release blocker', async (
   assert.deepEqual(jobs.blocker.needs, ['plan', 'candidate', 'release']);
   assert.match(jobs.blocker.if, /needs\.candidate\.result == 'failure'/);
   assert.match(jobs.blocker.if, /needs\.release\.outputs\.alias_smoke == 'failure'/);
+  assert.match(jobs.blocker.if, /needs\.release\.outputs\.dist_tags == 'failure'/, 'a published version whose dist-tag check failed files a blocker');
+  assert.equal(jobs.release.outputs.dist_tags, '${{ steps.dist_tags.outcome }}');
   assert.deepEqual(jobs.blocker.permissions, { contents: 'read', issues: 'write' });
   for (const name of Object.keys(jobs).filter(name => name !== 'blocker')) {
     assert.notEqual(jobs[name].permissions?.issues, 'write', `${name} must not write issues`);

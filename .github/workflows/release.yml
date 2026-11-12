@@ -78,6 +78,8 @@ jobs:
       candidate: ${{ steps.plan.outputs.candidate }}
       candidate_tag: ${{ steps.plan.outputs.candidate_tag }}
       previous: ${{ steps.plan.outputs.previous }}
+      upgrade_from: ${{ steps.plan.outputs.upgrade_from }}
+      names: ${{ steps.plan.outputs.names }}
       needs_suite: ${{ steps.plan.outputs.needs_suite }}
       ignore_blockers: ${{ steps.plan.outputs.ignore_blockers }}
       record_bump: ${{ steps.plan.outputs.record_bump }}
@@ -108,10 +110,10 @@ jobs:
           script: |
             const { execFileSync } = require('node:child_process');
             const { planRelease } = require('./.github/scripts/release-plan.cjs');
-            const { releasePackages, installAlias } = require('./.github/scripts/release-packages.cjs');
+            const { releasePackages, installAlias, publishedNames } = require('./.github/scripts/release-packages.cjs');
             const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
             const plan = await planRelease({
-              github, context, git, packageName: releasePackages().publication.cezar.name, aliasName: installAlias(),
+              github, context, git, packageName: releasePackages().publication.cezar.name, aliasName: installAlias(), names: publishedNames(),
               inputs: { bump: process.env.BUMP, rollback: process.env.ROLLBACK, rollbackTo: process.env.ROLLBACK_TO, ignoreBlockers: process.env.IGNORE_BLOCKERS },
             });
             for (const [key, value] of Object.entries(plan)) core.setOutput(key, value);
@@ -178,14 +180,14 @@ jobs:
       - name: Check the candidate tag
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          PACKAGE: ${{ needs.plan.outputs.package }}
+          NAMES: ${{ needs.plan.outputs.names }}
           VERSION: ${{ needs.plan.outputs.candidate }}
           TAG: ${{ needs.plan.outputs.candidate_tag }}
         with:
           retries: 3
           script: |
             require('./.github/scripts/release-plan.cjs').checkCandidateTag({
-              packageName: process.env.PACKAGE, version: process.env.VERSION, tag: process.env.TAG,
+              names: process.env.NAMES, version: process.env.VERSION, tag: process.env.TAG,
             });
 
       - name: Publish the release candidate
@@ -205,7 +207,7 @@ jobs:
       package: ${{ needs.plan.outputs.package }}
       alias: ${{ needs.plan.outputs.alias }}
       version: ${{ needs.plan.outputs.candidate }}
-      previous: ${{ needs.plan.outputs.previous }}
+      previous: ${{ needs.plan.outputs.upgrade_from }}
       ref: ${{ needs.plan.outputs.source_sha }}
 
   release:
@@ -223,6 +225,7 @@ jobs:
       issues: read # re-check open release-blocker issues
     outputs:
       alias_smoke: ${{ steps.alias_smoke.outcome }}
+      dist_tags: ${{ steps.dist_tags.outcome }}
     steps:
       # Validate and mint before npm publication; missing credentials must not
       # leave a published version without an App-authored bump PR.
@@ -308,6 +311,7 @@ jobs:
           PREVIOUS: ${{ needs.plan.outputs.previous }}
           IGNORE_BLOCKERS: ${{ needs.plan.outputs.ignore_blockers }}
           PACKAGE: ${{ needs.plan.outputs.package }}
+          NAMES: ${{ needs.plan.outputs.names }}
           VERSION: ${{ needs.plan.outputs.version }}
           STABLE_TAG: ${{ needs.plan.outputs.stable_tag }}
         with:
@@ -315,7 +319,7 @@ jobs:
           script: |
             await require('./.github/scripts/release-plan.cjs').recheckGates({
               github, context, mode: process.env.MODE, previous: process.env.PREVIOUS, ignoreBlockers: process.env.IGNORE_BLOCKERS,
-              packageName: process.env.PACKAGE, version: process.env.VERSION, stableTag: process.env.STABLE_TAG,
+              packageName: process.env.PACKAGE, names: process.env.NAMES, version: process.env.VERSION, stableTag: process.env.STABLE_TAG,
             });
 
       - name: Publish release
@@ -334,6 +338,7 @@ jobs:
       # A retry skips names already on the registry, so check that each stable dist-tag
       # really points to this version before the promotion counts as done.
       - name: Check the dist-tags
+        id: dist_tags
         if: steps.release.outputs.published == 'true'
         env:
           NAMES: ${{ steps.release.outputs.publishedNames }}
@@ -438,7 +443,7 @@ jobs:
     needs: [plan, candidate, release]
     # A failed candidate publishes no stable version and leaves `latest` as it was; a
     # failed install of the promoted version needs a rollback. Both block the next release.
-    if: ${{ always() && needs.plan.result == 'success' && (needs.candidate.result == 'failure' || needs.release.outputs.alias_smoke == 'failure') }}
+    if: ${{ always() && needs.plan.result == 'success' && (needs.candidate.result == 'failure' || needs.release.outputs.dist_tags == 'failure' || needs.release.outputs.alias_smoke == 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -454,7 +459,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ needs.plan.outputs.version }}
-          STAGE: ${{ needs.candidate.result == 'failure' && format('tests of release candidate {0}', needs.plan.outputs.candidate) || format('install of {0} through the alias after promotion', needs.plan.outputs.version) }}
+          STAGE: ${{ needs.candidate.result == 'failure' && format('tests of release candidate {0}', needs.plan.outputs.candidate) || needs.release.outputs.dist_tags == 'failure' && format('dist-tags of {0} after promotion', needs.plan.outputs.version) || format('install of {0} through the alias after promotion', needs.plan.outputs.version) }}
         with:
           script: |
             const { fileReleaseBlocker } = require('./.github/scripts/release-blocker.cjs');

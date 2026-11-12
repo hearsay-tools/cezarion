@@ -13,6 +13,7 @@ test('nightly rehearses the release on the newest verified commit', () => {
   const { jobs } = read('nightly.yml');
   const candidate = jobs.decide.steps.find(step => step.id === 'candidate');
   assert.match(candidate.with.script, /verifiedMainCommit/);
+  assert.match(candidate.with.script, /npmView\(.*\{ optional: true \}\)\?\.distTags\.latest/, 'a package not on the registry yet leaves no upgrade baseline');
   assert.equal(jobs.decide.outputs.candidate, '${{ steps.candidate.outputs.sha }}');
   assert.equal(jobs.suite.uses, './.github/workflows/full-suite.yml');
   assert.equal(jobs.suite.with.ref, '${{ needs.decide.outputs.candidate }}');

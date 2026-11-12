@@ -145,7 +145,8 @@ One dispatch takes one **candidate commit** through every stage
    ([`release-candidate-tests.yml`](../.github/workflows/release-candidate-tests.yml)).
    [`scripts/release-smoke.mjs`](../scripts/release-smoke.mjs) installs the candidate,
    and its alias when one is published, from the registry into an empty prefix, boots it and loads the cockpit, then boots
-   the current `latest` on a fresh home and project and upgrades it to the candidate.
+   the version its stable dist-tag holds now (`latest`, or `latest-x.y` on a maintenance
+   line) on a fresh home and project and upgrades it to the candidate.
    It runs on Linux, macOS and Windows, on the `engines.node` floor and the current
    LTS. The browser specs run shuffled on the candidate's source commit: the published
    bundle has no e2e mode.
@@ -165,7 +166,7 @@ environment, so a release can require reviewer approval — and the trusted publ
 on npmjs.com is pinned to that same environment name. Outside Actions, with neither
 `NODE_AUTH_TOKEN` nor the OIDC request env, the script degrades to a loud dry run.
 
-`next` and `latest` never move backwards. A maintenance-line candidate below the
+`next` and `latest` never move backwards, on any published name. A maintenance-line candidate below the
 current `next` stages under `next-<major>.<minor>`, and a maintenance release below
 the current `latest` publishes under `latest-<major>.<minor>`. A release from `main`
 must be above `latest`: merge the pending version-bump PR first.
