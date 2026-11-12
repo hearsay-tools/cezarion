@@ -27,6 +27,7 @@ import { writeSettledJournal } from './project-migration.testkit.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
 import { prepareBeforeTicks, prepareProjects } from './auto.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
+import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /**
  * Early recovery of an unfinished project migration (hearsay-tools/cezarion#3089): every entry
@@ -76,7 +77,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
@@ -169,6 +170,18 @@ describe('early recovery of an unfinished project migration', () => {
     expect(existsSync(lazy.journal)).toBe(false);
     expect(await contexts.warmAll([{ id: 'warm', root: warm.root, status: 'not-git' }])).toEqual(['warm']);
     expect(existsSync(warm.journal)).toBe(false);
+  });
+
+  it('refuses a lazy build without a manager factory before it recovers or claims the project', async () => {
+    const lazy = journaled();
+    const ownership = owner();
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+      listProjects: async () => [{ id: 'lazy', root: lazy.root, status: 'not-git' as const }] });
+    disposers.push(() => contexts.disposeAll());
+    await expect(contexts.context('lazy')).rejects.toThrow('ProjectContexts needs a createManager factory');
+    expect(existsSync(lazy.journal)).toBe(true);
+    expect(ownership.owns(lazy.dataDir)).toBe(false);
+    expect(existsSync(join(lazy.dataDir, 'cockpit.lock'))).toBe(false);
   });
 
   it('stops preparing projects once the cockpit is closing', async () => {

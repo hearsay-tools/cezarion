@@ -16,6 +16,7 @@ import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { WorkspaceEventBus, createApp } from './server.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /**
  * Workspace SSE stream (spec 2026-07-20-multi-project-workspace, step 2.8):
@@ -54,7 +55,7 @@ describe('GET /api/v1/workspace/events', () => {
     }
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     bus = new WorkspaceEventBus();
     bootId = (await registerProject(repoRoot, undefined, testHome())).id;
     app = createApp({ home: testHome(),

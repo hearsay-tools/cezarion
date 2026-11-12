@@ -10,6 +10,7 @@ import { processStartToken } from '../delegation/process-liveness.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { ProjectContexts, ProjectContextsClosedError, type ProjectWarmCandidate } from './project-context.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -41,7 +42,7 @@ describe('ProjectContexts.warmAll', () => {
   });
 
   function makeContexts(projects: ProjectWarmCandidate[]): { contexts: ProjectContexts; built: string[] } {
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => projects });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => projects });
     const built: string[] = [];
     contexts.onContextBuilt((ctx) => built.push(ctx.id));
     return { contexts, built };
@@ -159,7 +160,7 @@ describe('ProjectContexts.warmAll', () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'gone', root: root(), status: 'not-git' }], ownership });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => [{ id: 'gone', root: root(), status: 'not-git' }], ownership });
     const built: string[] = [];
     contexts.onContextBuilt((ctx) => built.push(ctx.id));
     const building = contexts.context('gone');
@@ -178,7 +179,7 @@ describe('ProjectContexts.warmAll', () => {
       { id: 'kept', root: kept, status: 'not-git', lastOpenedAt: '2026-10-11T00:00:00.000Z' },
     ];
     // The registry no longer holds `removed`: its build answers unknown-project.
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [listed[1]!] });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => [listed[1]!] });
     try {
       expect(await contexts.warmAll(listed)).toEqual(['kept']);
       expect(warn).not.toHaveBeenCalled();
@@ -196,7 +197,7 @@ describe('ProjectContexts.warmAll', () => {
       await recovering;
     });
     const projects: ProjectWarmCandidate[] = [{ id: 'busy', root: root(), status: 'not-git' }];
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => projects });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => projects });
     const building = contexts.context('busy');
     await vi.waitFor(() => expect(recover).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
     const manager = recover.mock.contexts[0] as RunManager;
@@ -217,7 +218,7 @@ describe('ProjectContexts.warmAll', () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
     const recover = vi.spyOn(RunManager.prototype, 'recover');
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'early', root: root(), status: 'not-git' }], ownership });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => [{ id: 'early', root: root(), status: 'not-git' }], ownership });
     const building = contexts.context('early');
     await Promise.resolve();
     contexts.disposeAll();
@@ -232,7 +233,7 @@ describe('ProjectContexts.warmAll', () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const recover = vi.spyOn(RunManager.prototype, 'recover');
     const projects: ProjectWarmCandidate[] = [{ id: 'gone', root: root(), status: 'not-git' }];
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => { await gate; return projects; } });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => { await gate; return projects; } });
     const building = contexts.context('gone');
     contexts.dispose('gone');
     release();
