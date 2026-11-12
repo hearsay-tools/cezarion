@@ -999,6 +999,9 @@ hearsay-tools/cezarion#3291).
   `flaky-test`, and a Cezar automation starts a task to fix or quarantine the test
   ([main CI repair](main-ci-repair.md#flake-reports-from-the-merge-queue)). A report never
   gets `main-ci-failure`, so the main CI repair automation does not take it.
+- **Activation order.** Enable the flake automation before anyone adds `flaky-test`. A
+  label added before it was enabled starts no task: remove the label and add it again, or
+  turn on the automation's **Include existing items** with a lookback that covers it.
 
 `.github/scripts/report-queue-flakes.workflow.test.cjs` pins the trigger, the token, the
 trusted checkout, the absence of queued code, and that the jobs, steps and artifacts the

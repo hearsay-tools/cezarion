@@ -164,6 +164,10 @@ These reports stay outside this repair path:
   reproduces the flake from the report's files and either fixes the test or quarantines
   it, in a PR that links the report. Create it paused, check it with
   `hsq automation check <id>`, and enable it deliberately, as for the repair automation.
+- Enable that automation before anyone adds `flaky-test`. By default an automation
+  ignores events from before it was enabled, so a label added earlier starts no task.
+  To recover one, remove the label and add it again, or turn on the automation's
+  **Include existing items** with a lookback that covers the label event.
 
 The labels `flake-report` and `flaky-test` must exist before a flake needs a report:
 without either, the reporter fails visibly and writes nothing.
