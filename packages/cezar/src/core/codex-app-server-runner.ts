@@ -90,6 +90,7 @@ export interface CodexRunnerOptions {
  */
 export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars and default_tools_approval_mode approve' },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: 'prepended to the opening turn/start input through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },

@@ -5,6 +5,7 @@
 
 import type { UiEvent } from './ui-events.ts';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
+import type { RunnerTimings } from './runner-runtime.ts';
 import type { RunnerFacts } from './runner-facts.ts';
 
 /**
@@ -25,6 +26,8 @@ export function isRunnerId(value: string): value is RunnerId {
 }
 
 export interface AgentRunSpec {
+  /** Internal deadline overrides; never persisted or sent to the native wire. */
+  timings?: Partial<RunnerTimings> | undefined;
   /** Appended to the CLI's default system prompt (`--append-system-prompt`). */
   systemPrompt?: string;
   /** Private bundled tool server; capability values belong only in env. */
@@ -83,6 +86,7 @@ export interface AgentRunSpec {
  * error here — and, through `AgentRunSpecSupport`, in every runner (#284).
  */
 const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
+  timings: true,
   systemPrompt: true,
   squawkTools: true,
   userPrompt: true,

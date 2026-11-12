@@ -67,6 +67,7 @@ export interface PiRunnerOptions {
  */
 export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: 'explicit CI --extension and selected tool admission' },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt message' },
   images: { honored: true, via: 'RPC prompt images' },

@@ -82,6 +82,7 @@ export interface ClaudeCliRunnerOptions {
  */
 export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: '--mcp-config and generated --allowedTools name' },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'text block of the first stream-json user message on stdin' },
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },

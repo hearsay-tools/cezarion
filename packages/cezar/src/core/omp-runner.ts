@@ -90,6 +90,7 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
  */
 export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: `explicit CI --extension; the ${productName('Cezar')} tools admitted when --tools is set` },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },

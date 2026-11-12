@@ -143,6 +143,7 @@ export const KILL_GRACE_MS = 4_000;
  */
 export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: 'merged OPENCODE_CONFIG_CONTENT local mcp entry' },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: 'prepended to the opening prompt_async text through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'prompt_async text part' },
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },

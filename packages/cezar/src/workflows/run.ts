@@ -164,7 +164,7 @@ export class RunManager {
   constructor(
     store: RunStore,
     repoRoot: string,
-    options: { home: Home; createRunner: RunnerFactory; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; squawkPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined; acquireCiResources: (workspace: object) => CiResources },
+    options: { home: Home; createRunner: RunnerFactory; timings?: Partial<import('../core/runner-runtime.ts').RunnerTimings>; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; squawkPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined; acquireCiResources: (workspace: object) => CiResources },
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;
@@ -175,7 +175,7 @@ export class RunManager {
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.#semaphore = options.semaphore ?? new WorkspaceSemaphore({ home: options.home });
     this.#toolActivity = options.toolActivity?.attach(store);
-    this.#context = { home: options.home, createRunner: options.createRunner, store, repoRoot, dataDir: this.#dataDir, semaphore: this.#semaphore, disposed: () => this.#disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.#toolActivity };
+    this.#context = { home: options.home, createRunner: options.createRunner, timings: options.timings, store, repoRoot, dataDir: this.#dataDir, semaphore: this.#semaphore, disposed: () => this.#disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.#toolActivity };
     const facade = this;
     this.#modules = composeRunModules(this.#context, {
       unreadInputGraceMs: () => unreadInputGraceMs,
