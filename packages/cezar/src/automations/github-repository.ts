@@ -1,5 +1,5 @@
 import { forgeKindOfRemote, parseRemote } from '../server/forge/index.ts';
-import { forgetRepoHandle, resolveRepoHandle } from '../server/forge/github-repo-handle.ts';
+import { canonicalRepoRef, forgetRepoHandle, isRepositoryNameMiss } from '../server/forge/github-repo-handle.ts';
 
 export interface GithubRepositoryName { owner: string; repo: string }
 
@@ -18,7 +18,7 @@ export interface GithubRepository extends GithubRepositoryName {
 export function githubRepository(
   root: string,
   remote: string | undefined,
-  resolve: typeof resolveRepoHandle = resolveRepoHandle,
+  resolve: typeof canonicalRepoRef = canonicalRepoRef,
   forget: typeof forgetRepoHandle = forgetRepoHandle,
 ): GithubRepository | undefined {
   const parsed = parseRemote(remote ?? '');
@@ -26,19 +26,9 @@ export function githubRepository(
   const fallback = { owner: parsed.owner, repo: parsed.repo };
   return {
     ...fallback,
-    canonical: async () => {
-      const handle = await resolve(root);
-      return handle ? { owner: handle.owner, repo: handle.name } : fallback;
-    },
+    canonical: async () => (await resolve(root, fallback)) ?? fallback,
     forget: () => forget(root),
   };
-}
-
-/** A GitHub answer that can mean the name is no longer the repository's. */
-export function isRepositoryNameMiss(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const stderr = 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
-  return /HTTP 404|HTTP 422|Not Found|Validation Failed/i.test(`${error.message}\n${stderr}`);
 }
 
 /**

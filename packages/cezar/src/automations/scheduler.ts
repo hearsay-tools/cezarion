@@ -82,14 +82,15 @@ export class ProjectAutomationScheduler {
         throw new AutomationBackedOffError(`automation is backed off until ${state.backoffUntil}`);
       }
       const { baseline, overlapSince } = pollWindow(definition, state, mode);
-      const duplicates: GithubCandidate[] = [];
-      const accept = candidateAcceptor(definition, baseline, mode, store, candidate => duplicates.push(candidate));
-      const result = await githubRequests.run(() => readUnderCanonicalName(github, ({ owner, repo }) => github.poller.poll(
-        owner,
-        repo,
-        definition,
-        { since: overlapSince, accept, ...(mode === 'execute' && state.historyScan ? { historyScan: state.historyScan } : {}) },
-      )));
+      let duplicates: GithubCandidate[] = [];
+      const result = await githubRequests.run(() => readUnderCanonicalName(github, ({ owner, repo }) => {
+        // Each attempt starts clean: a retry under a new name must not see the failed one's matches as handled.
+        const found: GithubCandidate[] = [];
+        duplicates = found;
+        const accept = candidateAcceptor(definition, baseline, mode, store, candidate => found.push(candidate));
+        return github.poller.poll(owner, repo, definition,
+          { since: overlapSince, accept, ...(mode === 'execute' && state.historyScan ? { historyScan: state.historyScan } : {}) });
+      }));
       this.assertCurrent(definition);
       const eligible = result.candidates.filter(candidate => afterBaseline(candidate, definition, baseline));
       if (mode === 'execute') await this.launchCandidates(definition, eligible);
@@ -330,7 +331,10 @@ function candidateAcceptor(definition: GithubAutomationDefinition, baseline: str
  *  keyed by its node ID, which a repository rename keeps, so a receipt recorded under the old name
  *  still covers it. */
 function candidateKey(candidate: GithubCandidate): string {
-  return candidate.event.startsWith('issue.') ? `issue:${candidate.nodeId}` : candidate.eventId;
+  if (candidate.event.startsWith('issue.')) return `issue:${candidate.nodeId}`;
+  // The event ID starts with the repository name, which a rename changes.
+  const prefix = `${candidate.repo}:`;
+  return candidate.eventId.startsWith(prefix) ? candidate.eventId.slice(prefix.length) : candidate.eventId;
 }
 
 function laterCursor(

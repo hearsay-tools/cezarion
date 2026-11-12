@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationFailureNotice } from '@open-mercato/cezar-contract/automations';
 import { GithubPoller, type GithubCandidate } from './github-poller.ts';
-import { githubRepository, isRepositoryNameMiss, readUnderCanonicalName, type GithubRepository } from './github-repository.ts';
+import { githubRepository, readUnderCanonicalName, type GithubRepository } from './github-repository.ts';
+import { isRepositoryNameMiss } from '../server/forge/github-repo-handle.ts';
 import { ProjectAutomationScheduler } from './scheduler.ts';
 import { AutomationStore } from './store.ts';
 import type { GithubAutomationDefinition } from './types.ts';
@@ -22,12 +23,12 @@ function validationFailed(): Error {
 
 describe('githubRepository', () => {
   it('reads under the name GitHub reports, and falls back to the origin URL text', async () => {
-    const resolve = vi.fn(async () => ({ owner: 'acme', name: 'squawk' }));
+    const resolve = vi.fn(async () => ({ owner: 'acme', repo: 'squawk' }));
     const forget = vi.fn();
     const repository = githubRepository('/root', 'git@github.com:acme/cezarion.git', resolve, forget)!;
     expect(repository).toMatchObject({ owner: 'acme', repo: 'cezarion' });
     expect(await repository.canonical!()).toEqual({ owner: 'acme', repo: 'squawk' });
-    expect(resolve).toHaveBeenCalledWith('/root');
+    expect(resolve).toHaveBeenCalledWith('/root', { owner: 'acme', repo: 'cezarion' });
     repository.forget!();
     expect(forget).toHaveBeenCalledWith('/root');
     resolve.mockResolvedValueOnce(null as never);
@@ -75,6 +76,7 @@ describe('readUnderCanonicalName', () => {
   it('classifies 404 and 422 answers as a name miss', () => {
     expect(isRepositoryNameMiss(validationFailed())).toBe(true);
     expect(isRepositoryNameMiss(new Error('gh: Not Found (HTTP 404)'))).toBe(true);
+    expect(isRepositoryNameMiss(new Error("GraphQL: Could not resolve to a Repository with the name 'acme/cezarion'."))).toBe(true);
     expect(isRepositoryNameMiss(new Error('gh: Bad credentials (HTTP 401)'))).toBe(false);
     expect(isRepositoryNameMiss('HTTP 422')).toBe(false);
   });
@@ -146,6 +148,54 @@ describe('a GitHub poll after a repository rename', () => {
     await scheduler.check(definition);
     expect(launch).not.toHaveBeenCalled();
     expect(store.logs({ automationId: definition.id })).toContainEqual(expect.objectContaining({ result: 'duplicate', runId: 'earlier', githubNumber: 7 }));
+  });
+
+  const renamed = (owner: string, repo: string, forgotten: () => number) => ({
+    owner, repo: 'cezarion',
+    canonical: async () => ({ owner, repo: forgotten() ? repo : 'cezarion' }),
+  });
+
+  it('retries with a clean acceptor, so a match seen before the failure still launches', async () => {
+    const { store, definition } = await setup();
+    let forgotten = 0;
+    const labelled = (repo: string): GithubCandidate => ({ eventId: `acme/${repo}:I_9:issue.labeled:LE_9`, event: 'issue.labeled',
+      timestamp: labeledAt, tieBreaker: 'LE_9', repo: `acme/${repo}`, nodeId: 'I_9', number: 9, title: 'Flaky', url: `https://github.com/acme/${repo}/issues/9`,
+      author: 'bot', assignees: [], labels: ['main-ci-failure'], changedLabel: 'main-ci-failure' });
+    // The first page accepted issue 9, then a later page under the old name failed with 422.
+    const poll = vi.fn(async (_owner: string, repo: string, _definition: unknown, options: { accept?: (candidate: GithubCandidate) => boolean }) => {
+      expect(options.accept!(labelled(repo))).toBe(true);
+      if (repo === 'cezarion') throw validationFailed();
+      return { candidates: [labelled(repo)], truncated: false, pages: 1 };
+    });
+    const launch = vi.fn(async () => ({ runId: 'repair' }));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { ...renamed('acme', 'squawk', () => forgotten), forget: () => { forgotten++; }, poller: { poll } as never }, launch });
+    await scheduler.check(definition);
+    expect(poll).toHaveBeenCalledTimes(2);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(store.logs({ automationId: definition.id }).filter(row => row.result === 'duplicate')).toEqual([]);
+  });
+
+  it('does not launch a pull request again whose receipt was recorded under the old name', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cezar-rename-pr-')); dirs.push(dir);
+    const store = AutomationStore.open(dir);
+    const definition = store.create({ name: 'PRs', enabled: true, events: ['pull_request.opened'], intervalSeconds: 300,
+      filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'one') as GithubAutomationDefinition;
+    store.setState(definition.id, (current) => ({ ...current, baselineAt: '2026-01-01T00:00:00.000Z' }));
+    const opened = (repo: string): GithubCandidate => ({ eventId: `acme/${repo}:PR_4:pull_request.opened:${labeledAt}`, event: 'pull_request.opened',
+      timestamp: labeledAt, tieBreaker: 'PR_4', repo: `acme/${repo}`, nodeId: 'PR_4', number: 4, title: 'Fix', url: `https://github.com/acme/${repo}/pull/4`,
+      author: 'alice', assignees: [], labels: [] });
+    const receipt = store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId: opened('cezarion').eventId, candidate: opened('cezarion') })!;
+    store.appendReceipt({ ...receipt, status: 'launched', runId: 'earlier', updatedAt: new Date().toISOString() });
+    const accepted: boolean[] = [];
+    const poll = vi.fn(async (_owner: string, repo: string, _definition: unknown, options: { accept?: (candidate: GithubCandidate) => boolean }) => {
+      accepted.push(options.accept!(opened(repo)));
+      return { candidates: [], truncated: false, pages: 1 };
+    });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'squawk', poller: { poll } as never }, launch: async () => ({ runId: 'again' }) });
+    await scheduler.check(definition);
+    expect(accepted).toEqual([false]);
   });
 });
 

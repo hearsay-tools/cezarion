@@ -10,7 +10,7 @@ import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../m
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { gh, githubContext, parseOwnerName, type GithubContext } from './github-cli.ts';
-import { canonicalRepoRef, discoverRepoHandle, forgetRepoHandle, resolveRepoHandle, sharedRepoHandle } from './github-repo-handle.ts';
+import { canonicalRepoRef, discoverRepoHandle, forgetRepoHandle, forgettingNameOnMiss, resolveRepoHandle, sharedRepoHandle } from './github-repo-handle.ts';
 export { parseOwnerName } from './github-cli.ts';
 export { __clearRepoHandleCacheForTests, discoverRepoHandle, forgetRepoHandle, resolveRepoHandle } from './github-repo-handle.ts';
 import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract/github';
@@ -589,7 +589,7 @@ async function loadGithubPage(
   const ownerName = await resolveRepoHandleStrict(repoRoot, context);
   if (!ownerName) return { available: false, reason: 'Could not resolve this repository on GitHub.', issues: [], prs: [] };
   const runGraphql: GraphqlRunner = (query, variables) =>
-    gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context);
+    forgettingNameOnMiss(repoRoot, () => gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context));
   const projectGraphql = githubProjectGraphql(repoRoot, context);
   const firstPage = isFirstGithubPage(page);
   const issueSide = fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'issues', capped, page.issuesCursor, page.issuesDone);
@@ -890,7 +890,7 @@ export async function searchGithubItems(
     if (!handle) {
       return { available: false, reason: 'no GitHub remote to search', items: [] };
     }
-    const out = await gh(repoRoot, [
+    const out = await forgettingNameOnMiss(repoRoot, () => gh(repoRoot, [
       'search',
       kind === 'pr' ? 'prs' : 'issues',
       '--repo',
@@ -905,7 +905,7 @@ export async function searchGithubItems(
       // on the cockpit's host. Behind `--` it is search text, which is all the box ever means.
       '--',
       trimmed,
-    ]);
+    ]));
     const hits = z.array(ghSearchHitSchema).parse(JSON.parse(out));
     // Older gh/GHES search treats repeated repo qualifiers as OR. Never hydrate a foreign
     // hit's number with this repository's memberships or expose it as a local detail row.

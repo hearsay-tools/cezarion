@@ -78,8 +78,9 @@ Automation runtime state gains optional `lastError` and `lastErrorAt`, and
 (hearsay-tools/cezarion#3326). Older binaries keep both state keys through their
 passthrough readers but do not clear them. The notice shows only from three
 consecutive failures, and the next failed check replaces the error. Issue receipts now match by
-node ID instead of repository and number. Every stored receipt already carries
-the node ID, so no receipt is lost and no issue launches again.
+node ID instead of repository and number, and pull request receipts by their event
+ID without its repository prefix. Every stored receipt already carries both, so no
+receipt is lost and no item launches again.
 
 `cez job start|status` is an additive task command (hearsay-tools/cezarion#3097). Success
 prints one JSON object to stdout and exits 0; a refusal or usage error prints

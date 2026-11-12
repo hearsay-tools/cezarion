@@ -70,14 +70,35 @@ export function sharedRepoHandle(repoRoot: string, signal?: AbortSignal, context
 /** Test-only: drop the memoized repo handles. */
 export function __clearRepoHandleCacheForTests(): void {
   repoHandleCache.clear();
+  canonicalNames.clear();
   for (const flight of repoDiscoveryFlights.values()) flight.controller.abort();
   repoDiscoveryFlights.clear();
 }
 
-/** Drop this root's memoized handle after a read that named it failed or was redirected: the
+/** Drop this root's memoized names after a read that named them failed or was redirected: the
  *  repository may have been renamed since, and the next lookup asks GitHub again. */
 export function forgetRepoHandle(repoRoot: string): void {
-  repoHandleCache.delete(githubContext(repoRoot).key);
+  const { key } = githubContext(repoRoot);
+  repoHandleCache.delete(key);
+  for (const name of canonicalNames.keys()) if (name.startsWith(`${key}\n`)) canonicalNames.delete(name);
+}
+
+/** A GitHub answer that can mean the name is no longer the repository's. */
+export function isRepositoryNameMiss(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const stderr = 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
+  return /HTTP 404|HTTP 422|Not Found|Validation Failed|Could not resolve to a Repository/i.test(`${error.message}\n${stderr}`);
+}
+
+/** Runs a read that names the repository; when GitHub no longer knows that name, the next read
+ *  asks for the current one. The error still reaches the caller. */
+export async function forgettingNameOnMiss<T>(repoRoot: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (isRepositoryNameMiss(error)) forgetRepoHandle(repoRoot);
+    throw error;
+  }
 }
 
 /** Local absence cannot improve through network retries. Authentication, timeouts and remote
@@ -121,10 +142,27 @@ export async function resolveRepoHandle(
   return result.status === 'resolved' ? result.handle : null;
 }
 
-/** The name to read `remote`'s repository under: GitHub's current name for it, or `remote` itself
- *  when `gh` cannot say. Null only without a remote. */
-export async function canonicalRepoRef(repoRoot: string, remote: { owner: string; repo: string } | null): Promise<{ owner: string; repo: string } | null> {
+type RepoRef = { owner: string; repo: string };
+const canonicalNames = new Map<string, RepoRef>();
+
+/** The name to read `remote`'s repository under: GitHub's current name for that repository, or
+ *  `remote` itself when `gh` cannot say. It names `remote` explicitly: an unqualified `gh repo
+ *  view` follows gh's default repository, which in a fork checkout is `upstream`. Failures are not
+ *  memoized. Null only without a remote. */
+export async function canonicalRepoRef(repoRoot: string, remote: RepoRef | null): Promise<RepoRef | null> {
   if (!remote || productEnv('DRY_RUN') === '1') return remote;
-  const handle = await resolveRepoHandle(repoRoot);
-  return handle ? { owner: handle.owner, repo: handle.name } : remote;
+  const context = githubContext(repoRoot);
+  const key = `${context.key}\n${`${remote.owner}/${remote.repo}`.toLowerCase()}`;
+  const memo = canonicalNames.get(key);
+  if (memo) return memo;
+  try {
+    const handle = parseOwnerName(await gh(repoRoot,
+      ['repo', 'view', `github.com/${remote.owner}/${remote.repo}`, '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, undefined, context));
+    if (!handle) return remote;
+    const ref = { owner: handle.owner, repo: handle.name };
+    canonicalNames.set(key, ref);
+    return ref;
+  } catch {
+    return remote;
+  }
 }

@@ -12,12 +12,15 @@ On by default; only exact `HSQ_AUTOMATIONS=0` (`CEZ_AUTOMATIONS` fallback) opts 
 
 ## Repository name and failing polls
 
-A GitHub poll reads under the canonical `owner/name` from `gh repo view`
-(`automations/github-repository.ts`), not the `origin` URL text, because the
-issue search answers `422` for a renamed repository's old name. The name is
-memoized per project (`server/forge/github-repo-handle.ts`). A `404` or `422`
-forgets it, resolves again, and retries once when the name changed. Issue
-receipts dedupe by node ID, so a rename does not relaunch an old issue.
+A GitHub poll reads under the canonical `owner/name` that `gh repo view
+github.com/<origin owner>/<origin name>` reports (`automations/github-repository.ts`),
+not the `origin` URL text, because the issue search answers `422` for a renamed
+repository's old name. It names `origin` explicitly: an unqualified `gh repo view`
+picks gh's default repository, which is `upstream` in a fork. The name is memoized
+per project (`server/forge/github-repo-handle.ts`). A `404` or `422` forgets it,
+resolves again, and retries once, with a fresh acceptor, when the name changed.
+Receipts match without the repository name (issues by node ID, pull requests by
+the rest of the event ID), so a rename does not relaunch an old item.
 
 A failed check stores `lastError` and `lastErrorAt`; a success or a re-arm clears
 them, and a backed-off skip keeps the last real error. From
