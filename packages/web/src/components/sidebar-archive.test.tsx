@@ -209,8 +209,14 @@ describe('useSidebarArchive guards and focus (#780)', () => {
     act(() => { void result.current.archiveOne(record({ id: 'a' })) })
     elsewhere.focus()
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
+    // Observers hear a mutation in the order they were created: the hook's own observer is
+    // registered when the toast is offered, so this one runs after it has acted on the removal.
+    const delivered = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => { observer.disconnect(); resolve() })
+      observer.observe(document.body, { childList: true, subtree: true })
+    })
     act(() => ui.row('a').remove())
-    await new Promise((r) => setTimeout(r, 20))
+    await delivered
     expect(document.activeElement).toBe(elsewhere)
   })
 

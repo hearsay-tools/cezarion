@@ -123,6 +123,8 @@ describe('owned fixture server readiness (#795)', () => {
     try {
       const child = spawnFixtureServer(['-e', serverScript(), '--', '--port', String(address.port)], { env: process.env })
       children.push(child)
+      // The deadline bounds the health request only, not Node's startup (hearsay-tools/cezarion#1102).
+      await firstOutput(child)
       const actual = await waitForFixtureServer(child, { deadline: Date.now() + 1_500 })
       expect(actual).not.toBe(`http://127.0.0.1:${address.port}`)
       expect((await fetch(`${actual}/api/v1/health`)).status).toBe(200)
