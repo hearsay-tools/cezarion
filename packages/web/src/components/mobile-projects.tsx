@@ -3,17 +3,16 @@ import { Link as RouterLink } from 'react-router'
 
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { AddProjectMenu } from '@/components/add-project-menu'
-import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUpdateControlProps } from '@/components/application-update-control'
 import { CheckIcon, FolderPlusIcon, LayersIcon, Settings2Icon, SunMoonIcon, WrenchIcon, XIcon } from '@/components/design-icons'
 import { ProjectMenu } from '@/components/sidebar-project-header'
 import { ProjectStateWords } from '@/components/project-state-words'
 import { StatusDot } from '@/components/status-dot'
+import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 import { SignalPill, signalPillSegments } from '@/components/signal-pill'
 import { useTheme } from '@/components/theme-provider'
 import { NEXT_THEME } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { SheetClose } from '@/components/ui/sheet'
-import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 import { scopeTo } from '@/lib/project-router'
 import { projectInitials, projectSignalParts, sumSignals, type ProjectSignal } from '@/lib/project-signal'
 import { cn } from '@/lib/utils'
@@ -61,57 +60,27 @@ export function MenuButtonPills({ elsewhere }: { elsewhere: ProjectSignal | null
 }
 
 /** Brand row: app mark, name, version and the close button. The brand lives here and on the rail. */
-export function DrawerIdentity({ version }: { version: string | null }) {
+export function DrawerIdentity({ version, latestVersion = null }: { version: string | null; latestVersion?: string | null }) {
   const { resolvedTheme } = useTheme()
+  const updateAvailable = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
   return (
     <div data-slot="drawer-identity" className="flex shrink-0 items-center gap-[12px] border-b border-border pt-[env(safe-area-inset-top)] pr-[14px] pb-[14px] pl-[18px]">
       <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" className="mt-[14px] size-[32px] rounded-lg" />
       <span className="mt-[14px] text-[18px] leading-none font-bold tracking-[-0.02em] text-foreground">{productName('Cezarion')}</span>
       {/* A nightly or preview build's version is long: it truncates (full text on hover) instead of
           pushing the Close button out of the row. */}
-      {version ? <span data-slot="drawer-version" title={`v${version}`} className="mt-[14px] min-w-0 truncate text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
+      {version ? <span data-slot="drawer-version" data-update-available={updateAvailable ? 'true' : undefined}
+        title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
+        className="mt-[14px] min-w-0 truncate text-[11px] leading-none text-soft-foreground">
+        {updateAvailable ? <StatusDot tone="pending" className="mr-1 inline-block size-[5px] align-middle" /> : null}
+        v{version}
+      </span> : null}
       <SheetClose asChild>
         {/* 44px, not the mock's 40: the spec's mobile touch-target floor wins. */}
         <Button variant="ghost" size="icon" aria-label="Close menu" className="mt-[14px] ml-auto size-[44px] text-foreground">
           <XIcon className="size-[19px]" aria-hidden="true" />
         </Button>
       </SheetClose>
-    </div>
-  )
-}
-
-/**
- * The update row (#621): nothing while up to date, since the identity row already shows the
- * version. When a newer release exists it earns a full-width row right under the identity, with
- * the Update or Restart action and the progress/failure feedback that used to live in the
- * sidebar footer this drawer no longer renders.
- */
-export function DrawerUpdate({ version, latestVersion, ...update }: Omit<ApplicationUpdateControlProps, 'version' | 'latestVersion'> & {
-  version: string | null
-  latestVersion: string | null
-}) {
-  // A ready or restarting update outlives the version gap (the new version is installed but not
-  // running yet), so the state, not only the comparison, keeps the row visible.
-  const pending = update.state?.status === 'ready' || update.state?.status === 'preparing' || update.state?.status === 'restarting'
-  const available = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
-  if (!available && !pending) return null
-  const status = update.state?.status
-  // Per state: "restart" is only true once the new version is installed; while it is still being
-  // fetched the row says so.
-  const label =
-    status === 'preparing' ? 'Preparing update…'
-    : status === 'ready' || status === 'restarting' ? 'Restart to finish updating'
-    : `Update available · v${latestVersion}`
-  return (
-    <div data-slot="drawer-update" className="shrink-0 border-b border-border px-[18px] py-[6px]">
-      <div className="flex min-h-[44px] items-center gap-[8px]">
-        <StatusDot tone="pending" className="size-[6px] shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-          {label}
-        </span>
-        <ApplicationUpdateControl version={version} latestVersion={latestVersion} {...update} />
-      </div>
-      <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={update.state} error={update.error} offline={update.offline} busy={update.busy} />
     </div>
   )
 }

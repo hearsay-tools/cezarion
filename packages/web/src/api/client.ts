@@ -73,7 +73,6 @@ import type {
   GithubPrMergeStateResponse,
   GithubPrChangesData,
   HealthResponse,
-  ApplicationUpdateResponse,
   AttachmentInput,
   LaunchKeyResponse,
   MessageInput,
@@ -1159,16 +1158,6 @@ export function runFileRawUrl(id: string, path: string): string {
   return apiPath(runPath(id, `/files?path=${encodeURIComponent(path)}&raw=1`))
 }
 // ---- workspace mutations ------------------------------------------------------------------
-
-/** Prepare the server-selected release without interrupting the running cockpit. */
-export async function applyApplicationUpdate(signal?: AbortSignal): Promise<ApplicationUpdateResponse> {
-  return unwrap(await cez.api.v1.workspace['application-update'].apply.$post({ json: {} }, init({ signal })), '/workspace/application-update/apply')
-}
-
-/** Acknowledges the restart before the server hands off to its detached helper. */
-export async function restartApplication(signal?: AbortSignal): Promise<ApplicationUpdateResponse> {
-  return unwrap(await cez.api.v1.workspace['application-update'].restart.$post({ json: {} }, init({ signal })), '/workspace/application-update/restart')
-}
 
 /**
  * Open a terminal signed in to `provider`, optionally for a NAMED account.

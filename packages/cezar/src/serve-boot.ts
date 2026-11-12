@@ -1,21 +1,10 @@
 import { productName } from './home/display.ts';
-import { productEnv } from './core/product-env.ts';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { detectEnvironment } from './core/backend-detect.ts';
 import type { DelegationController } from './delegation/provision.ts';
 import type { startServer } from './server/server.ts';
 import { recoverWithProviderRuntimeAuthObservation, type ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
 import type { Home } from './home/home.ts';
-import { currentEntry } from './self-update/layout.ts';
-import { readNpmConfiguration } from './application-update/npm-process.ts';
-import { restartEndpoint } from './application-update/helper.ts';
-import { armRestartHelper } from './application-update/launcher.ts';
-import { ApplicationUpdateService } from './application-update/service.ts';
-import { SelfUpdateService } from './self-update/service.ts';
-import { isSupervised, restartProcess, type RestartOptions } from './self-update/restart.ts';
 import { forwardToSessionGroups } from './core/session-process.ts';
-import { resolveCapabilities } from './server/capabilities.ts';
 import { pruneOrphans } from './git-worktree.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from './config.ts';
 import { reclaimWorktrees } from './runs/retention.ts';
@@ -97,30 +86,6 @@ export function warnServeBind(bindHost: string | undefined, port: number): void 
   }
 }
 
-export function createServeApplicationUpdate(
-  repoRoot: string,
-  update: { latest?: string },
-  getServer: () => ReturnType<typeof startServer>,
-  readNpm = readNpmConfiguration,
-  store: Pick<RunStore, 'close'> | undefined,
-  home: Home,
-): ApplicationUpdateService | undefined {
-  // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
-  const npm = readNpm();
-  const npmPrefix = npm?.prefix;
-  const npmCache = npm?.cache;
-  return (npmPrefix && npmCache) || productEnv('DRY_RUN') === '1'
-    ? new ApplicationUpdateService({
-      packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
-      launchEntry: resolve(process.argv[1] ?? ''),
-      npmPrefix: npmPrefix ?? home.dryPrefix,
-      npmCache: npmCache ?? home.dryCache, npmBin: npm?.npmBin, home: home.root, targetVersion: () => update.latest,
-      dryRun: productEnv('DRY_RUN') === '1',
-      armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(getServer().address()), npmBin: npm?.npmBin ?? 'npm' }),
-      handoff: () => { void stopServe(getServer(), 'SIGTERM', { store }).then(() => process.exit(0)); },
-    }) : undefined;
-}
-
 type StoppableServer = Pick<ReturnType<typeof startServer>, 'shutdownForRestart'>;
 
 /** How long a stop waits for the server's own shutdown. A socket the listener still holds, or a
@@ -135,8 +100,7 @@ export interface StopServeOptions {
 }
 
 /**
- * The one teardown every exit from `serve` runs: a signal, the desktop shell closing stdin, and
- * both updaters' restarts. The server's own shutdown stops dev servers, delegation, the listener
+ * The one teardown every exit from `serve` runs: a signal or the desktop shell closing stdin. The server's own shutdown stops dev servers, delegation, the listener
  * and the store, waited for at most `boundMs`. Whatever happened there, the store is closed and
  * the signal goes to every agent session group: agents lead their own process groups
  * (hearsay-tools/cezarion#890), so nothing above reaches them. The signal goes last: with the store
@@ -161,31 +125,6 @@ export async function stopServe(server: StoppableServer, signal: NodeJS.Signals 
     }
     forward(signal);
   }
-}
-
-/** Stop this serve (`stopServe`), then re-exec it on the same port or exit 75 to its supervisor. */
-export async function restartServe(
-  server: StoppableServer & Pick<ReturnType<typeof startServer>, 'address'>,
-  restart: (opts: RestartOptions) => void = restartProcess,
-  opts: StopServeOptions = {},
-  home: Home,
-): Promise<void> {
-  const port = restartEndpoint(server.address()).port;
-  await stopServe(server, 'SIGTERM', opts);
-  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised(), entry: currentEntry(process.env, home) });
-}
-
-/** The managed desktop updater; a restart re-execs this serve on the same port. */
-export function createServeSelfUpdate(
-  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined; home: Home },
-  getServer: () => ReturnType<typeof startServer>,
-): SelfUpdateService {
-  return new SelfUpdateService({
-    home: opts.home, pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
-    activeRuns: () => opts.store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
-    trimPaths: () => !resolveCapabilities(process.env, opts.bindHost).localHandoff,
-    restart: () => { void restartServe(getServer(), restartProcess, { store: opts.store }, opts.home); },
-  });
 }
 
 export function printServeBanner(

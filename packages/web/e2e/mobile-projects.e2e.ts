@@ -203,7 +203,7 @@ describe('phone Tools page (#621 follow-up)', () => {
       // "Set up ›" have something to render whatever this machine has installed.
       const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>>; capabilities: Record<string, unknown> }
       // Keep the routed health fixture isolated from real WebSocket health snapshots, which can
-      // replace it in the query cache. As in smoke/application-update, localHandoff:false prevents the
+      // replace it in the query cache. localHandoff:false prevents the
       // health subscription; these assertions do not depend on local handoff.
       health.capabilities = { ...health.capabilities, localHandoff: false }
       const missing = health.checks.length - 1

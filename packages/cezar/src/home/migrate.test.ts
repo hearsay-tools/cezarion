@@ -175,7 +175,7 @@ it('steps 4–5: copies every file family and nested backups into the owning pri
   writeFileSync(legacy.serverLock(), 'old lock');
   const result = migrateLegacyHome(legacy, target);
   for (const path of [target.workspaceConfig, target.workspaceUiState, target.serverState('one'), join(target.remoteSettings, '4321.json'),
-    join(target.config, 'tracker-connections/github.json'), join(target.applicationUpdates, 'update.json'),
+    join(target.config, 'tracker-connections/github.json'), join(target.state, 'application-updates/update.json'),
     join(target.backups, 'config.json/snapshot.json'), join(target.backups, 'remote-settings/4321.json/snapshot.json'),
     join(target.backups, 'server-instances/one.json/snapshot.json'), join(target.state, 'migration.json'), result.record!.backup]) {
     expect(existsSync(path), path).toBe(true);

@@ -18,11 +18,11 @@ import { RunManager } from './workflows/run.ts';
 import { createRunner } from './core/runner-factory.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
 import { ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
-import { watchSupervisor } from './self-update/supervisor.ts';
+import { watchSupervisor } from './desktop-supervisor.ts';
 import { checkForUpdate } from './update-check.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { openUrl } from './open-url.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner, stopServe } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, printServeBanner, stopServe } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 import { recoverProjectMigration } from './project-migration/recovery.ts';
 import { moveProjectWhenIdle } from './project-migration/auto.ts';
@@ -38,8 +38,7 @@ export const defaultServeDeps = {
   CockpitOwnership, recoverProjectMigration, moveProjectWhenIdle, acquireServeListener, WorkspaceSemaphore, TaskWebhooks, previewToolEnabled, PreviewHost,
   cockpitOriginFor, ToolActivityTracker, RunManager, createRunner, sweepMergedBranches, DelegationController,
   ProviderAuthService, createHostDiscovery, WorkspaceEventBus, ProviderRuntimeAuthObserver, detectEnvironment,
-  getRepoInfo, reconcileServeWorktrees, recoverServeProject, checkForUpdate, warnServeBind, createServeSelfUpdate,
-  createServeApplicationUpdate, startServer, once, printServeBanner, stopServe, onTerminal, ignoreHangupOffTerminal,
+  getRepoInfo, reconcileServeWorktrees, recoverServeProject, checkForUpdate, warnServeBind, startServer, once, printServeBanner, stopServe, onTerminal, ignoreHangupOffTerminal,
   watchSupervisor, waitForHealth, openUrl, process, console,
 };
 
@@ -122,7 +121,7 @@ export async function serveCommand(
   await deps.recoverServeProject(store, manager, providerRuntimeAuth, delegation, bootProjectId);
 
   // Update discovery (#368) — fire-and-forget; the banner prints whenever the
-  // registry answers and /api/v1/health picks it up for the GUI chip.
+  // registry answers and /api/v1/health reports it as `latestVersion`.
   const pkgName = deps.readOwnName();
   const update: { latest?: string } = {};
   void deps.checkForUpdate(pkgName, version).then((latest) => {
@@ -133,10 +132,7 @@ export async function serveCommand(
 
   const port = preferredPort;
   deps.warnServeBind(bindHost, port);
-  let server: ReturnType<typeof startServer>;
-  const selfUpdate = deps.createServeSelfUpdate({ pkgName, version, store, bindHost, home }, () => server);
-  const applicationUpdate = deps.createServeApplicationUpdate(repoRoot, update, () => server, undefined, store, home);
-  server = deps.startServer({
+  const server = deps.startServer({
     home,
     ownership,
     delegation,
@@ -145,8 +141,6 @@ export async function serveCommand(
     manager,
     version,
     update,
-    applicationUpdate,
-    selfUpdate,
     bootProjectId,
     semaphore,
     bindHost,
@@ -164,6 +158,8 @@ export async function serveCommand(
   if (!address || typeof address === 'string') throw new Error('cockpit TCP listener is unavailable');
   boundPort = address.port;
   const boundHost = address.address;
+  // Releases v0.14.9 to v0.18.0 shipped a cockpit Update button. It starts the new version with
+  // `--restart-exact` over an IPC channel and rolls back unless the new version reports this listener.
   if (restartExact && deps.process.send) {
     deps.process.send({ type: 'application-update-listening', host: boundHost, port: boundPort, repoRoot, version },
       () => deps.process.disconnect?.());

@@ -396,8 +396,8 @@ describe('observable waits (#764)', () => {
     expect(rules(scanSource('x.ts', `setTimeout(() => { resolve('ready') }, 150)`))).toContain('sleep')
   })
   it('includes packaged CLI specs and their helpers in the guard coverage', () => {
-    const source = readFileSync(join(e2eDir, '../../cezar/test/e2e/application-update.test.ts'), 'utf8')
-    expect(scanSource('packages/cezar/test/e2e/application-update.test.ts', source).filter(s => s.rule === 'sleep')).toEqual([])
+    const source = readFileSync(join(e2eDir, '../../cezar/test/e2e/compatibility-packages.test.ts'), 'utf8')
+    expect(scanSource('packages/cezar/test/e2e/compatibility-packages.test.ts', source).filter(s => s.rule === 'sleep')).toEqual([])
   })
 })
 

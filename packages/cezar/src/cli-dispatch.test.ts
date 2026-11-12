@@ -18,11 +18,9 @@ function fixture(args: string[] = []) {
     operatorHomeEntry: vi.fn(defaultCliDeps.operatorHomeEntry),
     resolveCliHome: vi.fn(() => home),
     prepareOperatorHome: vi.fn(() => home),
-    runManagedCommand: vi.fn().mockResolvedValue(undefined),
     runSubcommand: vi.fn().mockResolvedValue(undefined),
     getRepoInfo: vi.fn().mockResolvedValue(null),
     runProjectsCommand: vi.fn().mockResolvedValue(0),
-    readOwnName: vi.fn(() => '@wjarka/cezarion'),
     readOwnVersion: vi.fn(() => '1.2.3'),
     serveCommand: vi.fn().mockResolvedValue(undefined),
     serverCommand: vi.fn().mockResolvedValue(undefined),
@@ -35,16 +33,12 @@ function fixture(args: string[] = []) {
 }
 
 describe('main dispatch', () => {
-  it('returns a managed-command exit before subcommands, global parsing, or Home access', async () => {
-    const f = fixture(['versions', '--own-flag']);
-    f.deps.runManagedCommand.mockResolvedValue(7);
+  it.each(['install', 'update', 'versions', 'use', 'link', 'unlink'])('treats the removed managed command %s as unknown without preparing Home', async (command) => {
+    const f = fixture([command]);
     await f.run();
-    expect(f.processStub.exitCode).toBe(7);
-    expect(f.deps.runManagedCommand).toHaveBeenCalledWith(['versions', '--own-flag'], { pkgName: '@wjarka/cezarion', version: '1.2.3', entry: '/bin/cez' }, expect.any(Function));
-    expect(f.deps.runSubcommand).not.toHaveBeenCalled();
-    expect(f.deps.parseArgs).not.toHaveBeenCalled();
-    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
-    expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
+    expect(f.deps.console.error).toHaveBeenCalledWith(`unknown command: ${command}\n`);
+    expect(f.processStub.exitCode).toBe(1);
+    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
   });
 
   it('dispatches task subcommands before global flags without resolving Home', async () => {
@@ -52,19 +46,13 @@ describe('main dispatch', () => {
     f.deps.runSubcommand.mockResolvedValue(0);
     await f.run();
     expect(f.processStub.exitCode).toBe(0);
-    expect(f.deps.runManagedCommand).toHaveBeenCalledBefore(f.deps.runSubcommand);
     expect(f.deps.runSubcommand).toHaveBeenCalledWith(['message', '--own-flag'], f.processStub.env, expect.any(Function));
     expect(f.deps.parseArgs).not.toHaveBeenCalled();
     expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
   });
 
-  it('shares one lazy Home factory across managed, task, and ordinary dispatch', async () => {
+  it('shares one lazy Home factory across task and ordinary dispatch', async () => {
     const f = fixture();
-    f.deps.runManagedCommand.mockImplementation(async (_args: string[], _meta: unknown, home: () => Home) => {
-      expect(home()).toBe(f.home);
-      expect(home()).toBe(f.home);
-      return undefined;
-    });
     f.deps.runSubcommand.mockImplementation(async (_args: string[], _env: unknown, home: () => Home) => {
       expect(home()).toBe(f.home);
       return undefined;
@@ -84,9 +72,7 @@ describe('main dispatch', () => {
     expect(help).toContain('      --no-workers');
     expect(help).toContain('      --no-messaging');
     expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
-    // With the switch on, help names the selected Home's paths: path resolution only.
-    if (REBRAND_SWITCH) expect(f.deps.resolveCliHome).toHaveBeenCalledBefore(f.deps.console.log);
-    else expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
     expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
     expect(f.processStub.exitCode).toBeUndefined();
   });
@@ -201,10 +187,9 @@ describe('main dispatch', () => {
     expect(unknown.deps.prepareOperatorHome).not.toHaveBeenCalled();
   });
 
-  it('keeps parse errors rejecting after the two specialized dispatchers decline them', async () => {
+  it('keeps parse errors rejecting after the subcommand dispatcher declines them', async () => {
     const f = fixture(['--unknown-option']);
     await expect(f.run()).rejects.toThrow('Unknown option');
-    expect(f.deps.runManagedCommand).toHaveBeenCalledBefore(f.deps.runSubcommand);
     expect(f.deps.runSubcommand).toHaveBeenCalledBefore(f.deps.parseArgs);
     expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
   });
@@ -258,15 +243,8 @@ describe('binary help and notices', () => {
       expect(help).toContain(`"skillsRepos" in .ai/${rebrand ? 'squawk' : 'cezar'}/config.json`);
       expect(help).toContain(`workflows in .ai/${rebrand ? 'squawk' : 'cezar'}/workflows/.`);
       expect(help.includes('A project also reads .ai/cezar/')).toBe(rebrand);
-      expect(help).toContain(rebrand ? f.home.versions : '~/.cezar/versions');
+      expect(help).not.toContain(' versions | use ');
     }
-  });
-  it('prints the notice before a managed command can return', async () => {
-    const f = fixture(['versions']);
-    f.deps.runManagedCommand.mockResolvedValue(0);
-    await main(f.deps as unknown as CliDeps, true);
-    expect(f.deps.console.error).toHaveBeenCalledBefore(f.deps.runManagedCommand);
-    expect(f.deps.console.error).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -285,27 +263,15 @@ describe.each([false, true])('CLI metadata (switch %s)', rebrand => {
     }
   });
 
-  it('prints help when home resolution fails', async () => {
+  it('prints help without resolving Home, so a host without one still gets it', async () => {
     const f = fixture(['--help']);
     f.processStub.argv[1] = '/bin/hsq';
     f.deps.resolveCliHome.mockImplementation(() => { throw new Error('No home directory'); });
     await main(f.deps as unknown as CliDeps, rebrand);
     expect(f.deps.console.log.mock.calls[0]?.[0]).toContain('Usage:');
-    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain(
-      `manage the desktop installation under ${rebrand ? 'the data folder' : '~/.cezar/versions'}`,
-    );
     expect(f.processStub.exitCode ?? 0).toBe(0);
+    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
     expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
     expect(f.deps.console.error).not.toHaveBeenCalled();
-  });
-
-  it('shows the resolved versions path only after the switch', async () => {
-    const f = fixture(['--help']);
-    f.processStub.argv[1] = '/bin/hsq';
-    await main(f.deps as unknown as CliDeps, rebrand);
-    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain(
-      `manage the desktop installation under ${rebrand ? f.home.versions : '~/.cezar/versions'}`,
-    );
-    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
   });
 });

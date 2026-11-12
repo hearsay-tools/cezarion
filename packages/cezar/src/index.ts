@@ -129,7 +129,7 @@ function readOwnVersion(): string {
 }
 
 main({
-  ...defaultCliDeps, resolveCliHome: () => resolveHome({ purpose: 'cli' }), readOwnName, readOwnVersion, runCommand, initCommand, initWorkspace, serverCommand,
+  ...defaultCliDeps, resolveCliHome: () => resolveHome({ purpose: 'cli' }), readOwnVersion, runCommand, initCommand, initWorkspace, serverCommand,
   serveCommand: (...args) => serveCommand(...args, { ...defaultServeDeps, initWorkspace, openBootStore, readOwnName, readOwnVersion }),
 }).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));

@@ -3,9 +3,6 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readProductIdentity, type DisplayIdentity } from '../../product-identity'
-import type { SelfUpdateStatus } from '@open-mercato/cezar-api-client'
-import { SelfUpdateDialog } from '@/components/self-update-dialog'
-import { selfUpdateQueryKeys } from '@/api/self-update-queries'
 import { conversationDeliveryExplanation } from '@/routes/task-thread/conversation-presentation'
 import { createQueryClient } from '@/api/query-client'
 import { skillSourcesKey } from '@/api/skill-sources-client'
@@ -50,21 +47,6 @@ describe.each([false, true])('browser command hints (switch %s)', rebrand => {
     state.identity = readProductIdentity(rebrand)
     expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined))
       .toContain(`with ${state.identity.command} worker resume`)
-  })
-
-  it.each(['global-npm', 'npx', 'checkout'] as const)('renders the install hint for %s', installKind => {
-    state.identity = readProductIdentity(rebrand)
-    const status: SelfUpdateStatus = {
-      version: '1.2.3', installKind, entry: '/fixture/index.js', canSelfUpdate: false,
-      channel: 'stable', restartMode: 'reexec', latest: { stable: null, nightly: null },
-      updateAvailable: null, checkedAt: null, installed: [], available: [], job: null, activeRuns: 0,
-    }
-    const client = createQueryClient()
-    client.setQueryData(selfUpdateQueryKeys.status, status)
-    render(<QueryClientProvider client={client}><SelfUpdateDialog open onOpenChange={() => {}} /></QueryClientProvider>)
-    const command = installKind === 'checkout' ? 'node packages/cezar/dist/index.js install'
-      : installKind === 'global-npm' ? `${state.identity.command} install` : `${rebrand ? 'npx -p @hearsay-tools/squawk hsq' : 'npx @wjarka/cezarion'} install`
-    expect(screen.getByText(command)).toBeTruthy()
   })
 
   it('renders the automation, remote settings and npm hints from the shared identity', () => {

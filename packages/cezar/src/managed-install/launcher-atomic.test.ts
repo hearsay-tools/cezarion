@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from '../home/home.ts';
 import { BINARY_NAMES, productIdentity } from '../home/identity.ts';
-import { activate, activeId, versionDir, writeManifest } from './layout.ts';
-import { activateManaged, posixLauncher, windowsLauncher, writeLaunchers } from './launcher.ts';
+import { CURRENT_LINK, versionDir, versionsDir } from './layout.ts';
+import { posixLauncher, windowsLauncher, writeLaunchers } from './launcher.ts';
 
 const fault = vi.hoisted(() => ({ target: '', code: '', fd: -1, temp: '' }));
 vi.mock('node:fs', async importOriginal => {
@@ -44,12 +44,9 @@ afterEach(() => {
 function fixture(platform: NodeJS.Platform) {
   const root = mkdtempSync(join(tmpdir(), 'atomic-managed-launcher-')); roots.push(root);
   const home = Home.sandbox(root, { layout: 'legacy' });
-  for (const [id, rebrand] of [['1.0.0', false], ['2.0.0', true]] as const) {
-    const entry = join(versionDir(id, {}, home), 'node_modules', productIdentity(rebrand).npmPackage, 'dist/index.js');
-    mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, `console.log(${JSON.stringify(id)});`);
-    writeManifest(id, { version: id, source: 'registry', installedAt: '2026-11-08T00:00:00Z' }, {}, home);
-  }
-  activate('1.0.0', {}, home, false);
+  const entry = join(versionDir('1.0.0', {}, home), 'node_modules', productIdentity(false).npmPackage, 'dist/index.js');
+  mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, 'console.log("1.0.0");');
+  symlinkSync(versionDir('1.0.0', {}, home), join(versionsDir({}, home), CURRENT_LINK), 'junction');
   const bin = writeLaunchers({}, home, false, platform);
   const target = join(bin, platform === 'win32' ? 'hsq.cmd' : 'hsq');
   return { home, bin, target, bytes: readFileSync(target), mode: statSync(target).mode & 0o777 };
@@ -59,13 +56,13 @@ for (const platform of ['linux', 'win32'] as const) for (const code of ['ENOSPC'
   it(`${platform}: ${code} during launcher replacement preserves old bytes and current`, () => {
     const f = fixture(platform);
     fault.target = f.target; fault.code = code;
-    expect(() => activateManaged('2.0.0', {}, f.home, true, platform)).toThrowError(expect.objectContaining({ code }));
+    expect(() => writeLaunchers({}, f.home, true, platform)).toThrowError(expect.objectContaining({ code }));
     expect(readFileSync(f.target)).toEqual(f.bytes);
     expect(fault.temp).toMatch(/\.tmp$/);
     expect(existsSync(fault.temp)).toBe(false);
     expect(readdirSync(f.bin).filter(name => name.endsWith('.tmp'))).toEqual([]);
     expect(statSync(f.target).mode & 0o777).toBe(f.mode);
-    expect(activeId({}, f.home)).toBe('1.0.0');
+    expect(realpathSync(join(versionsDir({}, f.home), CURRENT_LINK))).toBe(realpathSync(versionDir('1.0.0', {}, f.home)));
     if (platform === 'linux' && process.platform !== 'win32') expect(execFileSync('/bin/sh', [f.target], { encoding: 'utf8' }).trim()).toBe('1.0.0');
   });
 }

@@ -44,7 +44,6 @@ import { atomicWriteJsonSync } from './workspace/config.ts';
 import { mergeWriteAgentAccounts } from './workspace/agent-accounts.ts';
 import { disableRemoteSettings, enableRemoteSettings } from './remote-settings.ts';
 import { acquireLock, saveServerState } from './server-install/state.ts';
-import { installFromRegistry } from './self-update/installer.ts';
 import { freshServerState } from './server-install/types.ts';
 
 const realHome = join(userInfo().homedir, '.cezar'); // test-home-read: refusal target; fixture rejects unowned mutations
@@ -287,20 +286,6 @@ describe('home write guard with HOME pinned to a sandbox', () => {
       await enableRemoteSettings(4321, env, undefined, home);
       expect(JSON.parse(readFileSync(join(home.remoteSettings, '4321.json'), 'utf8'))).toHaveProperty('enabledAt');
       for (const [path] of vi.mocked(renameSync).mock.calls) expect(String(path)).not.toContain(realHome);
-    } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
-  });
-
-  it('checks the install destination again after npm changes the home', async () => {
-    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
-    const fixture = fs.mkdtempSync(join(tmpdir(), 'cez-guard-installer-'));
-    mutationScope.root = fixture;
-    const env = { CEZ_HOME: fixture };
-    vi.mocked(existsSync).mockImplementation((path) => String(path).includes('.staging-'));
-    try {
-      await expect(installFromRegistry('0.12.1', { home: { ...testHome(env), get versions() { return join(env.CEZ_HOME, 'versions'); } }, env, runNpm: async () => { env.CEZ_HOME = realHome; } }))
-        .rejects.toThrow('refusing to write');
-      expect(renameSync).not.toHaveBeenCalled();
-      for (const [path] of vi.mocked(rmSync).mock.calls) expect(String(path)).not.toContain(realHome);
     } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
   });
 

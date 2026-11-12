@@ -15,7 +15,6 @@ on:
       - develop
     paths:
       - 'packages/desktop/**'
-      - 'packages/cezar/src/self-update/**'
       - 'packages/cezar/src/home/identity.ts'
       - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
@@ -27,7 +26,6 @@ on:
       - develop
     paths:
       - 'packages/desktop/**'
-      - 'packages/cezar/src/self-update/**'
       - 'packages/cezar/src/home/identity.ts'
       - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
@@ -119,12 +117,8 @@ jobs:
         working-directory: packages/desktop/src-tauri
         run: cargo test --locked --lib -- --ignored --test-threads=1
 
-      # The cockpit's own updater writes the same layout; its link handling is per-platform too.
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Self-update layout tests
-        run: npm test -- packages/cezar/src/self-update/self-update.test.ts
 
       - name: Build test installers
         working-directory: packages/desktop

@@ -1,4 +1,4 @@
-//! Stopping the owned cockpit and deciding what follows a new version. Std-only, so its tests
+//! Stopping the owned cockpit and deciding what a supervisor does next. Std-only, so its tests
 //! run without a window system.
 //!
 //! The shell starts cezar with a piped stdin and `CEZ_SUPERVISOR_STDIN=1`. Closing that pipe is
@@ -48,35 +48,12 @@ pub fn wait_until(child: &mut Child, deadline: Instant) -> bool {
     }
 }
 
-/// What the shell does once a new cezar version is current (an install, an update or a switch).
-/// Decided under the child lock, which is also where a supervisor publishes a starting cockpit
-/// and decides whether to go round again, so no request falls between the two.
-#[derive(Debug, PartialEq, Eq)]
-pub enum AfterNewVersion {
-    /// A cockpit runs, or is starting, on the old version: stop it; its supervisor relaunches.
-    RestartRunning,
-    /// Nothing runs and nothing supervises (the launcher, or after a start or server failure):
-    /// start a supervisor, or the splash would wait forever.
-    StartSupervisor,
-    /// A supervisor is alive without a cockpit (installing, between two cockpits, or cleaning up a
-    /// failed start): flag the restart, and it relaunches at its next decision instead of stopping.
-    AskSupervisor,
-}
-
-pub fn after_new_version(cockpit_running: bool, supervising: bool) -> AfterNewVersion {
-    match (cockpit_running, supervising) {
-        (true, _) => AfterNewVersion::RestartRunning,
-        (false, false) => AfterNewVersion::StartSupervisor,
-        (false, true) => AfterNewVersion::AskSupervisor,
-    }
-}
-
 /// What a supervisor does when its cockpit is gone or never came up.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Next {
     /// The app is quitting: start nothing new.
     Quit,
-    /// A restart was asked for (a new version, or the cockpit exited 75): start the current one.
+    /// The cockpit exited 75: start the current version again.
     Relaunch,
     /// Nothing asked for another cockpit: stop supervising.
     Stop,
@@ -118,32 +95,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_new_version_restarts_a_running_cockpit() {
-        assert_eq!(after_new_version(true, true), AfterNewVersion::RestartRunning);
-    }
-
-    // The launcher and a failed start leave no supervisor: without a new one the splash stays
-    // on "Updating cezar" forever.
-    #[test]
-    fn a_new_version_with_no_supervisor_starts_one() {
-        assert_eq!(after_new_version(false, false), AfterNewVersion::StartSupervisor);
-    }
-
-    // A cockpit is published before its health wait, so one that is still starting counts as
-    // running: it is stopped and relaunched on the new version, not left on the old one.
-    #[test]
-    fn a_new_version_while_a_cockpit_starts_restarts_it() {
-        assert_eq!(after_new_version(true, true), AfterNewVersion::RestartRunning);
-    }
-
-    // The first install runs inside `supervise`, and a failed start is cleaned up there: the
-    // supervisor is asked to go round again rather than the request being dropped.
-    #[test]
-    fn a_new_version_during_an_install_or_a_failed_start_asks_the_supervisor() {
-        assert_eq!(after_new_version(false, true), AfterNewVersion::AskSupervisor);
-    }
-
-    #[test]
     fn a_supervisor_relaunches_on_request() {
         assert_eq!(supervisor_next(false, true), Next::Relaunch);
     }
@@ -153,7 +104,7 @@ mod tests {
         assert_eq!(supervisor_next(false, false), Next::Stop);
     }
 
-    // Quit wins: a restart asked for during quit, or a cockpit that exited 75, starts nothing.
+    // Quit wins: a cockpit that exited 75 during quit starts nothing.
     #[test]
     fn a_quitting_app_starts_no_new_cockpit() {
         assert_eq!(supervisor_next(true, true), Next::Quit);

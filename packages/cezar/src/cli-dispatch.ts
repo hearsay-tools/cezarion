@@ -6,7 +6,6 @@ import { productEnv } from './core/product-env.ts';
 import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
 import { REBRAND_SWITCH } from './home/switch.ts';
 import type { Home } from './home/home.ts';
-import { runManagedCommand } from './self-update/cli.ts';
 import { runSubcommand } from './subcommands.ts';
 import { getRepoInfo } from './server/git.ts';
 import { runProjectsCommand } from './workspace/projects-cli.ts';
@@ -16,13 +15,12 @@ import type { serverCommand } from './server-command.ts';
 import type { TaskAccess } from './headless-run.ts';
 
 export const defaultCliDeps = {
-  parseArgs, productEnv, operatorHomeEntry, prepareOperatorHome, runManagedCommand,
+  parseArgs, productEnv, operatorHomeEntry, prepareOperatorHome,
   runSubcommand, getRepoInfo, runProjectsCommand, process, console,
 };
 
 export type CliDeps = typeof defaultCliDeps & {
   resolveCliHome: () => Home;
-  readOwnName: () => string;
   readOwnVersion: () => string;
   serveCommand: (home: Home, root: string, port: number, open: boolean, bindHost: string | undefined, restartExact: boolean) => Promise<void>;
   serverCommand: typeof serverCommand;
@@ -31,7 +29,7 @@ export type CliDeps = typeof defaultCliDeps & {
   initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
 };
 
-function cliHelp(rebrand: boolean, versions = '~/.cezar/versions'): string {
+function cliHelp(rebrand: boolean): string {
   return `${productName('cezar', rebrand)} — local cockpit for AI agent tasks in your repo
 
 Usage:
@@ -55,9 +53,6 @@ Usage:
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
 ${rebrand ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}${rebrand ? '  hsq migrate-project [--dry-run] move this project\'s state from .ai/cezar/ to .ai/squawk/, offline\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
-  cez install | update      manage the desktop installation under ${versions}
-  cez versions | use <id>   list or switch managed versions
-  cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
 
 Options:
   -p, --port <n>              cockpit port (default 4321; server-install: this
@@ -134,28 +129,13 @@ function printCliMetadata(deps: CliDeps, values: { version?: boolean; help?: boo
   return false;
 }
 
-/** Help stays available even when the host cannot resolve a user's home. */
-function cliVersionsPath(deps: CliDeps, rebrand: boolean): string | undefined {
-  if (!rebrand) return;
-  try {
-    return deps.resolveCliHome().versions;
-  } catch {
-    return "the data folder's versions directory";
-  }
-}
-
 async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
   // Help reads resolved paths only. Task commands and version output never need a Home.
-  const help = () => commandText(cliHelp(rebrand, cliVersionsPath(deps, rebrand)), deps.process.argv[1], rebrand);
+  const help = () => commandText(cliHelp(rebrand), deps.process.argv[1], rebrand);
   let resolvedHome: Home | undefined;
   let homeEntry = deps.operatorHomeEntry(deps.process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.
   const home = () => resolvedHome ??= deps.prepareOperatorHome(deps.resolveCliHome(), homeEntry);
-  const managedExit = await deps.runManagedCommand(deps.process.argv.slice(2), { pkgName: deps.readOwnName(), version: deps.readOwnVersion(), entry: resolve(deps.process.argv[1] ?? '') }, home);
-  if (managedExit !== undefined) {
-    deps.process.exitCode = managedExit;
-    return;
-  }
   // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
   const subcommandExit = await deps.runSubcommand(deps.process.argv.slice(2), deps.process.env, home);
   if (subcommandExit !== undefined) {

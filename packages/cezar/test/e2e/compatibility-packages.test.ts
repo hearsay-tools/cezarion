@@ -8,18 +8,21 @@ import { createRequire, stripTypeScriptTypes } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { productIdentity } from '../../src/home/identity.ts';
 import { withCompatibilityPackages } from '../../src/release/compatibility.ts';
-import { fixtureText, frozenUpdater, modulesAt, oldInstallation, capturePlans, launchOriginalEntries, type ConsumerKind } from '../../src/application-update/legacy-entry-paths.testkit.ts';
 
 const execFile = promisify(execFileCallback);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const old = productIdentity(false), active = productIdentity(true);
-const { ApplicationUpdateService } = await import(pathToFileURL(join(repo, 'packages/cezar/dist/application-update/service.js')).href) as typeof import('../../src/application-update/service.ts');
-const { promoteOriginal, runRestartWorkflow } = await import(pathToFileURL(join(repo, 'packages/cezar/dist/application-update/helper.js')).href) as typeof import('../../src/application-update/helper.ts');
+type ConsumerKind = 'global' | 'npx';
+const modulesAt = (consumer: string, kind: ConsumerKind): string =>
+  join(consumer, kind === 'global' && process.platform !== 'win32' ? 'lib/node_modules' : 'node_modules');
+/** A validator the v0.17.0 updater ran, frozen as shipped; it must still accept a new release. */
+const frozenValidator = (file: string): string =>
+  stripTypeScriptTypes(readFileSync(new URL(`../fixtures/${file}`, import.meta.url), 'utf8'));
 
 type Archive = { file: string; manifest: { name: string; version: string } };
 
@@ -103,47 +106,6 @@ function packRuntime(root: string): { tarball: string; source: string; manifest:
   return { tarball: pack(source, root), source, manifest };
 }
 
-async function upgradeOldLayout(root: string, kind: ConsumerKind, alias: boolean, entries: string[], version: string,
-  env: NodeJS.ProcessEnv, Frozen: typeof ApplicationUpdateService, nested = kind === 'global', links = true): Promise<void> {
-  const id = `${kind}-${alias ? 'alias' : 'scoped'}-${entries[0]}-${nested}`.replace(/[^a-z0-9]/gi, '');
-  const consumer = kind === 'global' ? join(root, id) : join(env.npm_config_cache!, '_npx', id);
-  const original = oldInstallation(consumer, kind, alias, entries, nested, links);
-  let installs = 0;
-  const options = { packageRoot: original.packageRoot, launchEntry: original.launchEntries[0]!,
-    npmPrefix: kind === 'global' ? consumer : join(root, 'unused-prefix'), npmCache: env.npm_config_cache!,
-    home: join(root, 'homes', id), targetVersion: () => version,
-    runNpm: async (args: string[]) => {
-      installs++;
-      assert.equal(args.at(-1), `${alias ? old.npmAlias : old.npmPackage}@${version}`);
-      const stage = args[args.indexOf('--prefix') + 1]!;
-      assert.ok(!existsSync(join(stage, 'node_modules')), 'the shipped updater installs into an empty stage');
-      await execFile(npm, [...args, '--offline', '--no-update-notifier'], { env, cwd: root, shell: process.platform === 'win32' });
-    },
-  };
-  const plans = await capturePlans(options, original.launchEntries, Frozen, root, ApplicationUpdateService);
-  assert.equal(installs, 1, 'entry-path variants reuse the same shipped ready record');
-  const plan = plans[0]!;
-  const frozen = stripTypeScriptTypes(fixtureText('v0.17.0-promotion-validator.ts.txt'));
-  const previous = Object.fromEntries(['npm_config_registry', 'npm_config_offline', 'npm_config_update_notifier'].map(key => [key, process.env[key]]));
-  let launched = false, success = false;
-  try {
-    Object.assign(process.env, { npm_config_registry: env.npm_config_registry, npm_config_offline: 'true', npm_config_update_notifier: 'false' });
-    const unexpected = async () => { assert.fail('the historical upgrade must not roll back'); };
-    await runRestartWorkflow({ waitForOldExit: async () => {}, promote: () => promoteOriginal(plan),
-      validateOriginal: async () => {
-        for (const entryPlan of plans) await execFile(process.execPath, ['--input-type=module', '-e', `${frozen}\nvalidateOriginal(JSON.parse(process.argv[1]), process.argv[2]);`, JSON.stringify(entryPlan), version], { env });
-      },
-      launch: async () => { await launchOriginalEntries(plans, consumer, env); launched = true; },
-      verifyHealth: async () => { assert.equal(launched, true); }, reportSuccess: async () => { success = true; },
-      reapReplacement: unexpected, restore: unexpected, launchPrevious: unexpected, reportFailure: unexpected,
-    });
-    assert.equal(success, true);
-  } finally {
-    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
-  }
-  const scoped = dirname(createRequire(join(original.outer, 'package.json')).resolve(`${old.npmPackage}/package.json`));
-  assert.equal(JSON.parse(readFileSync(join(scoped, 'package.json'), 'utf8')).version, version);
-}
 async function verifyCommands(consumer: string, binDir: string, shim: string, env: NodeJS.ProcessEnv): Promise<void> {
   for (const command of ['cezarion', 'hsq']) {
     const calls = [[join(binDir, command + (process.platform === 'win32' ? '.cmd' : '')), [], process.platform === 'win32',
@@ -164,16 +126,14 @@ async function verifyInstalled(consumer: string, kind: ConsumerKind, name: strin
   const shim = join(modules, name);
   const implementation = dirname(createRequire(join(shim, 'package.json')).resolve(`${active.npmPackage}/package.json`));
   assert.equal(JSON.parse(readFileSync(join(implementation, 'package.json'), 'utf8')).name, active.npmPackage);
-  // Exercise the installed implementation's discovery against the actual npm result.
-  const { discoverInstallation } = await import(pathToFileURL(join(implementation, 'dist/application-update/discovery.js')).href);
-  const layout = discoverInstallation({ prefix: kind === 'global' ? consumer : join(consumer, 'unused-prefix'),
-    cache: env.npm_config_cache, packageRoot: implementation, launchEntry: join(shim, 'dist/index.js') });
-  assert.equal(layout.kind, kind);
-  assert.equal(layout.outerPackage, name);
-  assert.equal(layout.packageRoot, realpathSync(implementation));
   await verifyCommands(consumer, binDir, shim, env);
   if (name === old.npmPackage) {
-    const frozen = stripTypeScriptTypes(readFileSync(new URL('../fixtures/v0.17.0-package-validator.ts.txt', import.meta.url), 'utf8'));
+    // An old global install promoted in place: the shipped updater's promotion check passes.
+    const launchEntry = join(binDir, 'cezarion' + (windows ? '.cmd' : ''));
+    const plan = { installation: { kind, outerPackage: name, packageRoot: shim, outerRoot: shim, installRoot: consumer, launchEntry, request: name } };
+    await execFile(process.execPath, ['--input-type=module', '-e', `${frozenValidator('v0.17.0-promotion-validator.ts.txt')}\nvalidateOriginal(JSON.parse(process.argv[1]), process.argv[2]);`,
+      JSON.stringify(plan), version], { env });
+    const frozen = frozenValidator('v0.17.0-package-validator.ts.txt');
     const args = ['--input-type=module', '-e', `${frozen}\nvalidateInstalledPackage(process.argv[1], process.argv[2], process.argv[3]);`, shim, version, consumer];
     await execFile(process.execPath, args, { env });
     rmSync(join(shim, 'web/dist/assets'), { recursive: true });
@@ -182,7 +142,7 @@ async function verifyInstalled(consumer: string, kind: ConsumerKind, name: strin
 }
 
 // bound: the complete real-npm consumer file must stay within the three-minute CI allowance (D27).
-test('old forwarding tarballs and shipped installs cross the rename offline in global and npx layouts', { timeout: 180_000 }, async t => {
+test('old forwarding tarballs and shipped installs cross the rename offline in global and npx layouts', { timeout: 180_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'compatibility-packages-'));
   const token = 'p'.repeat(43);
   let registryCalls = 0;
@@ -200,7 +160,6 @@ test('old forwarding tarballs and shipped installs cross the rename offline in g
     const cache = join(root, 'empty-cache');
     const registry = `http://127.0.0.1:${address.port}`;
     await cacheArchives(cache, registry, [{ file: runtime.tarball, manifest: runtime.manifest }, ...bridges]);
-    const { ApplicationUpdateService: Frozen } = await frozenUpdater(root);
     for (const [kind, name] of [['global', old.npmPackage], ['npx', old.npmAlias]] as const) {
       const id = name === old.npmPackage ? 'scoped1' : 'alias1';
       const consumer = kind === 'global' ? join(root, `global-${id}`) : join(cache, '_npx', id);
@@ -213,8 +172,6 @@ test('old forwarding tarballs and shipped installs cross the rename offline in g
       await execFile(npm, ['install', ...(kind === 'global' ? ['--global', '--prefix', consumer] : []), '--no-update-notifier', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', `${name}@${runtime.manifest.version}`],
         { cwd: consumer, env, shell: process.platform === 'win32', maxBuffer: 10 * 1024 * 1024 });
       await verifyInstalled(consumer, kind, name, runtime.manifest.version, env);
-      if (name === old.npmAlias) await t.test('one shipped v0.17.0 old alias preparation, promotion and restart', () =>
-        upgradeOldLayout(root, 'global', true, ['bin.js'], runtime.manifest.version, env, Frozen, true, false));
     }
     assert.equal(registryCalls, 0);
   } finally {

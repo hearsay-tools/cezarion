@@ -4,22 +4,20 @@
 //! (`~/.cezar/versions/current`), runs it as a sidecar through the user's login shell (so the
 //! `node`, `claude`, `gh` on their PATH are the ones cezar sees — a GUI app inherits none of
 //! that), waits for `/api/v1/health`, and points the webview at the cockpit. Everything the
-//! cockpit does — including updating cezar — happens in the sidecar: an update ends with the
-//! sidecar exiting `75` (`CEZ_SUPERVISED=1`), and the supervisor loop below relaunches it,
-//! which picks up the freshly activated version.
+//! cockpit does happens in the sidecar. A sidecar that exits `75` (`CEZ_SUPERVISED=1`) asks to be
+//! relaunched, and the supervisor loop below starts the current version again. Older cockpits
+//! still do this after their own update.
 //!
-//! The one thing the shell does on its own is the SUPERVISOR's job: put a cezar in place when
-//! there is none (first launch) and put the newest one in place on request (the app menu's
-//! "Update local Cezarion…"), so a downgrade into a version that predates the cockpit's own
-//! updater is never a dead end. That is `npm install --prefix` into the same layout the
-//! cockpit's updater uses — no cezar code needed, any version recoverable.
+//! The shell installs a cezar only when there is none (first launch): `npm install --prefix`
+//! of the newest release into the managed `versions/` layout, then `current` points at it. The
+//! shell never updates or switches an installed cockpit.
 //!
-//! Three commands are exposed over Tauri IPC — `update_cezar_command`, `retry_start` and
-//! `show_versions_menu` — beside window dragging. The capability has to name loopback with a
-//! port wildcard (the cockpit's port is picked at launch), so the narrowing happens HERE: every
-//! command refuses a caller that is not the splash or the cockpit on the port this shell
-//! spawned (`caller_is_trusted`), and the window itself never navigates to another local server
-//! (`is_own_origin`). A dev server on `localhost:3000` is somebody else's page.
+//! One command is exposed to the cockpit's origin over Tauri IPC, `retry_start`, beside window
+//! dragging. The capability has to name loopback with a port wildcard (the cockpit's port is
+//! picked at launch), so the narrowing happens HERE: the command refuses a caller that is not
+//! the splash or the cockpit on the port this shell spawned (`caller_is_trusted`), and the window
+//! itself never navigates to another local server (`is_own_origin`). A dev server on
+//! `localhost:3000` is somebody else's page.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -42,10 +40,11 @@ mod identity { include!(concat!(env!("OUT_DIR"), "/product_identity.rs")); }
 use identity::PACKAGE;
 pub use disclaim::disclaim_exec_if_asked;
 
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
-/// Exit status the sidecar uses to say "relaunch me" after a self-update (EX_TEMPFAIL).
+/// Exit status the sidecar uses to say "relaunch me" (EX_TEMPFAIL); older cockpits exit with it
+/// after their own update.
 const RESTART_EXIT_CODE: i32 = 75;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 const LOG_TAIL: usize = 60;
@@ -58,20 +57,9 @@ const PREFERRED_PORTS: std::ops::Range<u16> = 4321..4331;
 struct Shell {
     child: Mutex<Option<Child>>,
     port: AtomicU16,
-    /// Set by the menu's update flow before it kills the sidecar: the supervisor loop treats the
-    /// resulting exit as "relaunch" instead of "crashed".
-    restart_requested: AtomicBool,
-    updating: AtomicBool,
     open_item: Mutex<Option<MenuItem<tauri::Wry>>>,
-    /// "Versions" submenu — one check item per managed install, rebuilt whenever the set or the
-    /// active one changes. Switching is the recovery path from ANY version, however old.
-    versions_menu: Mutex<Option<Submenu<tauri::Wry>>>,
     /// Set on every move/resize; a background writer persists the geometry shortly after.
     geometry_dirty: AtomicBool,
-    /// The running sidecar's version (from health) and the channel's newest when it is newer —
-    /// what the title strip's "Update cezar" button (legacy cockpits) is driven by.
-    running_version: Mutex<Option<String>>,
-    update_available: Mutex<Option<String>>,
     /// True while a supervisor thread is alive; the splash's "Try again" starts one when none is.
     supervising: AtomicBool,
     /// Set under the child lock when the app quits: no supervisor starts a cockpit after it.
@@ -92,80 +80,6 @@ const INIT_SCRIPT: &str = r#"
     // rest of this script is not.
     if (document.documentElement) document.documentElement.dataset.cezDesktop = platform;
     if (platform !== "macos" || location.protocol !== "http:") return;
-
-    // What the shell adds to the title strip of a cockpit that predates the desktop-aware build
-    // (a desktop-aware one paints its own from health): a VERSION chip that opens the list of
-    // installed versions — always there, so no version is ever a dead end — and, when the channel
-    // has something newer, the "Update cezar" pill. Both live in one row after the traffic lights.
-    var pendingVersion = null, pendingUpdate = null;
-    function items() {
-      var strip = document.querySelector('[data-cez-legacy-titlebar]');
-      if (!strip) return null;
-      var row = document.querySelector('[data-cez-titlebar-items]');
-      if (row) return row;
-      row = document.createElement('div');
-      row.setAttribute('data-cez-titlebar-items', '');
-      row.style.cssText = 'position:fixed;top:5px;left:80px;height:18px;z-index:2147483001;display:flex;' +
-        'align-items:center;gap:6px;color:inherit;' +
-        'font:600 11px/1 -apple-system,BlinkMacSystemFont,Inter,system-ui,sans-serif;';
-      var style = document.createElement('style');
-      style.textContent = '@keyframes cezPulse{0%,100%{opacity:1}50%{opacity:.35}}' +
-        '[data-cez-titlebar-items] button{appearance:none;height:18px;display:inline-flex;align-items:center;' +
-        'gap:6px;padding:0 8px;border-radius:999px;color:inherit;font:inherit;cursor:pointer;-webkit-app-region:no-drag}' +
-        '[data-cez-version-chip]{border:1px solid color-mix(in srgb,currentColor 22%,transparent);background:transparent;opacity:.75}' +
-        '[data-cez-version-chip]:hover{opacity:1;background:color-mix(in srgb,currentColor 10%,transparent)}' +
-        '[data-cez-update-pill]{border:1px solid rgba(168,243,114,.45);background:rgba(168,243,114,.16)}' +
-        '[data-cez-update-pill]:hover{background:rgba(168,243,114,.3)}';
-      document.head.appendChild(style);
-      (document.querySelector('[data-slot="app-shell"]') || document.body).appendChild(row);
-      return row;
-    }
-    function invoke(command) {
-      if (window.__TAURI_INTERNALS__) window.__TAURI_INTERNALS__.invoke(command);
-    }
-    function renderVersion(version) {
-      var row = items();
-      if (!row) { pendingVersion = version; return; }
-      var chip = row.querySelector('[data-cez-version-chip]');
-      if (!chip) {
-        chip = document.createElement('button');
-        chip.type = 'button';
-        chip.setAttribute('data-cez-version-chip', '');
-        chip.title = 'Switch cezar version';
-        chip.onclick = function () { invoke('show_versions_menu'); };
-        row.insertBefore(chip, row.firstChild);
-      }
-      chip.innerHTML = '<span style="font-family:ui-monospace,Menlo,monospace;font-weight:500">v' + version +
-        '</span><span style="font-size:8px;opacity:.7">▼</span>';
-    }
-    function renderPill(version) {
-      var row = items();
-      if (!row) { pendingUpdate = version; return; }
-      if (row.querySelector('[data-cez-update-pill]')) return;
-      var pill = document.createElement('button');
-      pill.type = 'button';
-      pill.setAttribute('data-cez-update-pill', '');
-      pill.title = 'Update cezar to v' + version + ' and restart';
-      pill.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:#fbbf24;animation:cezPulse 1.6s ease-in-out infinite"></span>' +
-        'Update cezar <span style="font-family:ui-monospace,Menlo,monospace;font-weight:500;opacity:.7">v' + version + '</span>';
-      pill.onclick = function () {
-        pill.disabled = true;
-        pill.style.opacity = '.6';
-        invoke('update_cezar_command');
-      };
-      row.appendChild(pill);
-    }
-    function legacy() {
-      // A desktop-aware cockpit shows its own controls — never two sets.
-      return !document.querySelector('[data-slot="desktop-titlebar"]');
-    }
-    // `offer_update` / `offer_version` (Rust) call these once the shell knows.
-    window.__CEZ_DESKTOP__.showUpdate = function (version) {
-      if (version && legacy()) renderPill(version);
-    };
-    window.__CEZ_DESKTOP__.showVersion = function (version) {
-      if (version && legacy()) renderVersion(version);
-    };
 
     // A cockpit that knows about the shell paints its own transparent title strip
     // (`data-slot="desktop-titlebar"`). One that predates it does not, and the traffic lights
@@ -189,15 +103,11 @@ const INIT_SCRIPT: &str = r#"
       shell.appendChild(strip);
       var style = document.createElement('style');
       style.textContent =
-        // The cockpit's columns — never the strip and the row this script adds beside them,
-        // which are `div`s under the same parent: inset too, the row grew to 28px and pushed
-        // the version chip out of the band, onto the brand row.
+        // The cockpit's columns, never the strip this script adds (a `div` under the same parent).
         '[data-slot="app-shell"]>aside[data-slot="sidebar"],' +
-        '[data-slot="app-shell"]>div:not([data-cez-legacy-titlebar]):not([data-cez-titlebar-items]){padding-top:28px!important}' +
+        '[data-slot="app-shell"]>div:not([data-cez-legacy-titlebar]){padding-top:28px!important}' +
         '[data-slot="sidebar-content"]>div:first-child{padding-top:6px!important}';
       document.head.appendChild(style);
-      if (pendingVersion) { var v = pendingVersion; pendingVersion = null; renderVersion(v); }
-      if (pendingUpdate) { var u = pendingUpdate; pendingUpdate = null; renderPill(u); }
     }, 100);
   })();
 "#;
@@ -274,12 +184,8 @@ fn build_main_window(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<Webvi
 
 fn build_menu(app: &AppHandle, shell: &Shell) -> tauri::Result<()> {
     let connections_item = MenuItem::with_id(app, "connections", "Connect to a server…", true, Some("CmdOrCtrl+Shift+K"))?;
-    let update_item = MenuItem::with_id(app, "update-cezar", "Update cezar to latest…", true, None::<&str>)?;
     let open_item = MenuItem::with_id(app, "open-browser", "Open view in browser", true, Some("CmdOrCtrl+Shift+O"))?;
     *shell.open_item.lock().unwrap() = Some(open_item.clone());
-    let versions_menu = Submenu::with_id(app, "versions", "Local versions", true)?;
-    *shell.versions_menu.lock().unwrap() = Some(versions_menu.clone());
-    refresh_versions_menu(app, shell);
     let app_menu = Submenu::with_items(
         app,
         identity::DISPLAY_NAME,
@@ -288,8 +194,6 @@ fn build_menu(app: &AppHandle, shell: &Shell) -> tauri::Result<()> {
             &PredefinedMenuItem::about(app, None, None)?,
             &PredefinedMenuItem::separator(app)?,
             &connections_item,
-            &update_item,
-            &versions_menu,
             &open_item,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, None)?,
@@ -328,258 +232,12 @@ fn build_menu(app: &AppHandle, shell: &Shell) -> tauri::Result<()> {
     Ok(())
 }
 
-/// One installed managed version, as the Versions submenu lists it.
-struct InstalledVersion {
-    id: String,
-    label: String,
-    active: bool,
-}
-
-/// Every complete install under `~/.cezar/versions` (a manifest AND an entry file), newest
-/// install first — the same rule as cezar's own `listInstalled`.
-fn installed_versions() -> Vec<InstalledVersion> {
-    let Ok(dir) = selected_versions_root() else { return Vec::new(); };
-    let active = active_id(&dir);
-    let mut rows: Vec<(String, InstalledVersion)> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let id = entry.file_name().to_string_lossy().into_owned();
-            if id == "current" || id.starts_with('.') {
-                continue;
-            }
-            let manifest = std::fs::read_to_string(entry.path().join(".cezar-install.json"))
-                .ok()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
-            let Some(manifest) = manifest else { continue };
-            if !entry_under(&entry.path()).is_file() {
-                continue;
-            }
-            let version = manifest.get("version").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
-            let source = manifest.get("source").and_then(|v| v.as_str()).unwrap_or("registry");
-            let installed_at = manifest.get("installedAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let label = version_label(&version, source, manifest.get("branch").and_then(|v| v.as_str()));
-            rows.push((installed_at, InstalledVersion { active: active.as_deref() == Some(id.as_str()), id, label }));
-        }
-    }
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
-    rows.into_iter().map(|(_, row)| row).collect()
-}
-
-/// How the Versions submenu names an install: a local build says so, and a linked checkout
-/// (`cezar link`, a worktree run in place) reads as its branch — that is what a developer
-/// switching between task worktrees is looking for.
-fn version_label(version: &str, source: &str, branch: Option<&str>) -> String {
-    match (source, branch) {
-        ("local", _) => format!("{version} (local build)"),
-        ("link", Some(branch)) => format!("{branch} — {version} (worktree)"),
-        ("link", None) => format!("{version} (worktree)"),
-        _ => version.to_string(),
-    }
-}
-
-/// Rebuild the Versions submenu from disk: a check item per install, the active one checked.
-fn refresh_versions_menu(app: &AppHandle, shell: &Shell) {
-    let guard = shell.versions_menu.lock().unwrap();
-    let Some(menu) = guard.as_ref() else { return };
-    if let Ok(items) = menu.items() {
-        for item in items {
-            let _ = menu.remove(&item);
-        }
-    }
-    let versions = installed_versions();
-    if versions.is_empty() {
-        if let Ok(item) = MenuItem::with_id(app, "versions-none", "No versions installed", false, None::<&str>) {
-            let _ = menu.append(&item);
-        }
-        return;
-    }
-    for version in versions {
-        if let Ok(item) = CheckMenuItem::with_id(app, format!("use-version:{}", version.id), &version.label, !version.active, version.active, None::<&str>) {
-            let _ = menu.append(&item);
-        }
-    }
-}
-
-/// Point `current` at an installed id (atomic rename over the old link) and relaunch.
-fn switch_version(app: &AppHandle, shell: &Arc<Shell>, id: &str) -> bool {
-    let Ok(dir) = selected_versions_root() else { return false; };
-    if !entry_under(&dir.join(id)).is_file() {
-        return false;
-    }
-    if activate(&dir, id).is_err() {
-        return false;
-    }
-    after_new_version(app, shell);
-    true
-}
-
-/// A new version is current: restart the running (or starting) cockpit on it, ask a supervisor
-/// without one to go round again, or start a supervisor when none is alive (the launcher, or
-/// after a failed start), so the splash never waits forever. Decided under the child lock, where
-/// `supervise` publishes a cockpit and decides whether to stop.
-fn after_new_version(app: &AppHandle, shell: &Arc<Shell>) {
-    let stopping = {
-        let mut guard = shell.child.lock().unwrap();
-        match sidecar::after_new_version(guard.is_some(), shell.supervising.load(Ordering::SeqCst)) {
-            sidecar::AfterNewVersion::RestartRunning => {
-                shell.restart_requested.store(true, Ordering::SeqCst);
-                guard.as_mut().map(|child| {
-                    sidecar::request_stop(child);
-                    child.id()
-                })
-            }
-            sidecar::AfterNewVersion::AskSupervisor => {
-                shell.restart_requested.store(true, Ordering::SeqCst);
-                None
-            }
-            sidecar::AfterNewVersion::StartSupervisor => {
-                let app = app.clone();
-                let shell = shell.clone();
-                std::thread::spawn(move || supervise(app, shell));
-                None
-            }
-        }
-    };
-    if let Some(pid) = stopping {
-        kill_after_grace(shell, pid);
-    }
-}
-
-/// A cockpit asked to stop that is still running after `STOP_GRACE` (an older cezar ignores the
-/// request) is force-killed, if it is still the one the shell owns.
-fn kill_after_grace(shell: &Arc<Shell>, pid: u32) {
-    let shell = shell.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(sidecar::STOP_GRACE);
-        let mut guard = shell.child.lock().unwrap();
-        if let Some(child) = guard.as_mut().filter(|child| child.id() == pid) {
-            if matches!(child.try_wait(), Ok(None)) {
-                let _ = child.kill();
-            }
-        }
-    });
-}
-
 /// Quit (or a signal): no supervisor starts a cockpit after this, and the one it owns, starting
 /// or running, is handed over to be stopped.
 fn take_for_quit(shell: &Shell) -> Option<Child> {
     let mut guard = shell.child.lock().unwrap();
     shell.quitting.store(true, Ordering::SeqCst);
     guard.take()
-}
-
-/// The legacy strip's "Update cezar" button lands here (capability: `allow-update-cezar` for
-/// the cockpit's origin). Same flow as the menu item.
-#[tauri::command]
-fn update_cezar_command(app: AppHandle, window: WebviewWindow, shell: tauri::State<'_, Arc<Shell>>) {
-    if !caller_is_trusted(&window, &shell) {
-        return;
-    }
-    let app = app.clone();
-    let shell = shell.inner().clone();
-    std::thread::spawn(move || update_cezar(&app, &shell, "Updating cezar…"));
-}
-
-/// semver-ish ordering for what cezar publishes (`0.11.1`, `0.11.1-nightly.20260924.49`):
-/// numeric core, a release above any prerelease of the same core, then identifiers.
-fn version_newer(candidate: &str, current: &str) -> bool {
-    fn parse(raw: &str) -> Option<([u64; 3], Vec<String>)> {
-        let raw = raw.trim().trim_start_matches('v').split('+').next()?;
-        let (core, pre) = match raw.split_once('-') {
-            Some((core, pre)) => (core, pre.split('.').map(str::to_owned).collect::<Vec<_>>()),
-            None => (raw, Vec::new()),
-        };
-        let mut parts = core.split('.').map(|part| part.parse::<u64>().ok());
-        Some(([parts.next()??, parts.next()??, parts.next()??], pre))
-    }
-    let (Some((a, pa)), Some((b, pb))) = (parse(candidate), parse(current)) else { return false };
-    if a != b {
-        return a > b;
-    }
-    match (pa.is_empty(), pb.is_empty()) {
-        (true, true) => false,
-        (true, false) => true,
-        (false, true) => false,
-        (false, false) => {
-            for (x, y) in pa.iter().zip(pb.iter()) {
-                let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
-                    (Ok(nx), Ok(ny)) => nx.cmp(&ny),
-                    (Ok(_), Err(_)) => std::cmp::Ordering::Less,
-                    (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
-                    _ => x.cmp(y),
-                };
-                if ord != std::cmp::Ordering::Equal {
-                    return ord == std::cmp::Ordering::Greater;
-                }
-            }
-            pa.len() > pb.len()
-        }
-    }
-}
-
-/// Ask npm (through the login shell, so registry config and auth apply) what the channel's
-/// dist-tag points at, and remember it when it is newer than the running sidecar. Silent on
-/// any failure — offline is "nothing to offer".
-fn check_cezar_update(app: &AppHandle, shell: &Shell) {
-    let running = shell.running_version.lock().unwrap().clone();
-    let Some(running) = running else { return };
-    let Some(tag) = release_tag() else { return };
-    let mut command = tool_command(npm_program(), &["view", &format!("{PACKAGE}@{tag}"), "version", "--json"]);
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let Ok(output) = command.output() else { return };
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let latest = serde_json::from_str::<serde_json::Value>(raw.trim())
-        .ok()
-        .and_then(|value| match value {
-            serde_json::Value::String(v) => Some(v),
-            serde_json::Value::Array(items) => items.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).last(),
-            _ => None,
-        });
-    let Some(latest) = latest else { return };
-    let newer = version_newer(&latest, &running).then_some(latest);
-    *shell.update_available.lock().unwrap() = newer.clone();
-    if let (Some(version), Some(window)) = (newer, app.get_webview_window("main")) {
-        offer_update(&window, &version);
-    }
-}
-
-/// Whether the legacy strip's version chip has anything to offer.
-fn switcher_has_choices(installed: usize) -> bool {
-    installed > 1
-}
-
-/// Tell the page which version runs. The desktop-aware cockpit ignores this (it paints its own
-/// chip); a legacy one grows the switcher in its strip.
-fn offer_version(window: &WebviewWindow, version: &str) {
-    let _ = window.eval(&format!(
-        "window.__CEZ_DESKTOP__ && window.__CEZ_DESKTOP__.showVersion && window.__CEZ_DESKTOP__.showVersion({})",
-        js_string(version)
-    ));
-}
-
-/// The title strip's version chip (legacy cockpits) lands here: pop the Versions list up as a
-/// native menu at the pointer. Menus are main-thread objects, commands are not.
-#[tauri::command]
-fn show_versions_menu(app: AppHandle, window: WebviewWindow, shell: tauri::State<'_, Arc<Shell>>) {
-    if !caller_is_trusted(&window, &shell) {
-        return;
-    }
-    use tauri::menu::ContextMenu;
-    let shell = shell.inner().clone();
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        refresh_versions_menu(&handle, &shell);
-        if let Some(menu) = shell.versions_menu.lock().unwrap().as_ref() {
-            let _ = menu.popup(window.as_ref().window().clone());
-        }
-    });
-}
-
-fn offer_update(window: &WebviewWindow, version: &str) {
-    let _ = window.eval(&format!(
-        "window.__CEZ_DESKTOP__ && window.__CEZ_DESKTOP__.showUpdate && window.__CEZ_DESKTOP__.showUpdate({})",
-        js_string(version)
-    ));
 }
 
 pub fn run() {
@@ -594,13 +252,8 @@ pub fn run() {
     let shell = Arc::new(Shell {
         child: Mutex::new(None),
         port: AtomicU16::new(0),
-        restart_requested: AtomicBool::new(false),
-        updating: AtomicBool::new(false),
         open_item: Mutex::new(None),
-        versions_menu: Mutex::new(None),
         geometry_dirty: AtomicBool::new(false),
-        running_version: Mutex::new(None),
-        update_available: Mutex::new(None),
         supervising: AtomicBool::new(false),
         quitting: AtomicBool::new(false),
         shell_update: Mutex::new(None),
@@ -623,7 +276,7 @@ pub fn run() {
     let shell_for_state = shell.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![update_cezar_command, retry_start, show_versions_menu, remote::connect_remote, remote::list_connections, remote::forget_connection])
+        .invoke_handler(tauri::generate_handler![retry_start, remote::connect_remote, remote::list_connections, remote::forget_connection])
         .setup(move |app| {
             app.manage(shell_for_state.clone());
             let handle = app.handle().clone();
@@ -656,25 +309,7 @@ pub fn run() {
             Ok(())
         })
         .on_menu_event(move |app, event| match event.id().as_ref() {
-            id if id.starts_with("use-version:") => {
-                let target = id["use-version:".len()..].to_string();
-                let app = app.clone();
-                let shell = shell_for_menu.clone();
-                std::thread::spawn(move || {
-                    if let Some(window) = app.get_webview_window("main") {
-                        splash_reset(&window, "Switching cezar…", &format!("Activating {target}."));
-                    }
-                    if !switch_version(&app, &shell, &target) {
-                        refresh_versions_menu(&app, &shell);
-                    }
-                });
-            }
             "connections" => { let _ = remote::show_connections(app); }
-            "update-cezar" => {
-                let app = app.clone();
-                let shell = shell_for_menu.clone();
-                std::thread::spawn(move || update_cezar(&app, &shell, "Updating cezar…"));
-            }
             "open-browser" => {
                 // The page the window is showing right now — route and all — so the browser tab
                 // lands on the same task, not the cockpit's front door. The splash (a
@@ -708,13 +343,6 @@ pub fn run() {
                         eprintln!("[geometry] resized to physical {}x{}", size.width, size.height);
                     }
                     shell_for_events.geometry_dirty.store(true, Ordering::SeqCst);
-                }
-                // `cezar link` / `cezar use` in a terminal change what is installed behind the
-                // app's back; coming back to the window is the moment the list must be true.
-                WindowEvent::Focused(true) => {
-                    let app = window.app_handle().clone();
-                    let shell = shell_for_events.clone();
-                    let _ = window.app_handle().run_on_main_thread(move || refresh_versions_menu(&app, &shell));
                 }
                 WindowEvent::CloseRequested { .. } => {
                     if let Some(webview) = window.get_webview_window("main") {
@@ -787,8 +415,8 @@ fn install_shell_update(shell: &Shell) {
 }
 
 /// Run cockpits until nothing asks for another: each one is spawned, published, health-checked,
-/// shown and watched (`run_cockpit`); a restart request or exit 75 starts the current version
-/// again, a failure is reported, and quit ends it. A missing install is installed first.
+/// shown and watched (`run_cockpit`); exit 75 starts the current version again, a failure is
+/// reported, and quit ends it. A missing install is installed first.
 fn supervise(app: AppHandle, shell: Arc<Shell>) {
     if shell.supervising.swap(true, Ordering::SeqCst) {
         return;
@@ -800,23 +428,21 @@ fn supervise(app: AppHandle, shell: Arc<Shell>) {
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    // Everything below needs the Node floor: the install, the sidecar, the update check. Without it
+    // Everything below needs the Node floor: the install and the sidecar. Without it
     // the honest answer is a page that says so, with the download link and a retry — not npm's
     // "command not found" three layers down.
-    let mut relaunch = require_node(&window) && run_cockpit(&app, &shell, &window);
+    let mut relaunch = require_node(&window) && run_cockpit(&shell, &window);
     while supervisor_continues(&shell, relaunch) {
-        relaunch = run_cockpit(&app, &shell, &window);
+        relaunch = run_cockpit(&shell, &window);
     }
 }
 
-/// Whether a supervisor whose cockpit is gone, or never came up, goes round again: a restart
-/// asked for meanwhile, or an exit 75 (`relaunch`), does; quitting never. Decided under the child
-/// lock, where `after_new_version` asks; a supervisor that stops is marked so there, and a later
-/// new version starts a fresh one.
+/// Whether a supervisor whose cockpit is gone, or never came up, goes round again: an exit 75
+/// (`relaunch`) does; quitting never. Decided under the child lock, where quit takes the cockpit;
+/// a supervisor that stops is marked so there, and the splash's "Try again" starts a fresh one.
 fn supervisor_continues(shell: &Shell, relaunch: bool) -> bool {
     let _guard = shell.child.lock().unwrap();
-    let requested = shell.restart_requested.swap(false, Ordering::SeqCst);
-    match sidecar::supervisor_next(shell.quitting.load(Ordering::SeqCst), requested || relaunch) {
+    match sidecar::supervisor_next(shell.quitting.load(Ordering::SeqCst), relaunch) {
         sidecar::Next::Relaunch => true,
         sidecar::Next::Quit | sidecar::Next::Stop => {
             shell.supervising.store(false, Ordering::SeqCst);
@@ -826,16 +452,19 @@ fn supervisor_continues(shell: &Shell, relaunch: bool) -> bool {
 }
 
 /// The entry to run, installing cezar first on a machine that has none.
-fn entry_or_install(app: &AppHandle, shell: &Arc<Shell>) -> Option<PathBuf> {
-    if let Err(reason) = selected_versions_root() {
-        if let Some(window) = app.get_webview_window("main") { fail(&window, "Home migration is in progress", reason, ""); }
-        return None;
-    }
+fn entry_or_install(window: &WebviewWindow) -> Option<PathBuf> {
+    let versions = match selected_versions_root() {
+        Ok(versions) => versions,
+        Err(reason) => {
+            fail(window, "Home migration is in progress", reason, "");
+            return None;
+        }
+    };
     if let Some(entry) = resolve_entry() {
         return Some(entry);
     }
     // First launch on this machine: the supervisor puts a cezar in place itself.
-    if !update_cezar(app, shell, "Installing cezar…") {
+    if !install_cezar(window, &versions) {
         return None;
     }
     resolve_entry()
@@ -851,28 +480,25 @@ fn owned_cockpit_gone(shell: &Shell, pid: u32) -> bool {
 }
 
 /// One cockpit's life. Returns true when it asked to be relaunched (exit 75); every other end
-/// returns false, and `supervisor_continues` decides from the flags what comes next.
-fn run_cockpit(app: &AppHandle, shell: &Arc<Shell>, window: &WebviewWindow) -> bool {
-    let Some(entry) = entry_or_install(app, shell) else { return false };
+/// returns false, and `supervisor_continues` decides from the quit flag what comes next.
+fn run_cockpit(shell: &Shell, window: &WebviewWindow) -> bool {
+    let Some(entry) = entry_or_install(window) else { return false };
     let port = pick_port();
     shell.port.store(port, Ordering::SeqCst);
     if let Some(item) = shell.open_item.lock().unwrap().as_ref() {
         let _ = item.set_enabled(true);
     }
     let cwd = pick_cwd();
-    refresh_versions_menu(app, shell);
     splash_reset(window, "Starting cezar…", &entry.to_string_lossy());
 
     let log: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
     // Spawn and publish under the child lock, after checking quit there: quit either finds this
-    // cockpit to stop, or this supervisor sees the quit and starts nothing. A pending restart is
-    // answered by this very start, which runs whatever is current now.
+    // cockpit to stop, or this supervisor sees the quit and starts nothing.
     let pid = {
         let mut guard = shell.child.lock().unwrap();
         if shell.quitting.load(Ordering::SeqCst) {
             return false;
         }
-        shell.restart_requested.store(false, Ordering::SeqCst);
         match spawn_sidecar(&entry, port, &cwd, log.clone()) {
             Ok(child) => {
                 let pid = child.id();
@@ -888,28 +514,21 @@ fn run_cockpit(app: &AppHandle, shell: &Arc<Shell>, window: &WebviewWindow) -> b
     };
 
     let url = format!("http://127.0.0.1:{port}");
-    let Some(version) = wait_for_health(port, || owned_cockpit_gone(shell, pid), HEALTH_TIMEOUT) else {
+    if wait_for_health(port, || owned_cockpit_gone(shell, pid), HEALTH_TIMEOUT).is_none() {
         return failed_start(shell, window, pid, &url, &log);
-    };
-    *shell.running_version.lock().unwrap() = Some(version);
-    *shell.update_available.lock().unwrap() = None;
+    }
     if let Ok(parsed) = url::Url::parse(&url) {
         let _ = window.navigate(parsed);
     }
     probe_ipc(window);
-    start_update_checks(app, shell, pid);
     watch_cockpit(shell, window, pid, &log)
 }
 
 /// A cockpit that never answered health: stop it if the shell still owns it, and say why unless a
-/// quit or a restart request made it go away.
+/// quit made it go away.
 fn failed_start(shell: &Shell, window: &WebviewWindow, pid: u32, url: &str, log: &Mutex<VecDeque<String>>) -> bool {
     stop_published(shell, pid);
     if shell.quitting.load(Ordering::SeqCst) {
-        return false;
-    }
-    if shell.restart_requested.load(Ordering::SeqCst) {
-        splash_reset(window, "Restarting cezar…", "Switching to the newly installed version.");
         return false;
     }
     let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
@@ -949,30 +568,6 @@ fn stop_published(shell: &Shell, pid: u32) {
     }
 }
 
-/// Registry check for the legacy strip's button: now, then every half hour, while the cockpit
-/// with `pid` is the one running.
-fn start_update_checks(app: &AppHandle, shell: &Arc<Shell>, pid: u32) {
-    let app = app.clone();
-    let shell = shell.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(4));
-        // The chip is a SWITCHER: with one version installed it would open a list of
-        // one. The version itself is already in the cockpit's sidebar and in the menu.
-        if switcher_has_choices(installed_versions().len()) {
-            if let (Some(version), Some(window)) = (shell.running_version.lock().unwrap().clone(), app.get_webview_window("main")) {
-                offer_version(&window, &version);
-            }
-        }
-        check_cezar_update(&app, &shell);
-        std::thread::sleep(Duration::from_secs(30 * 60));
-        // A new sidecar starts its own checker; this one retires.
-        let current = shell.child.lock().unwrap().as_ref().map(|child| child.id());
-        if current != Some(pid) {
-            return;
-        }
-    });
-}
-
 /// Wait for the running cockpit to exit. True when it asked to be relaunched (exit 75).
 fn watch_cockpit(shell: &Shell, window: &WebviewWindow, pid: u32, log: &Mutex<VecDeque<String>>) -> bool {
     let status = loop {
@@ -998,10 +593,6 @@ fn watch_cockpit(shell: &Shell, window: &WebviewWindow, pid: u32, log: &Mutex<Ve
         Some(RESTART_EXIT_CODE) => {
             splash_reset(window, "Restarting cezar…", "Switching to the newly activated version.");
             true
-        }
-        _ if shell.restart_requested.load(Ordering::SeqCst) => {
-            splash_reset(window, "Restarting cezar…", "Switching to the newly installed version.");
-            false
         }
         Some(code) if !shell.quitting.load(Ordering::SeqCst) => {
             let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
@@ -1083,36 +674,20 @@ fn require_node(window: &WebviewWindow) -> bool {
     }
 }
 
-// ---- installing / updating cezar from the shell ------------------------------------------
+// ---- installing cezar from the shell (first launch only) -----------------------------------
 
-/// Install the channel's newest cezar into the managed layout and make it current — the same
-/// layout and manifest the cockpit's own updater writes, so the two never disagree. Streams
-/// npm's output to the splash. On success, restarts a running sidecar or starts a supervisor
-/// when none is alive (`after_new_version`). Returns whether the install succeeded.
-fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
-    // The development channel never replaces the build picked by hand; only a machine with no
-    // cezar at all gets the newest release, so the app can start.
-    let tag = match release_tag() {
-        Some(tag) => tag,
-        None if resolve_entry().is_none() => "latest",
-        None => return false,
-    };
-    if shell.updating.swap(true, Ordering::SeqCst) {
-        return false;
-    }
-    let Some(window) = app.get_webview_window("main") else {
-        shell.updating.store(false, Ordering::SeqCst);
-        return false;
-    };
-    let versions = match selected_versions_root() {
-        Ok(versions) => versions,
-        Err(reason) => { fail(&window, "Home migration is in progress", reason, ""); shell.updating.store(false, Ordering::SeqCst); return false; }
-    };
-    splash_reset(&window, title, &format!("{PACKAGE}@{tag} → {}", versions.display()));
+/// The npm dist-tag the first install takes: the newest stable release.
+const INSTALL_TAG: &str = "latest";
+
+/// Install the newest cezar into the managed layout and make it current. Runs only when nothing
+/// is installed (`entry_or_install`); the shell never replaces an installed cockpit. Streams
+/// npm's output to the splash. Returns whether the install succeeded.
+fn install_cezar(window: &WebviewWindow, versions: &Path) -> bool {
+    splash_reset(window, "Installing cezar…", &format!("{PACKAGE}@{INSTALL_TAG} → {}", versions.display()));
 
     let mut lines: Vec<String> = Vec::new();
-    let installed = install_into(&versions, |staging| {
-        let spec = format!("{PACKAGE}@{tag}");
+    let installed = install_into(versions, |staging| {
+        let spec = format!("{PACKAGE}@{INSTALL_TAG}");
         let prefix = staging.to_string_lossy();
         let mut command = tool_command(
             npm_program(),
@@ -1129,7 +704,7 @@ fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
         {
             // Sequential drain is fine: npm's chatter is small and stdout closes at the end.
             for line in BufReader::new(reader).lines().map_while(Result::ok) {
-                splash_log(&window, &line);
+                splash_log(window, &line);
                 lines.push(line);
             }
         }
@@ -1139,40 +714,15 @@ fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
             Err(error) => Err(error.to_string()),
         }
     });
-    let ok = match installed {
+    match installed {
         Ok(version) => {
-            splash_log(&window, &format!("installed {version}"));
+            splash_log(window, &format!("installed {version}"));
             true
         }
         Err(reason) => {
-            fail(&window, "cezar could not be installed", &reason, &lines.join("\n"));
+            fail(window, "cezar could not be installed", &reason, &lines.join("\n"));
             false
         }
-    };
-    shell.updating.store(false, Ordering::SeqCst);
-    if ok {
-        after_new_version(app, shell);
-    }
-    ok
-}
-
-/// `updateChannel` from `~/.cezar/config.json` → the npm dist-tag; `latest` when unset. `None`
-/// for `development`: a worktree or PR build picked by hand follows no tag, so nothing is ever
-/// offered or installed over it.
-fn release_tag() -> Option<&'static str> {
-    let config = desktop_config_path();
-    let channel = std::fs::read_to_string(config)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|json| json.get("updateChannel").and_then(|value| value.as_str()).map(str::to_owned));
-    channel_tag(channel.as_deref())
-}
-
-fn channel_tag(channel: Option<&str>) -> Option<&'static str> {
-    match channel {
-        Some("nightly") => Some("nightly"),
-        Some("development") => None,
-        _ => Some("latest"),
     }
 }
 
@@ -1266,16 +816,16 @@ fn shell_quote(value: &str) -> String {
 
 // ---- the managed layout --------------------------------------------------------------------
 //
-// The same layout, manifest and rules as packages/cezar/src/self-update/{layout,installer}.ts.
-// Written against the filesystem rather than as a shell script, so one implementation — and one
-// set of tests — serves macOS, Linux and Windows.
+// `versions/<id>` directories, each with a `.cezar-install.json` manifest, and `current` pointing
+// at the active one: the layout every cezar install has used. Written against the filesystem
+// rather than as a shell script, so one implementation — and one set of tests — serves macOS,
+// Linux and Windows.
 
 fn entry_under(root: &Path) -> PathBuf {
     product::package_entry(root, PACKAGE, identity::LEGACY_PACKAGE, identity::NEXT_PACKAGE)
 }
 
 /// A version id becomes a directory name under `versions/`: a plain version and nothing else.
-/// The rule of `assertSafeId` in layout.ts.
 fn valid_version_id(id: &str) -> bool {
     id.chars().next().is_some_and(|first| first.is_ascii_alphanumeric())
         && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
@@ -1673,12 +1223,7 @@ fn probe_ipc(window: &WebviewWindow) {
         std::thread::sleep(Duration::from_millis(1500));
         let own_strip = own_strip_probe.is_ok() && window.is_maximized().unwrap_or(false);
         let _ = window.unmaximize();
-        std::thread::sleep(Duration::from_secs(6));
-        let _ = window.eval("document.querySelector('[data-cez-update-pill]') && window.__TAURI_INTERNALS__.invoke('plugin:window|internal_toggle_maximize')");
-        std::thread::sleep(Duration::from_millis(1500));
-        let legacy_update = window.is_maximized().unwrap_or(false);
-        let _ = window.unmaximize();
-        eprintln!("[probe] direct invoke maximized: {direct}; drag-region double-click maximized: {via_drag_script}; legacy strip injected: {legacy_strip}; cockpit's own strip: {own_strip}; legacy update button: {legacy_update}");
+        eprintln!("[probe] direct invoke maximized: {direct}; drag-region double-click maximized: {via_drag_script}; legacy strip injected: {legacy_strip}; cockpit's own strip: {own_strip}");
     });
 }
 
@@ -1746,17 +1291,6 @@ mod tests {
         url::Url::parse(raw).unwrap()
     }
 
-    /// The legacy inset rule matches `div`s under the app shell, and the strip and the row this
-    /// script adds ARE `div`s under the app shell. Inset too, the row pushed the version chip
-    /// onto the brand row (shell 0.1.1).
-    #[test]
-    fn the_development_channel_follows_no_dist_tag() {
-        assert_eq!(channel_tag(Some("development")), None);
-        assert_eq!(channel_tag(Some("nightly")), Some("nightly"));
-        assert_eq!(channel_tag(Some("stable")), Some("latest"));
-        assert_eq!(channel_tag(None), Some("latest"));
-    }
-
     /// The managed cockpit needs `node:sqlite`; an older Node gets the download page, not a
     /// sidecar that dies on start.
     #[test]
@@ -1772,27 +1306,13 @@ mod tests {
         assert!(engines.contains(&format!("\"node\": \">={MIN_NODE_LABEL}\"")), "packages/cezar engines moved; update MIN_NODE");
     }
 
-    #[test]
-    fn a_linked_worktree_reads_as_its_branch() {
-        assert_eq!(version_label("0.13.0", "link", Some("cez/cb28888e")), "cez/cb28888e — 0.13.0 (worktree)");
-        assert_eq!(version_label("0.13.0", "link", None), "0.13.0 (worktree)");
-        assert_eq!(version_label("0.13.0", "local", None), "0.13.0 (local build)");
-        assert_eq!(version_label("0.13.0", "registry", None), "0.13.0");
-    }
-
-    #[test]
-    fn the_version_switcher_needs_something_to_switch_to() {
-        assert!(!switcher_has_choices(0));
-        assert!(!switcher_has_choices(1));
-        assert!(switcher_has_choices(2));
-    }
-
+    /// The legacy inset rule matches `div`s under the app shell, and the strip this script adds
+    /// IS a `div` under the app shell: the rule must spare it.
     #[test]
     fn the_legacy_inset_spares_what_the_shell_adds() {
         let rule = INIT_SCRIPT.split("padding-top:28px!important").next().unwrap();
         let selector = rule.rsplit("style.textContent").next().unwrap();
         assert!(selector.contains(":not([data-cez-legacy-titlebar])"), "{selector}");
-        assert!(selector.contains(":not([data-cez-titlebar-items])"), "{selector}");
     }
 
     #[test]
@@ -1905,13 +1425,13 @@ mod tests {
         assert_eq!(manifest["source"], "registry");
         assert!(leftovers(&versions).is_empty(), "staging left behind: {:?}", leftovers(&versions));
 
-        // A second version replaces `current`, and the first stays installed.
+        // A second install replaces `current`, and the first stays installed.
         assert_eq!(install_into(&versions, fake_npm("0.13.0")).unwrap(), "0.13.0");
         assert_eq!(active_id(&versions).as_deref(), Some("0.13.0"));
         assert_eq!(std::fs::read_to_string(managed_entry(&versions).unwrap()).unwrap(), "// 0.13.0\n");
         assert!(entry_under(&versions.join("0.12.0")).is_file());
 
-        // Switching back is a link flip.
+        // Activating an installed id is a link flip.
         activate(&versions, "0.12.0").unwrap();
         assert_eq!(active_id(&versions).as_deref(), Some("0.12.0"));
         assert_eq!(std::fs::read_to_string(managed_entry(&versions).unwrap()).unwrap(), "// 0.12.0\n");

@@ -8,16 +8,14 @@ import type { ReactNode } from 'react'
 import { matchPath, useLocation, useNavigationType } from 'react-router'
 
 import { openCommandPalette } from '@/components/command-palette'
-import { DrawerGlobal, DrawerIdentity, DrawerProjects, DrawerUpdate, MenuButtonPills, elsewhereSignal, menuButtonLabel, type DrawerTools, type MobileProjectNav } from '@/components/mobile-projects'
+import { DrawerGlobal, DrawerIdentity, DrawerProjects, MenuButtonPills, elsewhereSignal, menuButtonLabel, type DrawerTools, type MobileProjectNav } from '@/components/mobile-projects'
 import { projectInitials, type ProjectSignal } from '@/lib/project-signal'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
 import { Link, pathnameProjectId, stripProjectPrefix, useNavigate } from '@/lib/project-router'
 import { MobileRunBarSlotContext } from '@/components/mobile-run-bar'
 import { StatusDot } from '@/components/status-dot'
 import { SidebarViewTabs } from '@/components/sidebar-view-tabs'
-import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUpdateControlProps } from '@/components/application-update-control'
 import { API_PREFIX } from '@open-mercato/cezar-api-client/utils/project-scope'
-import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
 import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-context'
 import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 import { Button } from '@/components/ui/button'
@@ -66,12 +64,6 @@ export type AppShellProps = {
   version?: string | null
   /** The npm registry's newer version, when the server's update check found one (#368). */
   latestVersion?: string | null
-  applicationUpdate?: ApplicationUpdateState | undefined
-  onApplyUpdate?: (() => Promise<void>) | undefined
-  onRestart?: (() => Promise<void>) | undefined
-  applicationUpdateError?: string | null
-  applicationUpdateBusy?: boolean
-  applicationUpdateOffline?: boolean
   /** View-specific desktop navigation; unconverted views fall back to the task list. */
   sidebarList?: ReactNode
   /** Step 3.3's grouped task quick-list. */
@@ -157,12 +149,6 @@ export function AppShell({
   repo = null,
   version = null,
   latestVersion = null,
-  applicationUpdate,
-  onApplyUpdate,
-  onRestart,
-  applicationUpdateError,
-  applicationUpdateBusy,
-  applicationUpdateOffline,
   sidebarList,
   taskQuickList,
   sessionScope,
@@ -241,18 +227,8 @@ export function AppShell({
   }, [])
 
   const items = visibleNavItems({ forge: forgeAvailable, automations: automationsAvailable })
-  // The application update's state and actions, in the shape the footer control and the drawer
-  // row both take.
-  const update: ApplicationUpdateControlProps = {
-    version,
-    latestVersion,
-    state: applicationUpdate,
-    onApplyUpdate,
-    onRestart,
-    error: applicationUpdateError,
-    busy: applicationUpdateBusy,
-    offline: applicationUpdateOffline,
-  }
+  // The running and newest versions, as the footer chip and the drawer identity row show them.
+  const release: ReleaseInfo = { version, latestVersion }
 
   return (
     // The Sheet root renders no DOM of its own — it is the context that lets the top bar's menu
@@ -269,7 +245,7 @@ export function AppShell({
           activeTo={activeTo}
           items={items}
           repo={repo}
-          update={update}
+          release={release}
           sidebarList={sidebarList}
           taskQuickList={taskQuickList}
           sessionScope={sessionScope}
@@ -279,7 +255,7 @@ export function AppShell({
           needsYou={needsYou}
         />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
-        <MobileNavDrawer update={update} taskQuickList={taskQuickList} sidebarProjectId={sidebarProjectId} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+        <MobileNavDrawer release={release} taskQuickList={taskQuickList} sidebarProjectId={sidebarProjectId} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
           // Both mobile controls open the same drawer. Restore the actual opener, rather
           // than Radix's single trigger ref (which otherwise points at the last mount).
           if (mobileNavTrigger.current?.isConnected) {
@@ -380,11 +356,14 @@ function ShellComposerRow({ showTabBar, items, activeTo, mobileProjects, current
   )
 }
 
+/** The running version and the newer one the server's boot check found, if any. */
+type ReleaseInfo = { version: string | null; latestVersion: string | null }
+
 type NavProps = {
   activeTo: string | null
   items: NavItem[]
   repo: RepoChip | null
-  update: ApplicationUpdateControlProps
+  release: ReleaseInfo
   sidebarList?: ReactNode
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
@@ -547,8 +526,8 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
  * The `<md` drawer: projects and their current task sections (#811). Views live in the tab bar and
  * its More sheet, New task on the floating button and search
  * in the top bar, so the desktop `SidebarContent` is no longer rendered here. The three things
- * only it carried got new homes: Tools is a row in `DrawerGlobal`, the update action is
- * `DrawerUpdate` under the identity row, and the project menu is the `…` on the current project.
+ * only it carried got new homes: Tools is a row in `DrawerGlobal`, the version is in the
+ * identity row, and the project menu is the `…` on the current project.
  *
  * Radix's Dialog (via the Sheet primitive) supplies the parts that are easy to get wrong by hand:
  * `role="dialog"`, the accessible name, the focus trap, the Escape handler, the backdrop's
@@ -557,8 +536,8 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
  */
 function MobileNavDrawer({
   onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, toolsStatus,
-  update, taskQuickList, sidebarProjectId,
-}: Pick<NavProps, 'sidebarProjectId' | 'taskQuickList' | 'update'> & {
+  release, taskQuickList, sidebarProjectId,
+}: Pick<NavProps, 'sidebarProjectId' | 'taskQuickList' | 'release'> & {
   onNavigate: () => void
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
   mobileProjects?: MobileProjectNav | null | undefined
@@ -580,8 +559,7 @@ function MobileNavDrawer({
     >
       {/* The dialog's accessible name. Visually redundant with the identity row below. */}
       <SheetTitle className="sr-only">Navigation</SheetTitle>
-      <DrawerIdentity version={update.version} />
-      <DrawerUpdate {...update} />
+      <DrawerIdentity version={release.version} latestVersion={release.latestVersion} />
       {/* One scroll: Projects, then the workspace links. The safe-area insets are the identity
           row's and the global rows', so the content between them takes none of its own. */}
       <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
@@ -628,7 +606,7 @@ function SidebarContent({
   activeTo,
   items,
   repo,
-  update,
+  release,
   sidebarList,
   taskQuickList,
   sessionScope,
@@ -691,23 +669,21 @@ function SidebarContent({
         </SidebarNavigateContext.Provider>
       </div>
 
-      <SidebarFooter toolsMenu={toolsMenu} update={update} />
+      <SidebarFooter toolsMenu={toolsMenu} release={release} />
     </div></SidebarNavigationScope>
   )
 }
 
-/** The board's footer: a 44px bar, 12px sides, Tools at the left, version and update at the right. */
-function SidebarFooter({ toolsMenu, update }: Pick<NavProps, 'toolsMenu' | 'update'>) {
+/** The board's footer: a 44px bar, 12px sides, Tools at the left, version at the right. */
+function SidebarFooter({ toolsMenu, release }: Pick<NavProps, 'toolsMenu' | 'release'>) {
   return (
     <div data-slot="sidebar-footer" className="shrink-0">
       <div data-slot="sidebar-footer-controls" className="flex h-11 items-center justify-between gap-1 border-t border-border px-3">
         <div data-slot="tools-menu" className="shrink-0">{toolsMenu}</div>
         <div className="flex min-w-0 items-center gap-1" data-slot="version-action">
-          {update.version ? <VersionChip version={update.version} latestVersion={update.latestVersion} /> : null}
-          <ApplicationUpdateControl {...update} />
+          {release.version ? <VersionChip version={release.version} latestVersion={release.latestVersion} /> : null}
         </div>
       </div>
-      <ApplicationUpdateFeedback {...update} />
     </div>
   )
 }

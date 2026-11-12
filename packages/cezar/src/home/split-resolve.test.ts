@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HOME_LOCATING_ENV } from '../core/agent-env.ts';
-import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
+import { posixLauncher, windowsLauncher } from '../managed-install/launcher.ts';
 import { Home } from './home.ts';
 import * as installMarker from './install-marker.ts';
 import { HOME_LAYOUT_ENV, type HomeRoots } from './kind-roots.ts';
@@ -72,13 +72,13 @@ describe('split Home resolution', () => {
     expect({ workspaceConfig: home.workspaceConfig, agentAccounts: home.agentAccounts, remoteSettings: home.remoteSettings,
       workspaceUiState: home.workspaceUiState, serverState: home.serverState(), serverInstances: home.serverInstances,
       namedState: home.serverState('named'), serverLock: home.serverLock(), namedLock: home.serverLock('named'),
-      backups: home.backups, applicationUpdates: home.applicationUpdates, versions: home.versions, bin: home.bin,
-      dryCache: home.dryCache, dryPrefix: home.dryPrefix, skillsCache: home.skillsCache, skillFilesCache: home.skillFilesCache,
+      backups: home.backups, versions: home.versions, bin: home.bin,
+      skillsCache: home.skillsCache, skillFilesCache: home.skillFilesCache,
     }).toEqual({ workspaceConfig: '/custom/config/config.json', agentAccounts: '/custom/config/agent-accounts.json', remoteSettings: '/custom/config/remote-settings',
       workspaceUiState: '/custom/state/ui-state.json', serverState: '/custom/state/server.json', serverInstances: '/custom/state/server-instances',
       namedState: '/custom/state/server-instances/named.json', serverLock: '/custom/state/server.install.lock', namedLock: '/custom/state/server-instances/named.install.lock',
-      backups: '/custom/state/backups', applicationUpdates: '/custom/state/application-updates', versions: '/custom/data/versions', bin: '/custom/data/bin',
-      dryCache: '/custom/cache/dry-cache', dryPrefix: '/custom/cache/dry-prefix', skillsCache: '/custom/cache/skills', skillFilesCache: '/custom/cache/skill-files' });
+      backups: '/custom/state/backups', versions: '/custom/data/versions', bin: '/custom/data/bin',
+      skillsCache: '/custom/cache/skills', skillFilesCache: '/custom/cache/skill-files' });
   });
 
   it('reads layout env separately from home locators', () => {

@@ -142,104 +142,17 @@ describe('AppShell', () => {
     expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
   })
 
-  it('shows the running version in the footer and only offers a newer local release', () => {
-    renderShell('/', { version: '1.2.9', latestVersion: '1.2.10', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: vi.fn() })
-    const brand = footer()
-    expect(brand?.querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.9')
-    expect(within(sidebar()).getByRole('button', { name: /update/i }).getAttribute('title')).toBe('Update from v1.2.9 to v1.2.10')
-    cleanup()
-    renderShell('/', { version: '1.2.10', latestVersion: '1.2.9', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: vi.fn() })
-    expect(within(sidebar()).queryByRole('button', { name: /update/i })).toBeNull()
-    cleanup()
-    renderShell('/', { version: '1.2.10', latestVersion: '1.2.10', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: vi.fn() })
-    expect(within(sidebar()).queryByRole('button', { name: /update/i })).toBeNull()
-    cleanup()
-    renderShell('/', { version: '1.2.10', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: vi.fn() })
-    expect(within(sidebar()).queryByRole('button', { name: /update/i })).toBeNull()
-  })
-
-  it('shows the update versions in a keyboard tooltip', async () => {
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: vi.fn() })
-    fireEvent.focus(within(sidebar()).getByRole('button', { name: 'Update application' }))
-    await waitFor(() => expect(document.querySelector('[data-slot="tooltip-content"]')?.textContent).toContain('Update from v1.0.0 to v2.0.0'))
-  })
-
-  it('does not reserve an empty update action or show manual guidance without a newer release', () => {
-    renderShell('/', { version: '0.14.8-pr501.7.abcdef', latestVersion: '0.14.8', applicationUpdate: { status: 'idle', supported: false, message: 'Update this installation manually.' } })
-    expect(sidebar().querySelector('[data-slot="application-update-action"]')).toBeNull()
-    expect(sidebar().querySelector('[data-slot="application-update-feedback"]')).toBeNull()
-    expect(within(sidebar()).queryByText('Update this installation manually.')).toBeNull()
-  })
-
-  it('explains manual updates beside the version only when a newer release exists', () => {
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: false, message: 'Update this installation manually.' } })
-    const header = footer()
-    expect(header).not.toBeNull()
-    expect(within(header).getByRole('status').textContent).toContain('In-app updates are unavailable for this installation.')
-    expect(within(header).getByRole('status').textContent).toContain(`Install the newer release using your original installation method, then restart ${productName("Cezarion")}.`)
-    expect(header.querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.0.0')
-    expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
-  })
-
-  it('keeps update progress and errors with the version in the footer', () => {
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'error', supported: true, message: 'Preparation failed.' }, onApplyUpdate: vi.fn() })
-    expect(footer().querySelector('[data-slot="application-update-feedback"]')?.textContent).toContain('Preparation failed.')
-  })
-
-  it('keeps ready state until Restart Now is confirmed', async () => {
-    const restart = vi.fn().mockResolvedValue(undefined)
-    renderShell('/', { version: '1.0.0', applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' }, onRestart: restart })
-    const trigger = within(sidebar()).getByRole('button', { name: /restart/i })
-    expect(trigger.getAttribute('title')).toBe('Restart required')
-    fireEvent.click(trigger)
-    expect(screen.getByRole('alertdialog').textContent).toMatch(/running tasks.*recovered/i)
-    fireEvent.click(screen.getByRole('button', { name: 'Restart Later' }))
-    expect(restart).not.toHaveBeenCalled()
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole('button', { name: 'Restart Now' }))
-    expect(restart).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the action unavailable when health is unknown or update is unsupported', () => {
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0' })
+  it('shows the running version in the footer, marks a newer release and offers no update action', () => {
+    renderShell('/', { version: '1.2.9', latestVersion: '1.2.10' })
+    const chip = footer().querySelector('[data-slot="version-chip"]') as HTMLElement
+    expect(chip.textContent).toBe('v1.2.9')
+    expect(chip.getAttribute('data-update-available')).toBe('true')
     expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
     cleanup()
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: false, message: 'Use your host’s deployment process.' } })
-    expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
-    expect(within(sidebar()).getByRole('status').textContent).toContain('Use your host’s deployment process.')
-    cleanup()
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'ready', supported: false, targetVersion: '2.0.0' }, onRestart: vi.fn() })
-    expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
-    cleanup()
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' } })
-    expect((within(sidebar()).getByRole('button', { name: /restart/i }) as HTMLButtonElement).disabled).toBe(true)
+    renderShell('/', { version: '1.2.10', latestVersion: '1.2.9' })
+    expect(footer().querySelector('[data-slot="version-chip"]')?.getAttribute('data-update-available')).toBeNull()
   })
 
-  it('shows preparation in the reserved action and leaves it unavailable', () => {
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'preparing', supported: true, targetVersion: '2.0.0' }, onApplyUpdate: vi.fn() })
-    const action = within(sidebar()).getByRole('button', { name: 'Preparing update' })
-    expect(action.getAttribute('aria-busy')).toBe('true')
-    expect((action as HTMLButtonElement).disabled).toBe(true)
-    expect(within(sidebar()).getByRole('status').textContent).toMatch(/preparing update/i)
-  })
-
-  it('shows a visible retry and manual next step after a failed update', () => {
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'error', supported: true, message: 'Preparation failed.' }, onApplyUpdate: vi.fn() })
-    const message = within(sidebar()).getByRole('status')
-    expect(message.textContent).toMatch(/Preparation failed.*Retry or update manually/i)
-    expect(message.className).not.toContain('sr-only')
-    expect(message.className).not.toContain('line-clamp')
-  })
-
-  it('blocks duplicate update clicks while the first request is pending', () => {
-    const apply = vi.fn(() => new Promise<void>(() => {}))
-    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: apply })
-    const action = within(sidebar()).getByRole('button', { name: 'Update application' })
-    fireEvent.click(action)
-    fireEvent.click(action)
-    expect(apply).toHaveBeenCalledTimes(1)
-  })
   it('renders the routed view in the main region', () => {
     renderShell('/', {}, <p>route content</p>)
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
@@ -1055,21 +968,18 @@ describe('AppShell', () => {
       })
     })
 
-    it('shows no update row until a newer release exists, then one row with the action', () => {
-      renderShell('/', { version: '1.0.0', latestVersion: '1.0.0' })
+    it('shows the version in the identity row and marks a newer release without an update action', () => {
+      renderShell('/', { version: '1.0.0', latestVersion: '1.2.0' })
       openMenu()
-      expect(drawer()?.querySelector('[data-slot="drawer-update"]')).toBeNull()
-      expect(drawer()?.querySelector('[data-slot="drawer-version"]')?.textContent).toBe('v1.0.0')
-    })
-
-    it('renders the update row right under the identity row with the Update button', () => {
-      renderShell('/', { version: '1.0.0', latestVersion: '1.2.0', applicationUpdate: { supported: true, status: 'idle' } as never, onApplyUpdate: async () => {} })
+      const version = drawer()?.querySelector('[data-slot="drawer-version"]') as HTMLElement
+      expect(version.textContent).toBe('v1.0.0')
+      expect(version.getAttribute('data-update-available')).toBe('true')
+      expect(version.getAttribute('title')).toBe('v1.0.0 — update available: v1.2.0')
+      expect(within(drawer() as HTMLElement).queryByRole('button', { name: /update|restart/i })).toBeNull()
+      cleanup()
+      renderShell('/', { version: '1.2.0', latestVersion: '1.2.0' })
       openMenu()
-      const identity = drawer()?.querySelector('[data-slot="drawer-identity"]') as HTMLElement
-      const row = drawer()?.querySelector('[data-slot="drawer-update"]') as HTMLElement
-      expect(identity.nextElementSibling).toBe(row)
-      expect(row.textContent).toContain('Update available · v1.2.0')
-      expect(within(row).getByRole('button', { name: 'Update application' })).toBeTruthy()
+      expect(drawer()?.querySelector('[data-slot="drawer-version"]')?.getAttribute('data-update-available')).toBeNull()
     })
 
     it('closes when the viewport widens past md, where the real sidebar takes over', async () => {

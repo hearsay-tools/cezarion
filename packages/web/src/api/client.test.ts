@@ -23,8 +23,6 @@ import {
   getGithubOwners,
   createProject,
   getHealth,
-  applyApplicationUpdate,
-  restartApplication,
   getProviderStatus,
   getRepo,
   getRunnerModels,
@@ -98,13 +96,6 @@ function lastCall(): { path: string; method: string; body: unknown; headers: Hea
 }
 
 describe('request shapes', () => {
-  it('sends strict empty bodies to the workspace update routes', async () => {
-    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ state: { status: 'ready', supported: true, targetVersion: '2.0.0' } }), { headers: { 'content-type': 'application/json' } }))
-    await applyApplicationUpdate()
-    expect(lastCall()).toMatchObject({ path: '/api/v1/workspace/application-update/apply', method: 'POST', body: {} })
-    await restartApplication()
-    expect(lastCall()).toMatchObject({ path: '/api/v1/workspace/application-update/restart', method: 'POST', body: {} })
-  })
   const cases: Array<{
     name: string
     call: () => Promise<unknown>

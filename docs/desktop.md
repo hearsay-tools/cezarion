@@ -10,7 +10,7 @@ The shell is versioned independently from the service. Source provenance:
 open-mercato/cezar#1132, open-mercato/cezar#1137, open-mercato/cezar#1138,
 open-mercato/cezar#1140, open-mercato/cezar#1142, open-mercato/cezar#1143,
 open-mercato/cezar#1144 and desktop/development portions of open-mercato/cezar#1195
-and open-mercato/cezar#1196. This fork retains its existing npm installation updater.
+and open-mercato/cezar#1196. The shell does not update the cockpit; see [Local mode](#local-mode).
 
 ## Install
 
@@ -37,19 +37,22 @@ signed release succeeds.
 Click **Start local cockpit**. Node.js 24.21.0+ and npm must be installed; the shell
 finds tools through your login shell on macOS/Linux. When Node is absent, it
 shows a download link and retry. Remote mode remains available from the app menu.
-The first local start installs `@hearsay-tools/squawk` under `<data>/versions`.
-The cockpit and server come from that installation, not from the shell bundle.
+The first local start installs the newest `@hearsay-tools/squawk` release
+(npm dist-tag `latest`) under `<data>/versions` and points `versions/current`
+at it. The cockpit and server come from that installation, not from the shell
+bundle.
 
-**Versions & updates** supports stable, nightly and development channels,
-installed-version rollback, linked worktrees and published fork PR builds.
-Restart interrupts active tasks; the dialog warns first. The app menu also
-provides version switching and recovery updates for older cockpit versions.
-The normal browser cockpit's existing npm updater remains available unchanged.
+The app installs the cockpit only when none is installed. It does not check for,
+offer or install a newer cockpit, and it has no version switcher. To get a newer
+cockpit, quit the app, delete the `current` link in the versions directory, and
+start the local cockpit again. The shell then installs the newest release. Older
+installed versions stay on disk. Before home migration commits, the versions
+directory is the legacy `versions/` tree (see
+[Desktop identity and bridge validation](#desktop-identity-and-bridge-validation)).
 
-CLI equivalents: `hsq install`, `hsq update --channel nightly`, `hsq versions`,
-`hsq use <id>`, `hsq link /path/to/checkout --use`, and `hsq unlink <id>`.
-A development checkout must be built; the picker can build an unbuilt/stale
-checkout before switching. The development channel never auto-selects a release.
+An older installed cockpit can still have its own updater. When it exits with
+status 75 after an update, the shell starts the version that `current` points
+at.
 
 ## Remote mode and trust boundary
 
@@ -96,8 +99,7 @@ and Linux browser profiles live in `<data>/desktop/profiles/<uuid>`; macOS
 profiles are managed by WebKit under the app's data store. Use Forget to clear a
 profile, rather than deleting just the bookmark file.
 
-Remote webviews have no Tauri capability grants, local initialization script or
-local version switching. The native title identifies the selected origin. This
+Remote webviews have no Tauri capability grants or local initialization script. The native title identifies the selected origin. This
 does not add a local reverse proxy or weaken server CORS/CSRF rules.
 
 Password-manager browser extensions are not bundled or integrated. Use your
@@ -148,13 +150,12 @@ The other native development settings use `HSQ_DRY_RUN` (`CEZ_DRY_RUN` fallback)
 `HSQ_DESKTOP_CWD` (`CEZ_DESKTOP_CWD` fallback) and
 `HSQ_DESKTOP_NO_UPDATE` (`CEZ_DESKTOP_NO_UPDATE` fallback).
 
-Click Local cockpit, check the project list and task view, then open
-Versions & updates. Create a dry-run task if desired. Quit the app (Cmd+Q on macOS; closing its window keeps it running) and confirm
+Click Local cockpit, check the project list and task view. Create a dry-run task if desired. Quit the app (Cmd+Q on macOS; closing its window keeps it running) and confirm
 its owned server exits. The shell closes the server's stdin and gives it 10 seconds
 to shut down on its own (store flush, agent and preview cleanup) before it
-force-kills it; a version switch stops the running server the same way. Try connecting to `http://example.com` (must reject),
+force-kills it. Try connecting to `http://example.com` (must reject),
 and to a separate local cockpit over loopback (must open a separate remote
-window). Remote pages must not be able to invoke native update/connect commands.
+window). Remote pages must not be able to invoke native commands such as connect.
 Use the ordinary app launch without these variables for your real projects.
 
 ## App icon

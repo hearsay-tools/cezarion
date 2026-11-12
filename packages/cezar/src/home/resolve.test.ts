@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HOME_LOCATING_ENV } from '../core/agent-env.ts';
 import { workspaceConfigPath, workspaceUiStatePath, agentAccountsPath, serverInstancesDir, serverStatePath, serverLockPath, agentHomePaths, expandTilde, ompProfilesDir, claudeStateFilePath } from '../paths.ts';
 import { remoteSettingsPath } from '../remote-settings.ts';
-import { binDir, versionsDir, currentEntry } from '../self-update/layout.ts';
-import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
+import { binDir, versionsDir } from '../managed-install/layout.ts';
+import { posixLauncher, windowsLauncher } from '../managed-install/launcher.ts';
 import { bareDirFor, skillFilesCacheDirFor } from '../skills-remote.ts';
 import { cezCacheDir, resolveChromium } from '../preview/chromium.ts';
 import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
@@ -23,13 +23,11 @@ const cases = [
     workspaceUiState: '/home/operator/.cezar/ui-state.json', agentAccounts: '/home/operator/.cezar/agent-accounts.json',
     remoteSettings: '/home/operator/.cezar/remote-settings', serverInstances: '/home/operator/.cezar/server-instances',
     versions: '/home/operator/.cezar/versions', bin: '/home/operator/.cezar/bin',
-    dryCache: '/home/operator/.cezar/dry-cache', dryPrefix: '/home/operator/.cezar/dry-prefix',
-    backups: '/home/operator/.cezar/backups', applicationUpdates: '/home/operator/.cezar/application-updates',
+    backups: '/home/operator/.cezar/backups',
     cache: '/home/operator/.cache/cez', skillsCache: '/home/operator/.cache/cez/skills',
     skillFilesCache: '/home/operator/.cache/cez/skill-files',
     serverState: '/home/operator/.cezar/server.json', namedServerState: '/home/operator/.cezar/server-instances/example-com.json',
     serverLock: '/home/operator/.cezar/server.install.lock', namedServerLock: '/home/operator/.cezar/server-instances/example-com.install.lock',
-    currentEntry: '/home/operator/.cezar/versions/current/node_modules/@wjarka/cezarion/dist/index.js',
     bareSkills: '/home/operator/.cache/cez/skills/team__skills', skillFiles: '/home/operator/.cache/cez/skill-files/team__skills',
   } },
   { name: 'override', env: { CEZ_HOME: '/srv/cockpit' }, expected: {
@@ -37,13 +35,11 @@ const cases = [
     workspaceUiState: '/srv/cockpit/ui-state.json', agentAccounts: '/srv/cockpit/agent-accounts.json',
     remoteSettings: '/srv/cockpit/remote-settings', serverInstances: '/srv/cockpit/server-instances',
     versions: '/srv/cockpit/versions', bin: '/srv/cockpit/bin',
-    dryCache: '/srv/cockpit/dry-cache', dryPrefix: '/srv/cockpit/dry-prefix',
-    backups: '/srv/cockpit/backups', applicationUpdates: '/srv/cockpit/application-updates',
+    backups: '/srv/cockpit/backups',
     cache: '/home/operator/.cache/cez', skillsCache: '/home/operator/.cache/cez/skills',
     skillFilesCache: '/home/operator/.cache/cez/skill-files',
     serverState: '/srv/cockpit/server.json', namedServerState: '/srv/cockpit/server-instances/example-com.json',
     serverLock: '/srv/cockpit/server.install.lock', namedServerLock: '/srv/cockpit/server-instances/example-com.install.lock',
-    currentEntry: '/srv/cockpit/versions/current/node_modules/@wjarka/cezarion/dist/index.js',
     bareSkills: '/home/operator/.cache/cez/skills/team__skills', skillFiles: '/home/operator/.cache/cez/skill-files/team__skills',
   } },
 ];
@@ -60,14 +56,14 @@ describe('legacy Home compatibility (release switch off)', () => {
     const { serverState: _state, serverLock: _lock, rootOverride: _override, ...paths } = home;
     expect(slashPaths({ ...paths, serverState: home.serverState(), namedServerState: home.serverState('example-com'),
       serverLock: home.serverLock(), namedServerLock: home.serverLock('example-com'),
-      currentEntry: currentEntry(env, home), bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),
+      bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),
     })).toEqual(expected);
     const readers = {
       root: resolveHome({ purpose: 'cli', env }).root, workspaceConfig: workspaceConfigPath(env, home), workspaceUiState: workspaceUiStatePath(home), // test-home-read: pure resolution; result only compared or used by read-only helpers
       agentAccounts: agentAccountsPath(home), remoteSettings: remoteSettingsPath(env, home), serverInstances: serverInstancesDir(home),
       versions: versionsDir(env, home), bin: binDir(env, home), cache: cezCacheDir(home),
       serverState: serverStatePath(undefined, home), namedServerState: serverStatePath('example-com', home),
-      serverLock: serverLockPath(undefined, home), namedServerLock: serverLockPath('example-com', home), currentEntry: currentEntry(env, home),
+      serverLock: serverLockPath(undefined, home), namedServerLock: serverLockPath('example-com', home),
       bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),
     };
     for (const [name, value] of Object.entries(slashPaths(readers))) expect(value, name).toBe(expected[name as keyof typeof expected]);

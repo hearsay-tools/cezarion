@@ -248,6 +248,23 @@ describe('the workspace settings API (step 2.7)', () => {
     expect(rawConfig()).toMatchObject({ skillsAutoUpdate: true, archiveOnMerge: true });
   });
 
+  it('PUT ignores a retired updateChannel key and an old stored key survives unrelated writes', async () => {
+    mkdirSync(home, { recursive: true });
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ updateChannel: 'nightly' })));
+    expect(await (await getConfig()).json()).not.toHaveProperty('updateChannel');
+    const res = await putConfig({ updateChannel: 'stable', archiveOnMerge: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).not.toHaveProperty('updateChannel');
+    expect(rawConfig()).toMatchObject({ updateChannel: 'nightly', archiveOnMerge: true });
+  });
+
+  it('serves no updater routes and no applicationUpdate health field', async () => {
+    expect(app.routes.map((r) => r.path).filter((path) => /self-update|application-update/.test(path))).toEqual([]);
+    expect((await apiRequest(app, '/api/v1/workspace/self-update')).status).toBe(404);
+    const health = (await (await apiRequest(app, '/api/v1/health')).json()) as Record<string, unknown>;
+    expect(health).not.toHaveProperty('applicationUpdate');
+  });
+
   it('boots and answers health with a retired skillsAutoUpdate key stored and its env var set', async () => {
     Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ skillsAutoUpdate: true })));
     vi.stubEnv('CEZ_SKILLS_AUTO_UPDATE', '1');

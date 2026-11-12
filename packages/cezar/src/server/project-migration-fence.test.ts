@@ -673,7 +673,7 @@ describe('admission sweep', () => {
    * Every admission point reachable in one process, against two fenced projects: `owned` is fenced
    * by its owning cockpit (built context, boot project of the app), `cold` by a CLI that took the
    * ownership lock itself. Each probe answers whether the point refused or skipped; an admitted
-   * point fails the sweep. `versions` is pinned in self-update/checkouts.test.ts.
+   * point fails the sweep.
    */
   it('refuses or skips at every reachable admission point while a fence is held, and admits after release', async () => {
     const owned = project(), cold = project(), free = project();
@@ -698,8 +698,8 @@ describe('admission sweep', () => {
     const cli = (args: string[], env: Record<string, string> = {}) => {
       const deps = { ...defaultCliDeps, process: { argv: ['/bin/node', '/bin/cez', ...args, '--repo', cold.root], env: {}, cwd: () => cold.root, exitCode: undefined as number | undefined },
         console: { log: vi.fn(), error: vi.fn() }, productEnv: (name: string) => env[name], resolveCliHome: () => testHome(), prepareOperatorHome: () => testHome(),
-        runManagedCommand: vi.fn().mockResolvedValue(undefined), runSubcommand: vi.fn().mockResolvedValue(undefined), getRepoInfo: vi.fn().mockResolvedValue(null),
-        runProjectsCommand: vi.fn().mockResolvedValue(0), readOwnName: () => '@wjarka/cezarion', readOwnVersion: () => '1.2.3', serveCommand: vi.fn(), serverCommand: vi.fn(),
+        runSubcommand: vi.fn().mockResolvedValue(undefined), getRepoInfo: vi.fn().mockResolvedValue(null),
+        runProjectsCommand: vi.fn().mockResolvedValue(0), readOwnVersion: () => '1.2.3', serveCommand: vi.fn(), serverCommand: vi.fn(),
         runCommand: vi.fn().mockResolvedValue(undefined), initCommand: vi.fn(), initWorkspace: vi.fn().mockResolvedValue(coldId) };
       return main(deps as unknown as CliDeps).then(() => [deps.runCommand, deps.initCommand, deps.initWorkspace].every((spy) => spy.mock.calls.length === 0), (error) => error instanceof ProjectMigrationFencedError);
     };

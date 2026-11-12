@@ -17,7 +17,7 @@ services, checkout discovery, managed restart, application update boot, backup l
 and preview lookup/download.
 
 `Home` names individual paths. Kind roots alone cannot describe the legacy layout:
-registry, install, dry cache, dry prefix, backups and application updates use
+registry, install and backups use
 `CEZ_HOME || join(homedir(), '.cezar')`, while skills and browser caches use
 `join(homedir(), '.cache', 'cez')` and ignore `CEZ_HOME`. Server state and install
 locks keep their default and named-instance paths. The launcher keeps runtime expressions
@@ -52,10 +52,9 @@ environment boundary. The source lint rule allows resolution only in `home/`,
 P2a-1 (hearsay-tools/cezarion#2931) gives `Home` five kind roots: `config`,
 `state`, `data`, `cache`, `runtime`. `root` aliases `config`; install markers and
 cockpit leases stay there. Named config paths use config; UI state, server state
-and install locks, backups and application updates use state; versions and bin
-use data; skills and dry caches use cache. Runtime has no named file yet.
-Legacy kinds equal root except cache, which stays `~/.cache/cez`; legacy dry
-paths deliberately stay at root. New root metadata is non-enumerable so the P1
+and install locks and backups use state; versions and bin
+use data; skills use cache. Runtime has no named file yet.
+Legacy kinds equal root except cache, which stays `~/.cache/cez`. New root metadata is non-enumerable so the P1
 literal path table keeps the same enumerable shape.
 
 Split defaults follow the platform table in the spec. Relative Linux XDG values

@@ -8,7 +8,6 @@ import { Home } from '../home/home.ts';
 import { agentEnv } from '../workflows/run/launch-context.ts';
 import { worktreeSetupEnv } from '../worktree-setup.ts';
 import { withPreviewCdp } from '../preview/agent-address.ts';
-import { restartEnv } from '../self-update/restart.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { productEnvEntries } from './product-env.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
@@ -52,13 +51,6 @@ it.each([false, true])('preview capability binds matching aliases and revokes bo
   expect(decorated.env.CEZ_PREVIEW_CDP_URL).toBe('wss://cockpit.example/api/v1/preview/cdp/preview-token');
   expect(decorated.env.HSQ_PREVIEW_CDP_URL).toBe(rebrand ? decorated.env.CEZ_PREVIEW_CDP_URL : undefined);
   decorated.revoke(); expect(session.revoke).toHaveBeenCalledOnce(); expect(grant.revoke).toHaveBeenCalledOnce();
-});
-
-it.each([false, true])('restart marker replaces inherited aliases with rebrand=%s', rebrand => {
-  const env = restartEnv({HSQ_RESTARTED_FROM: 'old', CEZ_RESTARTED_FROM: 'older', hsq_restarted_from: 'mixed', KEEP: ''}, rebrand);
-  expect(env.CEZ_RESTARTED_FROM).toBe(process.pid.toString());
-  expect(env.HSQ_RESTARTED_FROM).toBe(rebrand ? env.CEZ_RESTARTED_FROM : undefined);
-  expect(env.hsq_restarted_from).toBeUndefined(); expect(env.KEEP).toBe('');
 });
 
 it('generated intentional clears and native adapter allowlists preserve preferred empty values', () => {

@@ -2,22 +2,20 @@ import { BINARY_NAMES, productIdentity, scopedNpxCommand, type BinaryName } from
 import { shellQuote as quoteShellWord } from '../core/shell-env.ts';
 import type { Home } from '../home/home.ts';
 /**
- * The launchers in `~/.cezar/bin/` and the one-line PATH hook that makes `cezar` a command.
+ * The launchers in `<bin>/` and the one-line PATH hook that made `cezar` a command, as
+ * `cez install` wrote them. The home migration rewrites both for an existing managed install.
  *
- * A launcher is deliberately dumb: it execs whatever `versions/current` points at, so an update
- * is a symlink flip and the launcher is never rewritten. It carries ONE built-in verb, `use`,
- * that flips the link from the shell — the escape hatch for a downgrade into a version that
- * predates the cockpit's update dialog (this PoC's own situation).
+ * A launcher is deliberately dumb: it execs whatever `versions/current` points at. It carries ONE
+ * built-in verb, `use`, that flips the link from the shell.
  */
 
-import { appendFileSync, closeSync, fchmodSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fchmodSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join, win32 } from 'node:path';
 
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
-import { activate, binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
+import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 
 const PATH_MARKER = '# cezar managed install';
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
@@ -128,52 +126,12 @@ export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home,
   return dir;
 }
 
-/** Refresh fixed legacy launch paths before selecting a renamed managed tree.
- * With the switch off, preserve activation order and leave launcher writes to the caller. */
-export function activateManaged(id: string, env: NodeJS.ProcessEnv, home: Home, rebrand = productIdentity().rebrand, platform: NodeJS.Platform = process.platform): void {
-  if (rebrand) writeLaunchers(env, home, rebrand, platform);
-  activate(id, env, home, rebrand);
-}
-
-/** Whether `dir` is already on the caller's PATH. */
-export function isOnPath(dir: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const entries = (env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':');
-  return entries.some((entry) => entry === dir || entry === dir.replace(homedir(), '~'));
-}
-
-export interface PathHookResult {
-  /** The rc file the hook was written to, or null when nothing was written. */
-  file: string | null;
-  /** The line to add by hand when `file` is null. */
-  line: string;
-  alreadyPresent: boolean;
-}
-
 /** The POSIX rc file and its marked PATH line. The home migration replaces exactly this line. */
-export function pathHook(dir: string, env: NodeJS.ProcessEnv = process.env): { file: string; line: string; marker: string } {
+export function pathHook(dir: string, env: NodeJS.ProcessEnv & { HOME: string }): { file: string; line: string; marker: string } {
   // The user's home comes from `env`, like every other path in this module: a caller (or a
   // test) that points HOME elsewhere must never reach the real shell profile.
-  const home = env.HOME || homedir();
+  const home = env.HOME;
   const shell = env.SHELL ?? '';
   const rc = shell.endsWith('/zsh') ? '.zshrc' : shell.endsWith('/bash') ? '.bashrc' : '.profile';
   return { file: join(home, rc), line: `export PATH=${shellQuote(dir)}:"$PATH" ${PATH_MARKER}`, marker: PATH_MARKER };
-}
-
-/**
- * Add `~/.cezar/bin` to PATH for future shells by appending one marked line to the shell's rc
- * file (`.zshrc`, `.bashrc`, or `.profile` for anything else). Idempotent: the marker is what a
- * second run looks for. Windows users are told the line; the PoC does not touch the registry.
- */
-export function ensurePathHook(dir: string, env: NodeJS.ProcessEnv = process.env): PathHookResult {
-  if (process.platform === 'win32') return { file: null, line: `setx PATH "%PATH%;${dir}"`, alreadyPresent: false };
-  const { file, line } = pathHook(dir, env);
-  let current = '';
-  try {
-    current = readFileSync(file, 'utf8');
-  } catch {
-    // No rc file yet: the append below creates it.
-  }
-  if (current.includes(PATH_MARKER)) return { file, line, alreadyPresent: true };
-  appendFileSync(file, `\n${line}\n`);
-  return { file, line, alreadyPresent: false };
 }
