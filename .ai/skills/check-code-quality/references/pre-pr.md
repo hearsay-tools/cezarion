@@ -6,6 +6,13 @@ code statistics still use their existing paths until the remaining work in
 [hearsay-tools/squeal#167](https://github.com/hearsay-tools/squeal/issues/167) ships.
 CI passing does not replace this local check.
 
+Run it beside the push, as the reviewer round runs: start it on the committed head, push,
+and read the report when it finishes. It does not gate the push, and `npm run prepr` does
+not run it. It reuses Squeal's stored results at the branch's own content, so a warm
+daemon shortens it from about 11 minutes to about 2. An incomplete report still blocks
+the PR from merging, and auto-merge waits for it
+(hearsay-tools/cezarion#3289).
+
 ## 1. Collect the gate report
 
 Resolve and fetch the PR target branch from the repository bindings. Run from
