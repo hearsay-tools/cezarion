@@ -152,7 +152,8 @@ One dispatch takes one **candidate commit** through every stage
    bundle has no e2e mode.
 4. **Promote.** The gates are checked again, so a blocker opened during the
    candidate tests stops the release. Then `scripts/release.mjs` publishes the stable
-   version of the same commit with `--tag latest` (intra-release dependencies keep a
+   version of the same commit under the planned stable tag (`latest`, or `latest-x.y` for
+   a maintenance release below `latest`; intra-release dependencies keep a
    **caret** range, unlike the exact-pinned snapshots and candidates), checks that
    every published name's stable dist-tag points to it, installs it through the alias
    and boots it, opens a version-bump PR and cuts a GitHub Release

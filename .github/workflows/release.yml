@@ -366,10 +366,13 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
         run: node scripts/release-smoke.mjs --package "$PACKAGE" --version "$VERSION"
 
+      # Finalization (the rollback stamp, the bump PR, the GitHub Release) runs only after
+      # every post-publication check passed: the dist-tag check and the alias boot, which
+      # runs only after it. A failed check files a blocker; a rerun finishes the release.
       # A rollback records its version on the dispatched branch's head: the old
       # commit's tree is history, and a bump from it would revert newer work.
       - name: Stamp the dispatch commit for the rollback bump
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' && needs.plan.outputs.mode == 'rollback' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' && needs.plan.outputs.mode == 'rollback' }}
         env:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_DIST_TAG: ${{ needs.plan.outputs.stable_tag }}
@@ -378,7 +381,7 @@ jobs:
       # The checkouts keep no token, so no install or build step could read one. Only the
       # bump push gets it, with hooks off so no file a build wrote runs during the push.
       - name: Give the bump push its credential
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
         working-directory: ${{ needs.plan.outputs.bump_dir }}
         env:
           TOKEN: ${{ github.token }}
@@ -390,7 +393,7 @@ jobs:
       # a failed bump PR must not prevent the published version's Release.
       - name: Open version-bump PR (patch/minor/major only)
         id: bump_pr
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -408,7 +411,7 @@ jobs:
 
       - name: Create GitHub Release
         id: github_release
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}

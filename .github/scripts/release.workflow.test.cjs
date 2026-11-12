@@ -70,9 +70,10 @@ test('a failed candidate or promoted install files the release blocker', async (
   assert.match(jobs.blocker.if, /needs\.release\.outputs\.publish == 'failure'/, 'a stable publish that stopped partway files a blocker');
   assert.equal(jobs.release.outputs.publish, '${{ steps.release.outcome }}');
   assert.match(jobs.blocker.steps.at(-1).with.script, /publishedSome/, 'only when some name already carries the version');
-  // A failed dist-tag check stops finalization; a rerun after fixing the tag finishes it.
+  // Every post-publication check gates finalization: the alias boot runs only after the
+  // dist-tag check passed, so its success covers both.
   for (const name of ['Stamp the dispatch commit for the rollback bump', 'Give the bump push its credential', 'Open version-bump PR (patch/minor/major only)', 'Create GitHub Release']) {
-    assert.match(jobs.release.steps.find(step => step.name === name).if, /steps\.dist_tags\.outcome == 'success'/, name);
+    assert.match(jobs.release.steps.find(step => step.name === name).if, /steps\.alias_smoke\.outcome == 'success'/, name);
   }
   assert.equal(jobs.release.outputs.dist_tags, '${{ steps.dist_tags.outcome }}');
   assert.deepEqual(jobs.blocker.permissions, { contents: 'read', issues: 'write' });
