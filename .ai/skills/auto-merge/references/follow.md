@@ -21,17 +21,17 @@ Read queue membership separately with GraphQL (the `gh pr view --json` field lis
 does not include it):
 
 ```bash
-gh api graphql -f owner='<owner>' -f repo='<repo>' -F number=<n> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){id isInMergeQueue}}}' --jq '.data.repository.pullRequest.isInMergeQueue'
+gh api graphql -f owner='<owner>' -f repo='<repo>' -F number=<n> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){id isInMergeQueue}}}' --jq '.data.repository.pullRequest | {id, isInMergeQueue}'
 ```
 
 `gh pr merge <n> --disable-auto` clears the auto-merge request only: a PR
 already in the merge queue stays queued and still merges when its checks
 pass. When a step must stop the merge, dequeue the PR with its node `id`
-from the query above, then read `isInMergeQueue` again and continue only
-after it is false:
+from the query above. The answer carries the PR's `isInMergeQueue`; read
+the query again and continue only after it is false:
 
 ```bash
-gh api graphql -f id='<PR node id>' -f query='mutation($id: ID!){dequeuePullRequest(input:{id:$id}){pullRequest{isInMergeQueue}}}'
+gh api graphql -f id='<PR node id>' -f query='mutation($id: ID!){dequeuePullRequest(input:{id:$id}){mergeQueueEntry{state pullRequest{isInMergeQueue}}}}'
 ```
 
 A push of a new head drops the queue entry on its own, so the pre-push rows
