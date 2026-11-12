@@ -5,7 +5,7 @@ import { spawnAgent as nodeSpawn } from './disclaim-spawn.ts';
 import { trackChildExit } from './agent-runner.ts';
 import { probeLeaderState, type LeaderState, signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS } from './runner-runtime.ts';
+import { DEFAULT_RUNNER_TIMINGS, type RunnerTimings } from './runner-runtime.ts';
 
 export interface CodexAppServerMessage {
   id?: number | string;
@@ -36,10 +36,10 @@ export function spawnCodexAppServer(
   bin: string,
   cwd: string,
   extraEnv?: Record<string, string>,
-  opts: { session?: boolean } = {},
+  opts: { session?: boolean; timings?: Partial<RunnerTimings> | undefined } = {},
 ): ChildProcessWithoutNullStreams {
   try {
-    const options = { cwd, env: buildCodexAppServerEnv(extraEnv) };
+    const options = { cwd, timings: opts.timings, env: buildCodexAppServerEnv(extraEnv) };
     return opts.session ? spawnSessionLeader(bin, ['app-server'], options) : nodeSpawn(bin, ['app-server'], options);
   } catch (error) {
     throw codexSpawnError(error, bin);
@@ -155,6 +155,7 @@ export function endCodexAppServer(
   child: ChildProcessWithoutNullStreams,
   onTimers?: (term: NodeJS.Timeout, kill: NodeJS.Timeout | undefined) => void,
   onSignal?: (state: LeaderState) => void,
+  timings?: Partial<RunnerTimings>,
 ): void {
   try {
     child.stdin.end();
@@ -166,24 +167,24 @@ export function endCodexAppServer(
   // app-server that handles the signal instead of dying from it (#844).
   const hasExited = trackChildExit(child);
   let killTimer: NodeJS.Timeout | undefined;
-  const termState = probeLeaderState(child, EOF_TERM_GRACE_MS);
+  const termState = probeLeaderState(child, (timings?.eofTermGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofTermGraceMs));
   const termTimer = setTimeout(() => {
     const state = termState();
     if (!hasExited() && state !== 'exited') {
       onSignal?.(state);
       signalSession(child, 'SIGTERM');
     }
-    const killState = probeLeaderState(child, EOF_KILL_GRACE_MS);
+    const killState = probeLeaderState(child, (timings?.eofKillGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofKillGraceMs));
     killTimer = setTimeout(() => {
       const state = killState();
       if (!hasExited() && state !== 'exited') {
         onSignal?.(state);
         signalSession(child, 'SIGKILL');
       }
-    }, EOF_KILL_GRACE_MS);
+    }, (timings?.eofKillGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofKillGraceMs));
     killTimer.unref?.();
     onTimers?.(termTimer, killTimer);
-  }, EOF_TERM_GRACE_MS);
+  }, (timings?.eofTermGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofTermGraceMs));
   termTimer.unref?.();
   onTimers?.(termTimer, killTimer);
 }

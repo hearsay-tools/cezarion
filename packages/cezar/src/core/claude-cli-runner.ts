@@ -4,14 +4,7 @@ import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_pr
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { resolveClaudeExecutable } from './claude-executable.ts';
-import {
-  AUTO_END_DELAY_MS,
-  DEFAULT_RUN_TIMEOUT_MS,
-  EOF_KILL_GRACE_MS,
-  EOF_TERM_GRACE_MS,
-  KILL_GRACE_MS,
-  boundOutputDrainAfterExit,
-} from './runner-runtime.ts';
+import { AUTO_END_DELAY_MS, boundOutputDrainAfterExit, DEFAULT_RUNNER_TIMINGS, type RunnerTimings } from './runner-runtime.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -106,12 +99,12 @@ export class ClaudeCliRunner implements AgentRunner {
   readonly inputDelivery: InputDelivery = RUNNER_FACTS.claude.inputDelivery;
 
   private readonly bin: string;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private lastSession: AgentSession | null = null;
 
   constructor(opts: ClaudeCliRunnerOptions = {}) {
     this.bin = resolveClaudeExecutable(opts.bin);
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs;
   }
 
   /** One-shot run: start a session and auto-end it after the first turn. */
@@ -134,6 +127,7 @@ export class ClaudeCliRunner implements AgentRunner {
     try {
       child = spawnSessionLeader(this.bin, args, {
         cwd: spec.cwd,
+        timings: spec.timings,
         env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
       });
     } catch (err) {
@@ -294,9 +288,9 @@ export class ClaudeCliRunner implements AgentRunner {
         if (!hasExited()) signalChild('SIGTERM');
         eofKillTimer = setTimeout(() => {
           if (!hasExited()) signalChild('SIGKILL');
-        }, EOF_KILL_GRACE_MS);
+        }, (spec.timings?.eofKillGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofKillGraceMs));
         eofKillTimer.unref?.();
-      }, EOF_TERM_GRACE_MS);
+      }, (spec.timings?.eofTermGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofTermGraceMs));
       eofTermTimer.unref?.();
     };
 
@@ -308,7 +302,7 @@ export class ClaudeCliRunner implements AgentRunner {
       signalChild('SIGTERM', intentional);
       killTimer = setTimeout(() => {
         if (!hasExited()) signalChild('SIGKILL', intentional);
-      }, KILL_GRACE_MS);
+      }, (spec.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs));
       killTimer.unref?.();
     };
 
@@ -330,7 +324,7 @@ export class ClaudeCliRunner implements AgentRunner {
     child.stderr.on('data', (chunk: string) => stderrChunks.push(chunk));
 
     // Optional wall-clock kill switch (disabled for interactive sessions).
-    const limitMs = spec.timeoutMs ?? this.timeoutMs;
+    const limitMs = spec.timeoutMs ?? this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
     let timedOut = false;
     let deadline: NodeJS.Timeout | undefined;
     if (limitMs > 0) {
@@ -658,7 +652,7 @@ export class ClaudeCliRunner implements AgentRunner {
 
       await cleanupAfterEof();
 
-      const exitCode = await waitForExit(child);
+      const exitCode = await waitForExit(child, spec.timings);
       clearExitTimers();
 
       if (outputFailure) throw outputFailure.error;
@@ -961,7 +955,7 @@ function handleResultMessage(msg: ClaudeStreamMessage, ctx: ClaudeMessageCtx): n
 
 // ---- subprocess plumbing --------------------------------------------------
 
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
+function waitForExit(child: ChildProcessWithoutNullStreams, timings?: Partial<RunnerTimings>): Promise<number | null> {
   // A signal exit leaves exitCode null; its events may precede stdout drain.
   if (child.exitCode != null || child.signalCode != null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => {
@@ -980,7 +974,7 @@ function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | nu
     // A SIGKILLed process may never emit 'close' through some edge cases.
     const safety = setTimeout(
       () => fin(child.exitCode ?? null),
-      EOF_TERM_GRACE_MS + EOF_KILL_GRACE_MS + KILL_GRACE_MS + 5_000,
+      (timings?.eofTermGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofTermGraceMs) + (timings?.eofKillGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofKillGraceMs) + (timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs) + 5_000,
     );
     safety.unref?.();
   });

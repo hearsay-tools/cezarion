@@ -18,7 +18,7 @@ import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { startCursorPrintProcess, type CursorPrintProcess, type CursorPrintProcessOptions } from './cursor-print-process.ts';
 import { createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
-import { AUTO_END_DELAY_MS, DEFAULT_NO_PROGRESS_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
+import { AUTO_END_DELAY_MS, DEFAULT_RUNNER_TIMINGS } from './runner-runtime.ts';
 import { productName } from '../home/display.ts';
 
 /** Cursor print fields with live-qualified invocation mechanisms. */
@@ -129,7 +129,7 @@ class CursorPrintSession implements AgentSession {
     private readonly opts: SessionOptions,
   ) {
     this.result = new Promise(resolve => { this.resolveResult = resolve; });
-    const limit = spec.timeoutMs ?? options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    const limit = spec.timeoutMs ?? options.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
     if (limit > 0) this.deadline = setTimeout(() => this.fail('Cursor print timed out'), limit);
     if (spec.resume && (!spec.sessionId || !NATIVE_ID_RE.test(spec.sessionId))) {
       this.fail('Cursor print resume requires a valid recorded session id');
@@ -241,6 +241,7 @@ class CursorPrintSession implements AgentSession {
       proc = startCursorPrintProcess({
         bin: this.bin, args, cwd: this.spec.cwd,
         env,
+        timings: this.spec.timings,
         ...this.options.processOptions,
       }, {
         onStdout: chunk => this.onStdout(chunk),
@@ -282,7 +283,7 @@ class CursorPrintSession implements AgentSession {
     if (this.noProgress) clearTimeout(this.noProgress);
     if (!this.busy || this.closing) return;
     this.noProgress = setTimeout(() => this.fail('Cursor print made no progress before its deadline'),
-      this.options.noProgressTimeoutMs ?? DEFAULT_NO_PROGRESS_TIMEOUT_MS);
+      this.options.noProgressTimeoutMs ?? this.spec.timings?.noProgressTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.noProgressTimeoutMs);
     this.noProgress.unref?.();
   }
   private onStdout(chunk: string): void {

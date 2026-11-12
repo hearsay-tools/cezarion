@@ -34,7 +34,7 @@ import { buildChildEnv } from './agent-env.js';
 import { squawkToolNames } from '../ci-wait/tool-catalog.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
-import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { boundOutputDrainAfterExit, DEFAULT_RUNNER_TIMINGS } from './runner-runtime.js';
 import { productName } from '../home/display.ts';
 
 export interface PiRunnerOptions {
@@ -90,12 +90,12 @@ export class PiRunner implements AgentRunner {
   readonly facts = RUNNER_FACTS.pi;
   readonly inputDelivery: InputDelivery = RUNNER_FACTS.pi.inputDelivery;
   private readonly bin: string;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private lastSession: AgentSession | null = null;
 
   constructor(opts: PiRunnerOptions = {}) {
     this.bin = opts.bin ?? productEnv('PI_BIN') ?? (productEnv('DRY_RUN') === '1' ? mockPiPath() : 'pi');
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs;
   }
 
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
@@ -113,6 +113,7 @@ export class PiRunner implements AgentRunner {
   ): AgentSession {
     const child = spawnSessionLeader(this.bin, buildPiArgs(spec), {
       cwd: spec.cwd,
+      timings: spec.timings,
       env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
     });
     boundOutputDrainAfterExit(child);
@@ -244,7 +245,7 @@ export class PiRunner implements AgentRunner {
       open = false;
       rpcInput.rejectAgentAck();
       child.stdin.end();
-      killWatchdog = armEndWatchdog(() => child, KILL_GRACE_MS, () => { terminatedBySquawk = true; });
+      killWatchdog = armEndWatchdog(() => child, (spec.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs), () => { terminatedBySquawk = true; });
     };
     const interrupt = (): void => {
       if (child.exitCode === null && child.signalCode === null) terminatedBySquawk = true;
@@ -257,7 +258,7 @@ export class PiRunner implements AgentRunner {
       signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-      }, KILL_GRACE_MS);
+      }, (spec.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs));
       interruptKillTimer.unref?.();
     };
 
@@ -275,7 +276,7 @@ export class PiRunner implements AgentRunner {
       },
     ]);
 
-    const limitMs = spec.timeoutMs ?? this.timeoutMs;
+    const limitMs = spec.timeoutMs ?? this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
     const deadline =
       limitMs > 0
         ? setTimeout(() => {
@@ -289,7 +290,7 @@ export class PiRunner implements AgentRunner {
       signalSession(child, 'SIGTERM');
       const reap = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-      }, KILL_GRACE_MS);
+      }, (spec.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs));
       reap.unref?.();
       return reap;
     };

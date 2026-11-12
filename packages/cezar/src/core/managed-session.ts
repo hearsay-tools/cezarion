@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentRunner, AgentRunSpec, AgentSession, SessionOptions } from './agent-runner.ts';
-import { DEFAULT_NO_PROGRESS_TIMEOUT_MS } from './runner-runtime.ts';
+import { DEFAULT_RUNNER_TIMINGS } from './runner-runtime.ts';
 import { classifyProviderError } from './provider-error.ts';
 
 /** The events that show the model working again, which forget a provider-retry note. Session,
@@ -16,6 +16,7 @@ export function startManagedSession(
   onEvent: (event: AgentEvent) => void,
   opts: SessionOptions,
 ): AgentSession {
+  const noProgressTimeoutMs = spec.timings?.noProgressTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.noProgressTimeoutMs;
   let session: AgentSession | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let turnOpen = true;
@@ -38,9 +39,9 @@ export function startManagedSession(
     timer = setTimeout(() => {
       stop();
       const failing = providerNote ? `; the provider was failing: ${providerNote}` : '';
-      onEvent({ type: 'error', message: `Agent made no progress for ${DEFAULT_NO_PROGRESS_TIMEOUT_MS / 60_000} minutes during an open turn and was terminated${failing}` });
+      onEvent({ type: 'error', message: `Agent made no progress for ${noProgressTimeoutMs / 60_000} minutes during an open turn and was terminated${failing}` });
       session?.interrupt();
-    }, DEFAULT_NO_PROGRESS_TIMEOUT_MS);
+    }, noProgressTimeoutMs);
     timer.unref?.();
   };
   const begin = (): void => { if (!stopped && !pendingPermissions.size) { phase += 1; turnOpen = true; activity(); } };

@@ -1,6 +1,6 @@
 import { ChildProcess, execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { afterExitDrain, exitDrainBudget, KILL_GRACE_MS } from './runner-runtime.ts';
+import { afterExitDrain, exitDrainBudget, DEFAULT_RUNNER_TIMINGS, type RunnerTimings } from './runner-runtime.ts';
 import { disclaimedCommand } from './disclaim-spawn.ts';
 
 /**
@@ -10,7 +10,7 @@ import { disclaimedCommand } from './disclaim-spawn.ts';
  */
 
 type Member = { pid: number; token: string };
-type Leader = { child: ChildProcess; signalledAt?: number; members?: Member[] };
+type Leader = { child: ChildProcess; timings?: Partial<RunnerTimings> | undefined; signalledAt?: number; members?: Member[] };
 /** Grouped leaders this process spawned, keyed by pgid (= the leader's pid). */
 const leaders = new Map<number, Leader>();
 /** Every child `spawnSessionLeader` returned, on any platform: win32's taskkill is for these only. */
@@ -206,7 +206,7 @@ const GROUP_POLL_MS = 50;
  * (hearsay-tools/cezarion#1286). Each check is one `kill(-pgid, 0)`; only the SIGKILL reads the
  * members, which on darwin spawns `ps` once each. */
 function scheduleKill(pgid: number, leader: Leader, signalledAt: number): void {
-  const deadline = signalledAt + KILL_GRACE_MS;
+  const deadline = signalledAt + (leader.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs);
   const check = (): void => {
     if (leaders.get(pgid) !== leader) return;
     if (!processGroupAlive(pgid)) { drop(pgid, leader); return; }
@@ -239,7 +239,7 @@ function reap(pgid: number, leader: Leader): void {
 export function spawnSessionLeader(
   bin: string,
   args: readonly string[],
-  options: { cwd: string; env: NodeJS.ProcessEnv },
+  options: { cwd: string; env: NodeJS.ProcessEnv; timings?: Partial<RunnerTimings> | undefined },
 ): ChildProcessWithoutNullStreams {
   const grouped = process.platform !== 'win32';
   const [file, argv] = disclaimedCommand(bin, args, options.env);
@@ -248,7 +248,7 @@ export function spawnSessionLeader(
   const pid = child.pid;
   if (!grouped || !(child instanceof ChildProcess) || pid === undefined || !groupId(pid)) return child;
   prune();
-  const leader: Leader = { child };
+  const leader: Leader = { child, timings: options.timings };
   leaders.set(pid, leader);
   // Runners clear their own SIGKILL timers when the leader exits. A member that ignored the
   // SIGTERM Squawk sent outlives it, so the follow-up SIGKILL for the group lives here. A leader

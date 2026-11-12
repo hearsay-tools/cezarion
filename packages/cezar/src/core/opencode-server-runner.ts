@@ -27,7 +27,7 @@ import { buildChildEnv } from './agent-env.ts';
 import { opencodeTaskScopeEnv } from './opencode-task-scope.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
-import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
+import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUNNER_TIMINGS } from './runner-runtime.ts';
 import { formatModelIdentity, parseModelIdentity } from './model-identity.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import {
@@ -170,14 +170,14 @@ export class OpencodeServerRunner implements AgentRunner {
   readonly inputDelivery: InputDelivery = RUNNER_FACTS.opencode.inputDelivery;
 
   private readonly bin: string;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private readonly serverStartTimeoutMs: number;
   private lastSession: OpencodeSession | null = null;
 
   constructor(opts: OpencodeRunnerOptions = {}) {
     this.bin = opts.bin ?? productEnv('OPENCODE_BIN') ?? (productEnv('DRY_RUN') === '1'
       ? fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url)) : 'opencode');
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs;
     this.serverStartTimeoutMs = opts.serverStartTimeoutMs ?? SERVER_START_TIMEOUT_MS;
   }
 
@@ -304,7 +304,7 @@ class OpencodeSession implements AgentSession {
 
   constructor(
     private readonly bin: string,
-    timeoutMs: number,
+    timeoutMs: number | undefined,
     private readonly serverStartTimeoutMs: number,
     private readonly spec: AgentRunSpec,
     private readonly onEvent: ((event: AgentEvent) => void) | undefined,
@@ -315,7 +315,7 @@ class OpencodeSession implements AgentSession {
     // The server prints its URL on stdout once listening.
     const urlReady = this.startServer();
 
-    const limitMs = spec.timeoutMs ?? timeoutMs;
+    const limitMs = spec.timeoutMs ?? timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
     let deadline: NodeJS.Timeout | undefined;
     if (limitMs > 0) {
       deadline = setTimeout(() => {
@@ -609,6 +609,7 @@ class OpencodeSession implements AgentSession {
     try {
       child = spawnSessionLeader(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
         cwd: this.spec.cwd,
+        timings: this.spec.timings,
         env: buildChildEnv({ backend: 'opencode', extraEnv: opencodeTaskScopeEnv(ciOpenCodeEnv(this.spec), this.spec.restrictCrossSessionMessaging) }),
       });
     } catch (err) {
