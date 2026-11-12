@@ -19,8 +19,9 @@ drafts. Once a PR has had a ready-for-review event, the queue needs a provider r
 started after the first such event, or waits out a 180-second settle window
 (`POST_READY_SETTLE_MS`, 2026-11-09, hearsay-tools/cezarion#3066). The verified exceptions
 and no-files PRs skip that wait.
-Heavy verification runs beside admission after preflight, and the `verify` aggregate
-requires both (2026-11-05, hearsay-tools/cezarion#2727).
+Heavy verification runs beside typecheck, preflight and admission once its skip inputs
+are ready. The `verify` aggregate requires all of them (2026-11-12,
+hearsay-tools/cezarion#3342, replacing the preflight ordering of hearsay-tools/cezarion#2727).
 The named skip is a provider decision, not proof of model execution. A default-branch reconciler can
 retry only the native review gate; a PR-context review signal grants no authority.
 Only the new admission marker permits promotion. A green historical execution-only

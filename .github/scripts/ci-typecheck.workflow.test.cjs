@@ -48,7 +48,7 @@ test('typecheck keeps minimum Node, its bounded retry and an independent full ch
   const index = run => build.steps.findIndex(step => step.run === run);
   assert.ok(index('npm run test:unit') >= 0 && index('npm run test:unit') < index('npm run build'), 'unit tests run from source, before the build');
   assert.equal(index('npm run build:server'), -1);
-  assert.deepEqual(build.needs, ['queue-proof', 'preflight'], 'heavy build follows preflight, beside review');
+  assert.deepEqual(build.needs, ['queue-proof', 'pr-test-input'], 'heavy build starts beside typecheck, preflight and review');
 });
 
 test('required typecheck cannot fail or skip behind docs, infra or release-bump exemptions', () => {
