@@ -91,3 +91,14 @@ test('successful issue creation remains counted when its first evidence write fa
  h.github.request=async(route,args)=>{if(route==='POST /repos/{owner}/{repo}/issues/{issue_number}/comments')throw new Error('temporary failure');return original(route,args);};
  const m=await report(h);assert.equal(m.complete,false);assert.equal(h.state.issues.length,1);assert.equal(m.reports.issues,1);
 });
+
+test('GitHub quota patterns are recorded in the manifest, never filed',async()=>{
+ const h=harness(),ordinary=pattern(h);
+ h.state.logs.set(10,'##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.');
+ const occurrences=[1,2,2].map((id,index)=>{const r=run(id),j=job(id*10+index),step=j.steps[0];return {run:r,job:j,step,cause:causesForStep({run:r,job:j,step,log:h.state.logs.get(10)})[0]};});
+ const quota={cause:occurrences[0].cause,occurrences,comparisons:[],classification:'recurring-failure',counts:{failures:3,runs:2,shas:2,contexts:2}};
+ const m=await report(h,[quota,ordinary]);
+ assert.deepEqual(m.suppressed,{quotaPatterns:1,occurrences:3,runs:[1,2]});
+ assert.equal(h.state.issues.length,1);assert.doesNotMatch(h.state.issues[0].body,/rate limit/i);
+ assert.equal(m.complete,true);
+});

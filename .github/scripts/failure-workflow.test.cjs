@@ -50,10 +50,8 @@ test('the entrypoint logs the API calls the job spent',async()=>{
  const spent=h.calls.filter(([route])=>route!=='GET /rate_limit').length;
  assert.equal(result.info.at(-1),`GitHub API calls: ${spent} (core remaining ${h.state.coreRemaining})`);
 });
-test('under the API floor the reporter stands down successfully without reading issues',async()=>{
- const h=harness();h.state.coreRemaining=799;const result=await execute(h);
- assert.deepEqual(result.errors,[]);assert.equal(h.state.issues.length,0);
- assert.deepEqual(h.calls.map(([route])=>route),['GET /rate_limit']);
- assert.match(result.summary.join(''),/core remaining 799 is under the floor of 800[\s\S]*Failure reporting skipped\. Rerun this reporting job after the quota resets/);
- assert.equal(result.info.at(-1),'GitHub API calls: 0 (core remaining unknown)');
+test('the reporter is never shed: a nearly spent quota still reports the failure',async()=>{
+ const h=harness();h.state.coreRemaining=100;const result=await execute(h);
+ assert.deepEqual(result.errors,[]);assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
+ assert.ok(!h.calls.some(([route])=>route==='GET /rate_limit'));
 });

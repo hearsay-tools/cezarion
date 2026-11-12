@@ -161,3 +161,22 @@ test('a test that fails on rate-limit text still reports',async()=>{
   const [result]=await (await create(h)).reportStep(input(h,'FAIL src/a.test.ts > maps errors\nAssertionError: expected API rate limit exceeded to be mapped'));
   assert.equal(result.reported,true);assert.equal(result.cause.kind,'test');assert.equal(h.state.issues.length,1);
 });
+
+test('a replay of a report written before the GitHub request normalization stays idempotent',async()=>{
+  const h=harness();
+  const log='##[error]Resource not accessible by integration. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
+  const current=input(h,log), [cause]=current.causes;
+  assert.equal(cause.legacySignatures.length,1);
+  // The earlier writer keyed this cause by its pre-normalization signature.
+  const {legacySignatures,...earlier}=cause;
+  await (await create(h)).reportStep({...current,causes:[{...earlier,signature:legacySignatures[0]}]});
+  const [replay]=await (await create(h)).reportStep(current);
+  assert.equal(replay.reported,false);assert.equal(replay.issue.number,1);
+  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
+});
+
+test('a quota error before an independent error still reports the independent error',async()=>{
+  const h=harness();
+  const [result,...rest]=await (await create(h)).reportStep(input(h,rateLimited('08C0:1C9592:4FCCB:842A3:6AF6010B','2026-11-12 18:10:19')+'\nTypeError: build failed'));
+  assert.equal(rest.length,0);assert.equal(result.reported,true);assert.match(h.state.issues[0].body,/TypeError: build failed/);
+});

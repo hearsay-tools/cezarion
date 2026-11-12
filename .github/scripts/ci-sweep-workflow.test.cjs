@@ -8,18 +8,18 @@ const workflowPath=path.resolve(__dirname,'../workflows/sweep-ci-failures.yml');
 const fixtureNow=()=>Date.parse(stamp)+24*60*60*1000;
 function workflow(){assert.equal(fs.existsSync(workflowPath),true,'scheduled workflow implemented');return yaml.parse(fs.readFileSync(workflowPath,'utf8'));}
 const AsyncFunction=Object.getPrototypeOf(async()=>{}).constructor;
-async function execute(h,inputs={}) {
+async function execute(h,inputs={},sweep) {
  const w=workflow(),step=w.jobs.sweep.steps.find(s=>s.uses?.startsWith('actions/github-script@'));
- const written={},summary=[],errors=[];
- const core={info:()=>{},setFailed:m=>errors.push(m),summary:{addRaw:m=>{summary.push(m);return core.summary;},write:async()=>{}}};
+ const written={},summary=[],errors=[],warnings=[];
+ const core={info:()=>{},warning:m=>warnings.push(m),setFailed:m=>errors.push(m),summary:{addRaw:m=>{summary.push(m);return core.summary;},write:async()=>{}}};
  const fakeRequire=p=>{
   if(p==='node:fs')return {writeFileSync:(name,body)=>{written[name]=body;}};
   const dependency=require(path.resolve(__dirname,'../..',p));
-  if(p==='./.github/scripts/sweep-ci-failures.cjs')return {sweepCiFailures:options=>dependency.sweepCiFailures({...options,now:fixtureNow})};
+  if(p==='./.github/scripts/sweep-ci-failures.cjs')return {sweepCiFailures:sweep||(options=>dependency.sweepCiFailures({...options,now:fixtureNow}))};
   return dependency;
  };
  await new AsyncFunction('require','github','context','core',step.with.script)(fakeRequire,h.github,{repo:{owner:'hearsay-tools',repo:'cezarion'},payload:{inputs}},core);
- return {written,summary,errors};
+ return {written,summary,errors,warnings};
 }
 test('scheduled/manual workflow uses trusted checkout and the immediate reporter concurrency lock',()=>{
  const w=workflow(),immediate=yaml.parse(fs.readFileSync(path.resolve(__dirname,'../workflows/report-workflow-failure.yml'),'utf8'));
@@ -57,4 +57,13 @@ test('unavailable logs surface as evidence gaps in a complete summary',async()=>
  assert.equal(result.errors.length,0);
  assert.equal(JSON.parse(result.written['ci-sweep-coverage.json']).complete,true);
  assert.match(result.summary.join(''),/Evidence gaps \(unavailable, expired or oversized logs\): 1\./);
+});
+test('suppressed GitHub quota failures appear in the summary and as a warning',async()=>{
+ const runs=Array.from({length:21},(_,index)=>index+1);
+ const manifest={version:1,complete:true,start:'2026-09-01T00:00:00Z',end:'2026-09-10T00:00:00Z',problems:[],reports:{issues:0,occurrences:0},suppressed:{quotaPatterns:2,occurrences:30,runs}};
+ const result=await execute(harness(),{},async()=>manifest);
+ const message='GitHub API rate-limit failures, not filed: 2 pattern(s), 30 occurrence(s) in 21 run(s): '+runs.slice(0,20).join(', ')+', ….';
+ assert.deepEqual(result.warnings,[message]);assert.ok(result.summary.includes(message+'\n\n'));assert.deepEqual(result.errors,[]);
+ const quiet=await execute(harness(),{},async()=>({...manifest,suppressed:{quotaPatterns:0,occurrences:0,runs:[]}}));
+ assert.deepEqual(quiet.warnings,[]);assert.doesNotMatch(quiet.summary.join(''),/rate-limit/);
 });

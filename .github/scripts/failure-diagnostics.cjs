@@ -40,13 +40,19 @@ function stepLines(log, step) {
     return inStep;
   }).map(line => line.replace(/^\d{4}-\d\d-\d\dT\S+ /, '').trimEnd());
 }
-function normalizeIdentity(text) {
+const GITHUB_REQUEST = /request ID [\dA-F]+(?::[\dA-F]+){4} and timestamp \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC/g;
+// GitHub quota exhaustion: the failure is the shared API budget, not the workflow.
+const QUOTA_ERROR = /\bAPI rate limit exceeded\b|\bsecondary rate limit\b/i;
+// Only plain error causes qualify; a test whose diagnostic names the quota still reports.
+const isQuotaCause = cause => cause?.kind === 'error' && QUOTA_ERROR.test(cause.failureIdentity || '');
+function normalizeIdentity(text, legacy = false) {
   // Hash full diagnostic identity; display redaction is deliberately lossy and
   // must never collapse distinct test paths into one cause.
-  // GitHub request IDs and timestamps differ on every repeat of one error.
-  return stripAnsi(text).replace(/\b\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|\s?UTC|[+-]\d\d:?\d\d)?/g, '<timestamp>')
-    .replace(/\b[\dA-F]{3,8}(?::[\dA-F]{3,10}){4}\b/g, '<request-id>')
-    .replace(/0x[\da-f]+/gi, '<address>')
+  // A GitHub API error names its own request ID and time on every repeat
+  // (hearsay-tools/squawk#3416). Only that sentence is normalized; `legacy`
+  // keeps it, giving the identity signatures had before 2026-11-13.
+  const plain = legacy ? stripAnsi(text) : stripAnsi(text).replace(GITHUB_REQUEST, 'request ID <request-id> and timestamp <timestamp>');
+  return plain.replace(/0x[\da-f]+/gi, '<address>')
     .replace(/\b\d+(?:\.\d+)?(?:ms|s)\b/g, '<duration>').replace(/\s+/g,' ').trim();
 }
 function causesForStep({run, job, step, log}) {
@@ -65,26 +71,36 @@ function causesForStep({run, job, step, log}) {
     if (!match) return [];
     const testIdentity=normalizeIdentity(match[1]);
     const testFile=match[1].match(/^([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)/)[1];
-    return [{key:'test:'+testIdentity,title:match[1],index,kind:'test',testIdentity,testFile,hasTestName:/\s+>\s+.+/.test(match[1])}];
+    return [{key:'test:'+testIdentity,legacyKey:'test:'+normalizeIdentity(match[1],true),title:match[1],index,kind:'test',testIdentity,testFile,hasTestName:/\s+>\s+.+/.test(match[1])}];
   });
   for (let i=0; i<tests.length; i++) {
     const diagnostic = lines.slice(tests[i].index+1, tests[i+1]?.index ?? lines.length)
       .find(line => /\b\w*Error:/.test(line));
     tests[i].testKey = tests[i].key;
-    if (diagnostic) tests[i].key += ':' + normalizeIdentity(diagnostic);
+    if (diagnostic) {
+      tests[i].key += ':' + normalizeIdentity(diagnostic);
+      tests[i].legacyKey += ':' + normalizeIdentity(diagnostic,true);
+    }
     tests[i].hasDiagnostic = Boolean(diagnostic);
   }
-  const errors = tests.length ? [] : lines.flatMap((line, index) => {
+  const candidates = tests.length ? [] : lines.flatMap((line, index) => {
     if (!/(?:\b\w*Error:|npm (?:ERR!|error) |##\[error\])/.test(line)) return [];
     if (/Process completed with exit code|command failed|exit status/i.test(line)) return [];
     const normalized = normalizeIdentity(line);
     // Generic error code lines alone cannot distinguish unrelated causes.
     if (/^(?:npm (?:ERR!|error) code \w+|\[REDACTED.*\])$/.test(normalized)) return [];
-    return [{key:`${stage}:${normalizeIdentity(step.name)}:${normalized}`,title:normalized,index,kind:'error',failureIdentity:normalized}];
-  }).slice(0, 1);
+    return [{key:`${stage}:${normalizeIdentity(step.name)}:${normalized}`,legacyKey:`${stage}:${normalizeIdentity(step.name,true)}:${normalizeIdentity(line,true)}`,title:normalized,index,kind:'error',failureIdentity:normalized}];
+  });
+  // One error line identifies a step. A quota error takes that slot only when
+  // the step logged no other error, so it never hides an independent failure.
+  const quota = item => QUOTA_ERROR.test(item.failureIdentity);
+  const errors = [...candidates.filter(item => !quota(item)), ...candidates.filter(quota)].slice(0, 1);
   const found = tests.length ? tests.filter(item => item.hasDiagnostic || !tests.some(other => other.testKey === item.testKey && other.hasDiagnostic)) : errors;
   if (!found.length) return [{signature:hash(`unknown:${run.id}:${run.run_attempt}:${job.id}:${step.number}`),title:`${stage} failure in ${sanitize(step.name)}`,stage,kind:'unknown',excerpt:sanitize('Logs unavailable or no recognizable failure diagnostic. Inspect the linked job and failed step.\n'+safeLines.slice(-30).join('\n'))}];
   const unique = [...new Map(found.map(item => [item.key,item])).values()];
-  return unique.map(item => ({signature:hash(item.key),title:sanitize(item.title).slice(0,180),stage,kind:item.kind,...(item.testIdentity ? {testIdentity:item.testIdentity,testFile:item.testFile,hasTestName:item.hasTestName,hasDiagnostic:item.hasDiagnostic} : {}),failureIdentity:item.failureIdentity||item.key,excerpt:sanitize(safeLines.slice(item.index,Math.min(item.index+30,found.find(next=>next.index>item.index)?.index??Infinity)).join('\n'))}));
+  // Signatures the same causes had before the GitHub request normalization,
+  // so a replay of an earlier report finds its records.
+  const legacyFor = key => [...new Set(found.filter(item => item.key === key && item.legacyKey !== key).map(item => hash(item.legacyKey)))];
+  return unique.map(item => ({signature:hash(item.key),...(legacyFor(item.key).length ? {legacySignatures:legacyFor(item.key)} : {}),title:sanitize(item.title).slice(0,180),stage,kind:item.kind,...(item.testIdentity ? {testIdentity:item.testIdentity,testFile:item.testFile,hasTestName:item.hasTestName,hasDiagnostic:item.hasDiagnostic} : {}),failureIdentity:item.failureIdentity||item.key,excerpt:sanitize(safeLines.slice(item.index,Math.min(item.index+30,found.find(next=>next.index>item.index)?.index??Infinity)).join('\n'))}));
 }
-module.exports = {causesForStep, sanitize, hash};
+module.exports = {causesForStep, sanitize, hash, isQuotaCause};

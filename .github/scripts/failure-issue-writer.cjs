@@ -1,4 +1,4 @@
-const {causesForStep,sanitize} = require('./failure-diagnostics.cjs');
+const {causesForStep,sanitize,isQuotaCause} = require('./failure-diagnostics.cjs');
 
 const marker = (kind,value) => `<!-- cez-failure-${kind}:v1:${value} -->`;
 const code = text => sanitize(text).split('\n').map(line=>`    ${line}`).join('\n');
@@ -14,11 +14,6 @@ function commentFor({cause,run,job,step,runUrl,jobUrl,occurrence}) {
 class FailureWriterLimitError extends Error {
   constructor(code) { super(code);this.code=code; }
 }
-
-// GitHub's own quota errors: the failure is the API budget, not the workflow.
-// Only plain error lines qualify; a test that asserts on this text still reports.
-const TRANSIENT_CAUSE=/\bAPI rate limit exceeded\b|\bsecondary rate limit\b/i;
-const isTransient=cause=>cause.kind==='error' && TRANSIENT_CAUSE.test(cause.failureIdentity || cause.title || '');
 
 // Without `since`, every issue in the repository (the sweep's adoption scan).
 // With `since` (the run's creation time), every open issue plus every issue
@@ -96,12 +91,13 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
 
   // An issue that already carries this occurrence marker, and whether a
   // comment (not just the body) recorded it.
-  async function findExistingTarget(matches,occurrence,run) {
+  async function findExistingTarget(matches,occurrences,run) {
     let target,alreadyReported=false;
+    const holds=text=>occurrences.some(occurrence=>text?.includes(occurrence));
     for(const issue of matches.filter(entry=>mayHoldOccurrence(entry,run))) {
       const entries=await commentsFor(issue);
-      if(entries.some(comment=>comment.body?.includes(occurrence))) {target=issue;alreadyReported=true;break;}
-      if((issue.body||'').includes(occurrence)) target=issue;
+      if(entries.some(comment=>holds(comment.body))) {target=issue;alreadyReported=true;break;}
+      if(holds(issue.body||'')) target=issue;
     }
     return {target,alreadyReported};
   }
@@ -118,10 +114,13 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
 
   // Deduplicates, reports and logs one cause of one step. Returns its single result.
   async function reportCause({cause,failureIssues,run,job,step,runUrl,labels,bodyFor}) {
-    const signature=marker('signature',cause.signature);
-    const occurrence=marker('occurrence',`${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature}`);
-    const matches=failureIssues.filter(issue=>(issue.body||'').includes(signature)).sort((a,b)=>b.number-a.number);
-    const {target:found,alreadyReported}=await findExistingTarget(matches,occurrence,run);
+    // Records written before a signature change carry its legacy signatures.
+    const signatures=[cause.signature,...(cause.legacySignatures||[])];
+    const signatureMarkers=signatures.map(value=>marker('signature',value));
+    const occurrences=signatures.map(value=>marker('occurrence',`${run.id}:${run.run_attempt}:${job.id}:${step.number}:${value}`));
+    const [signature]=signatureMarkers, [occurrence]=occurrences;
+    const matches=failureIssues.filter(issue=>signatureMarkers.some(value=>(issue.body||'').includes(value))).sort((a,b)=>b.number-a.number);
+    const {target:found,alreadyReported}=await findExistingTarget(matches,occurrences,run);
     if(alreadyReported) return {issue:found,cause,reported:false};
     if(createdOccurrences>=maxOccurrences) throw new FailureWriterLimitError('occurrence-limit');
     let target=found||matches.find(issue=>issue.state==='open');
@@ -134,9 +133,8 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
   }
 
   async function reportStep({run,job,step,causes:found,labels=['area-ci'],bodyFor=defaultBodyFor}) {
-    const transient=found.filter(isTransient);
-    if(transient.length) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
-    const causes=found.filter(cause=>!isTransient(cause));
+    if(found.some(isQuotaCause)) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
+    const causes=found.filter(cause=>!isQuotaCause(cause));
     if(!causes.length) return [];
     const runUrl=`https://github.com/${owner}/${repo}/actions/runs/${run.id}/attempts/${run.run_attempt}`;
     const prefix=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:`;
