@@ -31,6 +31,7 @@ import {
   type ThreadRow,
   type ThreadScrollControls,
 } from './thread-scroller'
+import { PENDING_ASK_SECTION_ID } from './pending-ask-navigation'
 import type { ThreadAsk, ThreadPermission, ThreadEntry, ThreadPreviewServer, ThreadState } from './thread-state'
 import { usePreviewPane } from './preview/preview-state'
 import { PreviewServerCard } from './preview/server-card'
@@ -118,8 +119,8 @@ function overlayAgentInputNotes(run: ApiRun, entries: readonly ThreadEntry[]): r
   return changed ? next : entries
 }
 
-/** The section holding the pending ask's answerable copy; its row key is `pending-ask:<askId>`. */
-export const PENDING_ASK_SECTION_ID = 'pending-ask'
+// Moved to `pending-ask-navigation`; kept importable from here.
+export { PENDING_ASK_SECTION_ID }
 
 /** The pending question (hearsay-tools/cezarion#1495): its answerable copy goes after the newest
  *  entry, from the compact context, so it exists even when its turn is not loaded. Its original
