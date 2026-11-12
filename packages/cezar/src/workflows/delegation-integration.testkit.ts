@@ -21,6 +21,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager, WORKER_FALLBACK_QUESTION } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
+import type { WorkerCleanupFactory } from '../delegation/service.ts';
 
 const execFile = promisify(execFileCallback);
 const entry = fileURLToPath(new URL('../index.ts', import.meta.url));
@@ -49,7 +50,8 @@ export async function buildDelegationCli(sourceEntry: string = entry) {
   } catch (error) { close(); throw error; }
 }
 
-export function registerDelegationIntegrationGroup(group: 'reviewed-integration' | 'spawn-idempotency' | 'failure-authority' | 'parent-cancellation'): void {
+/** `cleanup` is the worker cleanup for groups that destroy workers; the reviewed-integration group passes `workerCleanups()`. */
+export function registerDelegationIntegrationGroup(group: 'reviewed-integration' | 'spawn-idempotency' | 'failure-authority' | 'parent-cancellation', cleanup?: WorkerCleanupFactory): void {
   describe('public delegation completion integration', () => {
   let cli: Awaited<ReturnType<typeof buildDelegationCli>>;
   beforeAll(async () => { cli = await buildDelegationCli(); });
@@ -95,7 +97,7 @@ export function registerDelegationIntegrationGroup(group: 'reviewed-integration'
       CEZ_CLAUDE_BIN: wire, CEZ_CODEX_BIN: wire, CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: codexHome })) vi.stubEnv(name, value);
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repo, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 3 } }) }); track();
-    controller = await DelegationController.start(); controller.attachProject({ home: testHome(), id: 'integration', root: repo, store, manager });
+    controller = await DelegationController.start(cleanup); controller.attachProject({ home: testHome(), id: 'integration', root: repo, store, manager });
   });
 
   afterEach(async () => {
@@ -258,7 +260,7 @@ if (group === 'reviewed-integration') {
     manager.dispose(); store.close(); await controller.close();
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repo); track();
-    controller = await DelegationController.start(); controller.attachProject({ home: testHome(), id: 'integration', root: repo, store, manager });
+    controller = await DelegationController.start(cleanup); controller.attachProject({ home: testHome(), id: 'integration', root: repo, store, manager });
     await manager.recover();
     expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.review);
     expect(store.readWorkerResultDiff(p.id, a)).toContain('+alpha');

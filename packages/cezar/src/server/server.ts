@@ -61,7 +61,7 @@ import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, createRunInputSch
 import { workspaceEventsQuerySchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/workspace-events';
 import { automationListQuerySchema } from '@open-mercato/cezar-contract/automations';
 import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
-import { DelegationService } from '../delegation/service.ts';
+import { DelegationService, type WorkerCleanupFactory } from '../delegation/service.ts';
 import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
@@ -328,8 +328,8 @@ export interface ServerDeps extends ActivityServerDeps {
   /** Test seam for task-webhook deliveries (#589): the `fetch` they POST with. Used only when
    *  `createApp` builds its own `TaskWebhooks`. */
   taskWebhookFetch?: typeof fetch;
-  /** Same-process optional private listener; attached to managers before recovery. */
-  delegation?: DelegationController;
+  /** Same-process optional private listener; attached to managers before recovery. Without it, `workerCleanup` lets the fallback service destroy workers. */
+  delegation?: DelegationController; workerCleanup?: WorkerCleanupFactory;
   repoRoot: string;
   store: RunStore;
   manager: RunManager;
@@ -3132,7 +3132,7 @@ export function createApp(deps: ServerDeps) {
   };
 
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
-  const delegationService = deps.delegation?.service ?? new DelegationService();
+  const delegationService = deps.delegation?.service ?? new DelegationService(deps.workerCleanup);
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
     .use('/runs/:id', adoptFallbackControl, requireRunControl)

@@ -9,7 +9,6 @@ import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 import { workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { workerCleanups } from '../delegation/worker-cleanup.ts';
-import { DelegationController } from '../delegation/provision.ts';
 
 describe('human owned-worker cleanup', () => {
   let f: ReturnType<typeof fixture>;
@@ -18,7 +17,7 @@ describe('human owned-worker cleanup', () => {
   it('rejects malformed human cleanup without state or intent changes and accepts absent or empty bodies', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
-    const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project', delegation: new DelegationController(workerCleanups()) });
+    const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project', workerCleanup: workerCleanups() });
     const before = structuredClone(f.store.getRun(workerId)); const events = f.store.readEvents(workerId);
     const url = `http://127.0.0.1/api/v1/runs/${workerId}/worker-destroy`;
     const response = await app.request(url, { method: 'POST', headers: { host: '127.0.0.1', 'content-type': 'application/json' }, body: '{' });
@@ -31,7 +30,7 @@ describe('human owned-worker cleanup', () => {
   it('uses the scoped chained route and boot alias with the parent switches off, retaining completed records', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
-    const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project', delegation: new DelegationController(workerCleanups()) });
+    const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project', workerCleanup: workerCleanups() });
     for (const prefix of ['/api/v1', '/api/v1/p/project', '/api/v1/p/default']) {
       const response = await app.request(`http://127.0.0.1${prefix}/runs/${workerId}/worker-destroy`, { method: 'POST', headers: { host: '127.0.0.1', 'content-type': 'application/json' }, body: '{}' });
       expect(response.status).toBe(200); expect(workerDestroyResultSchema.parse(await response.json())).toEqual({ workerId, state: 'complete', remaining: [] });
