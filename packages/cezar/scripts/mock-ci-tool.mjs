@@ -8,11 +8,11 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR) {
   if (!pr) return;
-  return probeCezarTool(backend, wire, 'cezar_wait', { kind: 'pr', pr });
+  return probeSquawkTool(backend, wire, 'cezar_wait', { kind: 'pr', pr });
 }
 
 // Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).
-export async function probeCezarTool(backend, wire, name, args, record = true) {
+export async function probeSquawkTool(backend, wire, name, args, record = true) {
   const result = backend === 'pi' || backend === 'omp'
     ? await probeExtensionTool(backend, wire, name, args)
     : await probeMcpTool(mcpServerOf(backend, wire), name, args);
@@ -85,7 +85,7 @@ async function probeMcpTool({ server, env }, name, args) {
 // returns '' (a refusal is the tool's answer, not the mock's failure), or a note for the turn
 // text when the tool could not be reached, so the transcript says why the turn did not settle.
 export async function lifecycleCall(backend, wire, name, args) {
-  try { await probeCezarTool(backend, wire, name, args, false); return ''; }
+  try { await probeSquawkTool(backend, wire, name, args, false); return ''; }
   catch (error) { return `\n\n(mock: ${name} failed: ${error?.message ?? error})`; }
 }
 /** The one-question card the portable ask scenarios send. */
@@ -110,11 +110,11 @@ export async function ciPrompt(backend, wire, text) {
   return JSON.stringify(result.response);
 }
 
-const CEZAR_TOOL_NAME = /cezar-tool\s+([a-z_]+)/;
+const SQUAWK_TOOL_NAME = /cezar-tool\s+([a-z_]+)/;
 
 /** The native approval gate needs the first tool's name before executing the prompt. */
-export function cezarToolName(text) {
-  return new RegExp(`mock:${CEZAR_TOOL_NAME.source}`).exec(text)?.[1];
+export function squawkToolName(text) {
+  return new RegExp(`mock:${SQUAWK_TOOL_NAME.source}`).exec(text)?.[1];
 }
 
 // `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
@@ -124,7 +124,7 @@ export function cezarToolName(text) {
 // them holds the turn there until that file exists, so a test can act between two calls, or
 // between the last call and the turn end (hearsay-tools/cezarion#2397).
 export async function toolPrompt(backend, wire, text) {
-  const steps = [...text.matchAll(new RegExp(`mock:(?:${CEZAR_TOOL_NAME.source}\\s+([A-Za-z0-9+/=_-]+)|gate\\s+([A-Za-z0-9+/=_-]+))`, 'g'))];
+  const steps = [...text.matchAll(new RegExp(`mock:(?:${SQUAWK_TOOL_NAME.source}\\s+([A-Za-z0-9+/=_-]+)|gate\\s+([A-Za-z0-9+/=_-]+))`, 'g'))];
   if (!steps.some(step => step[1])) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
   const responses = [];
   let last;
@@ -132,7 +132,7 @@ export async function toolPrompt(backend, wire, text) {
     if (gate) { await gateOpen(Buffer.from(gate, 'base64').toString('utf8')); continue; }
     const args = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
     if (args.wait_id === 'last') args.wait_id = last;
-    const result = await probeCezarTool(backend, wire, name, args);
+    const result = await probeSquawkTool(backend, wire, name, args);
     try { last = JSON.parse(result.response.content[0].text.split('\n')[0]).wait_id ?? last; } catch { /* a refusal names no wait */ }
     responses.push(JSON.stringify(result.response));
   }
@@ -154,6 +154,6 @@ async function gateOpen(path) {
 export async function previewPrompt(backend, wire, text) {
   const port = Number(/mock:preview-serve\s+(\d+)/.exec(text)?.[1]);
   const fixture = fileURLToPath(new URL('../../web/e2e/fixtures/preview-app.mjs', import.meta.url));
-  const result = await probeCezarTool(backend, wire, 'cezar_preview_serve', { command: `node "${fixture}" ${port}`, port, label: 'web' });
+  const result = await probeSquawkTool(backend, wire, 'cezar_preview_serve', { command: `node "${fixture}" ${port}`, port, label: 'web' });
   return JSON.stringify(result.response);
 }

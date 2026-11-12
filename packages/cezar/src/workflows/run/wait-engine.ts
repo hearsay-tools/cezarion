@@ -33,7 +33,7 @@ interface WaitEngineHost {
   ciSupervisor(): Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   reconcileWorkerWaits(family?: string): void;
   noticeParkedWorkers(id: string): void;
-  withdrawCezarHumanWaits(id: string): void;
+  withdrawSquawkHumanWaits(id: string): void;
   /** The session that holds a subagent wait's children is live (hearsay-tools/cezarion#2431). */
   subagentSessionLive(id: string): boolean;
   /** Resolve a subagent wait whose session is gone `interrupted`, ending its running children in the transcript (hearsay-tools/cezarion#2431). */
@@ -110,7 +110,7 @@ export class WaitEngine {
   /** Commit, arm and (at a boundary) park on a newly registered wait. A wait opened with the
    *  result its caller already holds arms nothing and resolves with it after the park. */
   open<W extends Wait>(runId: string, state: ActiveRun | undefined, wait: W, options: OpenOptions): OpenResult<W> {
-    if (options.withdraw) this.host.withdrawCezarHumanWaits(runId);
+    if (options.withdraw) this.host.withdrawSquawkHumanWaits(runId);
     if (!this.commitOpened(runId, wait, options.onCommitFailure, options.receipt)) return { status: 'refused' };
     const settled = 'result' in options;
     if (!settled) this.armOpened(runId, wait);

@@ -54,7 +54,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     await expect(register(run.id, { pid: 1 })).rejects.toThrow();
     await expect(register(run.id, { pid: process.pid })).rejects.toMatchObject({ code: 'process_not_allowed' });
     await expect(register(run.id, { pid: sleeper(), exit_file: '/etc/cez-process-wait.exit' })).rejects.toMatchObject({ code: 'exit_file_outside' });
-    const answer = await manager.cezarToolHandlers(run.id, toolGenerationOf(run.id)).registerWait({ kind: WAIT_KIND.process, pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.squawkToolHandlers(run.id, toolGenerationOf(run.id)).registerWait({ kind: WAIT_KIND.process, pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'exit_file_outside', message: expect.stringContaining('worktree') });
     // A batch that writes its own exit file elsewhere is waited on by PID alone, never through a watcher.
     expect(answer.answer).toMatchObject({ message: expect.stringContaining('leave exit_file out: wait on pid alone') });

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 // fixture-server starts: 3
 
 let browser: AgentBrowser
@@ -35,7 +35,7 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: opencode, CEZ_PI_BIN: pi }), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)
@@ -230,7 +230,7 @@ it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-col
     writeFileSync(configPath, JSON.stringify({
       defaultModels: { pi: 'grok-4.6' },
     }))
-    server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
+    server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
       env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
     })
     baseUrl = await waitForFixtureServer(server, { expectedOrigin: baseUrl })
@@ -267,7 +267,7 @@ it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-col
   } finally {
     await stopFixtureServer(server)
     writeFileSync(configPath, originalConfig)
-    server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
+    server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
       env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
     })
     baseUrl = await waitForFixtureServer(server, { expectedOrigin: baseUrl })

@@ -34,7 +34,7 @@ describe('the agent-config API', () => {
       store,
       manager: {} as RunManager,
       version: '0.0.0-test',
-      cezarPort: () => 4321,
+      squawkPort: () => 4321,
     });
   });
   afterEach(() => {
@@ -197,7 +197,7 @@ describe('the agent-config API', () => {
       expect(body.editable).toBe(false);
       expect((await put('claude.project.settings', { content: '{"hooks":{}}', version: null })).status).toBe(409);
       expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(409);
-      const granted = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4322 });
+      const granted = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', squawkPort: () => 4322 });
       const saved = await apiRequest(granted, '/api/v1/agent-config/claude.project.settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -209,7 +209,7 @@ describe('the agent-config API', () => {
     it('a non-loopback bind never takes the switch', async () => {
       process.env.CEZ_REMOTE = '1';
       await enableRemoteSettings(4321, undefined, undefined, testHome());
-      const exposed = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bindHost: '172.17.0.1', cezarPort: () => 4321 });
+      const exposed = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bindHost: '172.17.0.1', squawkPort: () => 4321 });
       const res = await apiRequest(exposed, '/api/v1/agent-config/claude.project.settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },

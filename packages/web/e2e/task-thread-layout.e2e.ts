@@ -6,7 +6,7 @@ import { visibilitySampleExpression, waitForSettledSample } from './visual-ready
 import { expectEditorFitsViewport } from './session-layout'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { openSessionActivityRow, SESSION_ACTIVITY_SUMMARY } from './session-activity'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 import { artifactsDir, LONG_RUN, RUN, RUN_ID, seedThreadDataRoot, STEP_RUN, TYPO_RUNS } from './task-thread-fixture'
 // fixture-server starts: 1
@@ -34,7 +34,7 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 
 beforeAll(async () => {
   dataRoot = seedThreadDataRoot('cezar-e2e-thread-layout-', [RUN, LONG_RUN, ...TYPO_RUNS, STEP_RUN])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

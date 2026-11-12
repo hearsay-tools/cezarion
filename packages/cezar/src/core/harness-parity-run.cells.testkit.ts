@@ -250,7 +250,7 @@ export const RUN_GROUPS = {
   // #399 incident: issue Agent context, run 3a3c1ffa (original history unavailable).
   // Prompt delivery is the contract under test; these offline wires cannot prove
   // that a live model follows the instruction. Markerless output must still wait.
-  // hearsay-tools/cezarion#1234: every runner honors cezarTools, so every session here is taught
+  // hearsay-tools/cezarion#1234: every runner honors squawkTools, so every session here is taught
   // the lifecycle tools instead of the markers.
   monitoring(r: HarnessRegistrar) {
     const { describeRunners, runners, it } = r;

@@ -32,7 +32,7 @@ import { RunSkills } from './run-skills.ts';
 import { InboxClaims } from './inbox-claims.ts';
 import { WorkerExecutions } from './worker-executions.ts';
 import { TurnBookkeeper } from './turn-bookkeeping.ts';
-import { AutomationToolsSlot, provisionCiSession, type ToolHost, type CiSessionHost } from './cezar-tools.ts';
+import { AutomationToolsSlot, provisionCiSession, type ToolHost, type CiSessionHost } from './squawk-tools.ts';
 import { registerPreviewServer, stopPreviewServer } from '../../preview/run-tools.ts';
 import { AttachmentWriter } from './attachment-writer.ts';
 import { QueuedInput } from './queued-input.ts';
@@ -41,7 +41,7 @@ import { MaintenanceClaims } from './maintenance-claims.ts';
 import { WorkerOrphans } from './worker-orphans.ts';
 import type { StartRunInput } from './types.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
-import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { type SquawkDoneAnswer, type SquawkDoneRequest, type SquawkWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { type TurnEndOutcome } from '../turn-end.ts';
 import { type ActiveRun } from '../active-run.ts';
 import { isDisposedDelegatedRun, preserveRunAfterDisposal } from './run-guards.ts';
@@ -56,7 +56,7 @@ import type { RunExitId, ExitCall } from '../../runs/run-exits.ts';
 import { type PreviewHostLike } from '../../preview/registration.ts';
 import { acquireCiResources } from '../../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
-import type { CezarToolHandlers } from '../../ci-wait/controller.ts';
+import type { SquawkToolHandlers } from '../../ci-wait/controller.ts';
 import { type WorkerAccountBinding } from '../../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../../delegation/provision.ts';
 import { replaceRunProcess } from '../../core/process-usage.ts';
@@ -115,7 +115,7 @@ export interface RunModules {
   runFinish: RunFinish;
   runCancel: RunCancel;
   inputDelivery: InputDelivery;
-  cezarToolsHost: ToolHost;
+  squawkToolsHost: ToolHost;
 }
 
 export interface FacadeHost {
@@ -128,7 +128,7 @@ export interface FacadeHost {
   waitingBeforeFinalWorkflowStep(run: RunRecord): boolean;
   parentCompletionBlockers(runId: string): ReturnType<typeof completionGateReads.parentCompletionBlockers>;
   ciResources: ReturnType<typeof acquireCiResources>;
-  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers;
+  squawkToolHandlers(runId: string, generation: string): SquawkToolHandlers;
   delegationProvisioner?: DelegationProvisioner | undefined;
   move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;
   isActive(runId: string): boolean;
@@ -160,11 +160,11 @@ export interface FacadeHost {
   hasUnansweredHumanAsk(runId: string): boolean;
   cancelAutoResume(runId: string): boolean;
   rootFinishRequested(runId: string): boolean;
-  registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry>;
+  registerWait(runId: string, request: SquawkWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry>;
   cancelWait(runId: string, waitId: string, generation: string): ReturnType<WaitRegistry['cancelWait']>;
-  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer;
+  acceptDone(runId: string, generation: string, request: SquawkDoneRequest, signal?: AbortSignal): SquawkDoneAnswer;
   preview?: PreviewHostLike | undefined;
-  cezarPort?: (() => number | undefined) | undefined;
+  squawkPort?: (() => number | undefined) | undefined;
 }
 
 /** Build modules in dependency order; callbacks read the facade at use time. */
@@ -195,7 +195,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     isCurrentState: (id, state) => host.active.get(id) === state,
   };
   modules.ciSessionHost = {
-    active: host.active, ciResources: () => host.ciResources, cezarToolHandlers: (...args) => host.cezarToolHandlers(...args),
+    active: host.active, ciResources: () => host.ciResources, squawkToolHandlers: (...args) => host.squawkToolHandlers(...args),
     preview: () => host.preview, cockpit: () => host.cockpit,
   };
   modules.launchSettingsHost = {
@@ -259,7 +259,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     hasQueuedAgentInputs: id => modules.inputDelivery.hasQueuedAgentInputs(id),
     providerOwnsInboxInput: (id, inputId) => modules.inboxClaims.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
     openHumanAlias: (id, state, via, card) => modules.humanWaits.openHumanAlias(id, state, via, card), prepareHumanAsk: state => modules.humanWaits.prepareHumanAsk(state),
-    markHumanWaitSurfaced: (id, wait, card) => modules.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
+    markHumanWaitSurfaced: (id, wait, card) => modules.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawSquawkHumanWaits: id => modules.humanWaits.withdrawSquawkHumanWaits(id),
     routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id), noticeParkedWorker: id => modules.workerQuestions.noticeParkedWorker(id),
     retireUnreadParentQuestion: (id, request) => modules.workerQuestions.retireUnreadParentQuestion(id, request),
     deleteUnreadInput: (id, input) => { host.active.get(id)?.inputState.forgetUnreadInput(input); },
@@ -277,7 +277,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     active: id => host.active.get(id), canProceedWithRun: (id, run) => host.canProceedWithRun(id, run), ciSupervisor: () => host.ciSupervisor,
     reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
     noticeParkedWorkers: id => modules.workerQuestions.noticeParkedWorkers(id),
-    withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
+    withdrawSquawkHumanWaits: id => modules.humanWaits.withdrawSquawkHumanWaits(id),
     subagentSessionLive: id => modules.subagentWaits.sessionLive(id),
     interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
     countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
@@ -554,10 +554,10 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     reconcileWorkerWaits: () => host.reconcileWorkerWaits(), unreadInputGraceMs: () => host.unreadInputGraceMs(),
     submitAgentInput: (id, state, content, inputs, budget) => modules.inputDelivery.submitAgentInput(id, state, content, inputs, budget),
   }, MAX_AUTO_CONTINUES, ROUTED_QUESTION_REFUSAL);
-  modules.cezarToolsHost = { store: context.store,
+  modules.squawkToolsHost = { store: context.store,
     registerWait: (...args) => host.registerWait(...args), registerAsk: (...args) => modules.waitRegistry.registerAsk(...args),
     cancelWait: (...args) => host.cancelWait(...args), acceptDone: (...args) => host.acceptDone(...args),
-    registerPreviewServer: (...args) => registerPreviewServer(context.store, host.preview, host.cezarPort, () => context.disposed(), ...args), stopPreviewServer: (...args) => stopPreviewServer(context.store, host.preview, host.cezarPort, () => context.disposed(), ...args),
+    registerPreviewServer: (...args) => registerPreviewServer(context.store, host.preview, host.squawkPort, () => context.disposed(), ...args), stopPreviewServer: (...args) => stopPreviewServer(context.store, host.preview, host.squawkPort, () => context.disposed(), ...args),
     awaitAutomationTools: signal => modules.automationToolsSlot.awaitAutomationTools(signal) };
   return modules;
 }

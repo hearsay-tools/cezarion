@@ -61,10 +61,10 @@ export const TOOL_GRANT_CASES: readonly ToolGrantCase[] = [
   { id: 'unset-bash-allowlist', name: 'TG10 an unset grant with a bashAllowlist', grant: () => ({ kind: 'unset', bashAllowlist: ['git status'] }) },
 ];
 
-const CEZAR_TOOLS = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks'];
+const SQUAWK_TOOLS = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks'];
 const DESCRIPTOR = { name: 'cezar_ci_probe', command: 'node', args: ['/installed/ci-wait/mcp.js'] };
-const CLAUDE_CEZAR = CEZAR_TOOLS.map(tool => `mcp__${DESCRIPTOR.name}__${tool}`).join(',');
-const CEZAR = CEZAR_TOOLS.join(',');
+const CLAUDE_SQUAWK = SQUAWK_TOOLS.map(tool => `mcp__${DESCRIPTOR.name}__${tool}`).join(',');
+const CEZAR = SQUAWK_TOOLS.join(',');
 
 /** The flags that carry tool access on each wire that has them; `--extension` keeps its basename. */
 const TOOL_FLAGS: Partial<Record<RunnerId, { readonly values: readonly string[]; readonly switches: readonly string[] }>> = {
@@ -89,15 +89,15 @@ const IGNORED = Object.fromEntries(TOOL_GRANT_CASES.map(entry => [entry.id, SAME
 const EXPECTED: Readonly<Record<RunnerId, Readonly<Record<ToolGrantCaseId, Expected>>>> = {
   claude: {
     'unset': [],
-    'step-default': ['--allowedTools', `${CLAUDE_DEFAULT},${CLAUDE_CEZAR}`],
-    'inherited': ['--allowedTools', `${CLAUDE_DEFAULT},Subagent,SubagentSupervisor,SubagentWait,${CLAUDE_CEZAR}`],
-    'explicit-copy': ['--allowedTools', `${CLAUDE_DEFAULT},${CLAUDE_CEZAR}`],
-    'extra-built-in': ['--allowedTools', `${CLAUDE_DEFAULT},WebFetch,${CLAUDE_CEZAR}`],
-    'extra-mcp': ['--allowedTools', `${CLAUDE_DEFAULT},mcp__docs__search,${CLAUDE_CEZAR}`],
-    'narrowed': ['--allowedTools', `Read,Grep,${CLAUDE_CEZAR}`],
+    'step-default': ['--allowedTools', `${CLAUDE_DEFAULT},${CLAUDE_SQUAWK}`],
+    'inherited': ['--allowedTools', `${CLAUDE_DEFAULT},Subagent,SubagentSupervisor,SubagentWait,${CLAUDE_SQUAWK}`],
+    'explicit-copy': ['--allowedTools', `${CLAUDE_DEFAULT},${CLAUDE_SQUAWK}`],
+    'extra-built-in': ['--allowedTools', `${CLAUDE_DEFAULT},WebFetch,${CLAUDE_SQUAWK}`],
+    'extra-mcp': ['--allowedTools', `${CLAUDE_DEFAULT},mcp__docs__search,${CLAUDE_SQUAWK}`],
+    'narrowed': ['--allowedTools', `Read,Grep,${CLAUDE_SQUAWK}`],
     // An empty list sends no allowlist, so it grants what an unset one does (hearsay-tools/cezarion#1849).
     'empty': [],
-    'bash-allowlist': ['--allowedTools', `Read,Edit,Write,Grep,Glob,Bash(git status:*),${CLAUDE_CEZAR}`],
+    'bash-allowlist': ['--allowedTools', `Read,Edit,Write,Grep,Glob,Bash(git status:*),${CLAUDE_SQUAWK}`],
     'unset-bash-allowlist': [],
   },
   pi: {
@@ -175,7 +175,7 @@ export function describeToolGrantParity(scope: RunnerId | 'once'): void {
       for (const entry of TOOL_GRANT_CASES) {
         // Relative recording paths: the mock resolves them against its cwd, which is `dir`.
         const obs = await driveSeam(backend, 'baseline', { spec: {
-          cwd: dir, sessionId: undefined, toolGrant: entry.grant(backend), cezarTools: DESCRIPTOR,
+          cwd: dir, sessionId: undefined, toolGrant: entry.grant(backend), squawkTools: DESCRIPTOR,
           env: { CEZ_MOCK_ARGS_FILE: `${entry.id}.args.ndjson`, CEZ_MOCK_STDIN_FILE: `${entry.id}.stdin.ndjson`, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', ...entry.env },
         } });
         errors.set(entry.id, obs.v1.filter(event => event.type === 'error'));

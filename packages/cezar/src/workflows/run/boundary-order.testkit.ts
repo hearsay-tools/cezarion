@@ -66,7 +66,7 @@ export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
   const context = unused<RunModuleContext>('context', { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), disposed: () => false,
     semaphore: unused<WorkspaceSemaphore>('semaphore', { monitoringWakeIntervalMinutes: () => 1, memoryLimitMb: () => 1 }) });
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
-    withdrawCezarHumanWaits: id => humanWaits.withdrawCezarHumanWaits(id),
+    withdrawSquawkHumanWaits: id => humanWaits.withdrawSquawkHumanWaits(id),
   }), 40);
   const humanWaits = new HumanWaits(context, { waitEngine, routeWorkerQuestion: call('route', undefined) }, 40);
   type QuestionHost = ConstructorParameters<typeof WorkerQuestions>[1];

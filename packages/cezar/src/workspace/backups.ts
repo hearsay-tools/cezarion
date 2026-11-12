@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomePaths } from '../home/boundary.ts';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 import { homeFileLocation, homePathLocation } from '../home/file-location.ts';
@@ -137,7 +137,7 @@ function prune(home: string | Home, file: BackupFile, now: Date): void {
     const daily = Date.parse(entry.time) >= cutoff && !days.has(day);
     days.add(day);
     if (index < 20 || daily) continue;
-    assertCezarHomeWriteIsSandboxed(entry.path);
+    assertSquawkHomeWriteIsSandboxed(entry.path);
     unlinkSync(entry.path);
   }
 }
@@ -172,7 +172,7 @@ export function backupBeforeWrite(path: string, next: unknown, options: { home?:
     const timestamp = new Date(Math.max(now.getTime(), latest ? Date.parse(latest.time) + 1 : 0));
     const sha = createHash('sha256').update(raw).digest('hex').slice(0, 8);
     for (const directory of [backups, dir]) {
-      assertCezarHomeWriteIsSandboxed(directory);
+      assertSquawkHomeWriteIsSandboxed(directory);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
     writeSnapshot(dir, timestamp, sha, raw);
@@ -188,12 +188,12 @@ function backupUnavailable(path: string, error: unknown, required = false): void
 /** Keep serialized writes ordered even with a coarse or adjusted clock. */
 function writeSnapshot(dir: string, timestamp: Date, sha: string, raw: Buffer): void {
   const stage = join(dir, `${randomUUID()}.tmp`);
-  assertCezarHomeWriteIsSandboxed(stage);
+  assertSquawkHomeWriteIsSandboxed(stage);
   try {
     writeFileSync(stage, raw, { mode: 0o600, flag: 'wx' });
     for (;;) {
       const target = join(dir, `${timestamp.toISOString().replaceAll(':', '-')}-${sha}.json`);
-      assertCezarHomeWriteIsSandboxed(target);
+      assertSquawkHomeWriteIsSandboxed(target);
       try {
         // A hard link publishes complete bytes atomically and refuses an existing target.
         linkSync(stage, target);
@@ -204,7 +204,7 @@ function writeSnapshot(dir: string, timestamp: Date, sha: string, raw: Buffer): 
       }
     }
   } finally {
-    assertCezarHomeWriteIsSandboxed(stage);
+    assertSquawkHomeWriteIsSandboxed(stage);
     try { unlinkSync(stage); } catch {
       // Cleanup is best effort; a leftover staging name is never listed or restored.
     }

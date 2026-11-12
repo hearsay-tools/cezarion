@@ -41,7 +41,7 @@ const fixtureGitConfig = resolve(repoRoot, '.ai/qa/gitconfig')
  * then out of `packages/cezar/dist` (the production build) into the e2e bootstrap's ignored
  * mirror, `.ai/qa/build/cezar` (`.ai/scripts/build-e2e.sh`).
  */
-export const cezarCli = resolve(repoRoot, '.ai/qa/build/cezar/dist/index.js')
+export const squawkCli = resolve(repoRoot, '.ai/qa/build/cezar/dist/index.js')
 
 /**
  * Failure bundles (#408). A red cockpit shard used to leave nothing behind but

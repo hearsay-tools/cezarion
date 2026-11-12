@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { fixtureUpdateRun, manager, root, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { eventsOf, cezarAnswered, noHumanCard, steeringParent, askedPair, answered, said, fillConversation, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
+import { eventsOf, squawkAnswered, noHumanCard, steeringParent, askedPair, answered, said, fillConversation, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
@@ -15,7 +15,7 @@ it('answers the worker for the parent when the conversation has no room for its 
     const w = await worker(p.id, 'mock:cezar-ask');
     fillConversation(p.id, w.id, 1023);
     manager.enqueueOwnedRun(w.id);
-    await until(() => cezarAnswered(w.id).length === 1);
+    await until(() => squawkAnswered(w.id).length === 1);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the parent conversation is at capacity' })]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     noHumanCard(w.id);

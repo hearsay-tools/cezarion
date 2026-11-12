@@ -9,7 +9,7 @@ import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 import { waitForSettledSample } from './visual-ready'
 import { dismissWithEscape } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, getJson } from './agent-browser'
 import { pollJson, pollFor } from './poll'
 // fixture-server starts: 1
 
@@ -74,7 +74,7 @@ beforeAll(async () => {
     'utf8',
   )
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

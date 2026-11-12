@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
 import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
@@ -67,7 +67,7 @@ beforeAll(async () => {
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), transcript())
   cpSync(resolve(import.meta.dirname, 'fixtures/thread-run-images'), join(dataRoot, '.ai/cezar/runs', `${RUN_ID}-images`), { recursive: true })
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

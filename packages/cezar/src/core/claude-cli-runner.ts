@@ -32,7 +32,7 @@ export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './agent-runner.ts';
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tool-catalog.ts';
+import { squawkToolEnvNames, squawkToolNames } from '../ci-wait/tool-catalog.ts';
 import { costWeightedTokens } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
 import { InputSubmissions } from './input-submissions.ts';
@@ -80,7 +80,7 @@ export interface ClaudeCliRunnerOptions {
  * the harness parity matrix; change a row only with the mapping in `buildArgs`.
  */
 export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: '--mcp-config and generated --allowedTools name' },
+  squawkTools: { honored: true, via: '--mcp-config and generated --allowedTools name' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'text block of the first stream-json user message on stdin' },
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
@@ -262,11 +262,11 @@ export class ClaudeCliRunner implements AgentRunner {
     // wall-clock kill switch. claude installs its own SIGTERM handler and exits
     // 143 instead of dying from the signal, so without this flag our own
     // teardown reads as an agent failure (#703).
-    let terminatedByCezar = false;
+    let terminatedBySquawk = false;
     let explicitEnd = false;
     let automaticCleanupStarted = false;
     const signalChild = (signal: 'SIGTERM' | 'SIGKILL', intentional = true): void => {
-      terminatedByCezar ||= intentional;
+      terminatedBySquawk ||= intentional;
       signalSession(child, signal);
     };
     // Every watchdog below asks "is the child still alive?" — and that question
@@ -278,7 +278,7 @@ export class ClaudeCliRunner implements AgentRunner {
     const end = (): void => {
       if (!hasExited()) {
         explicitEnd = true;
-        terminatedByCezar ||= automaticCleanupStarted;
+        terminatedBySquawk ||= automaticCleanupStarted;
       }
       if (!stdinOpen) return;
       stdinOpen = false;
@@ -299,7 +299,7 @@ export class ClaudeCliRunner implements AgentRunner {
     };
 
     const interrupt = (intentional = true): void => {
-      if (!hasExited()) terminatedByCezar ||= intentional;
+      if (!hasExited()) terminatedBySquawk ||= intentional;
       stdinOpen = false;
       cancelRefusalRetry();
       if (hasExited() || killTimer) return;
@@ -409,7 +409,7 @@ export class ClaudeCliRunner implements AgentRunner {
     };
 
     const retryableRefusal = (msg: ClaudeStreamMessage, identity: string | undefined): boolean =>
-      !terminatedByCezar && stdinOpen && !attemptDidWork
+      !terminatedBySquawk && stdinOpen && !attemptDidWork
         && msg.type === 'result' && msg.is_error === true
         && identity !== undefined && identity === successfulIdentity
         && selectedModelRefusal(msg.result) === reportedModel
@@ -476,7 +476,7 @@ export class ClaudeCliRunner implements AgentRunner {
       // Normalize only this precise wire shape so genuine result errors
       // (authentication, limits, malformed sessions) stay authoritative.
       const mappedMessage = normalizeIntentionalTeardownResult(
-        originalRefusal ? { ...msg, result: originalRefusal } : msg, terminatedByCezar);
+        originalRefusal ? { ...msg, result: originalRefusal } : msg, terminatedBySquawk);
       emitUi((state) => mapClaudeMessage(mappedMessage, state));
 
       let delta = 0;
@@ -570,7 +570,7 @@ export class ClaudeCliRunner implements AgentRunner {
     const closeOutput = (): void => {
       if (deadline) clearTimeout(deadline);
       if (autoEndTimer) clearTimeout(autoEndTimer);
-      if (refusalRetry && stdinOpen && !terminatedByCezar && !timedOut) {
+      if (refusalRetry && stdinOpen && !terminatedBySquawk && !timedOut) {
         onEvent?.({ type: 'error', message: refusalRetry.message });
       }
       stdinOpen = false;
@@ -617,7 +617,7 @@ export class ClaudeCliRunner implements AgentRunner {
       // A session cezar itself tore down (EOF watchdog after `end()`, or a
       // cancel) exits 143/137 — that is our own signal coming back, not an
       // agent failure, so it settles on the normal path with a note (#703).
-      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
+      if (terminatedBySquawk && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
         onEvent?.({
           type: 'note',
           message: `claude CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
@@ -816,13 +816,13 @@ function claudeToolArgs(spec: AgentRunSpec): string[] {
   // ListAgents also reach the session's own subagents, so no deny applies; inbound messages
   // from other sessions stay refused on every launch (crossSessionInbound, D3).
   const allowed = claudeAllowedTools(spec.toolGrant);
-  if (spec.cezarTools) {
-    const { name, command, args: toolArgs } = spec.cezarTools;
+  if (spec.squawkTools) {
+    const { name, command, args: toolArgs } = spec.squawkTools;
     args.push('--mcp-config', JSON.stringify({ mcpServers: { [name]: {
       command, args: toolArgs,
-      env: Object.fromEntries(cezarToolEnvNames(spec.env ?? {}).map(key => [key, `\${${key}}`])),
+      env: Object.fromEntries(squawkToolEnvNames(spec.env ?? {}).map(key => [key, `\${${key}}`])),
     } } }));
-    if (allowed.length > 0) allowed.push(...cezarToolNames(spec.env ?? {}).map(tool => `mcp__${name}__${tool}`));
+    if (allowed.length > 0) allowed.push(...squawkToolNames(spec.env ?? {}).map(tool => `mcp__${name}__${tool}`));
   }
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));

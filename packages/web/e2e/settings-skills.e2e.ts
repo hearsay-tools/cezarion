@@ -198,9 +198,9 @@ describe('settings → skills against the live dry-run server', () => {
 
   it('a team skill and its repository group switch off and back on by keyboard, and the project saves each change (#1494, #1607)', async () => {
     // Dry-run configures no team source, so this case adds a local skills repo for its duration.
-    const cezarDir = projectPaths(servedRoot()).write
-    const configFile = resolve(cezarDir, 'config.json')
-    const uiStateFile = resolve(cezarDir, 'ui-state.json')
+    const squawkDir = projectPaths(servedRoot()).write
+    const configFile = resolve(squawkDir, 'config.json')
+    const uiStateFile = resolve(squawkDir, 'ui-state.json')
     const savedConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
     const savedUiState = existsSync(uiStateFile) ? readFileSync(uiStateFile, 'utf8') : null
     const source = mkdtempSync(join(tmpdir(), 'cez-e2e-team-skills-'))
@@ -226,7 +226,7 @@ describe('settings → skills against the live dry-run server', () => {
     }, () => `ui-state never saved ${name} as ${off ? 'off' : 'on'}`, { timeoutMs: 10_000, intervalMs: 100 })
     try {
       const config = savedConfig === null ? {} : (JSON.parse(savedConfig) as Record<string, unknown>)
-      mkdirSync(cezarDir, { recursive: true })
+      mkdirSync(squawkDir, { recursive: true })
       writeFileSync(configFile, JSON.stringify({ ...config, skillsRepos: [{ repo: source, ref: 'main' }] }), 'utf8')
       await refreshTeamSkills()
       browser.goto(`${baseUrl}${scoped('/skills')}`)
@@ -269,8 +269,8 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('a team skill source is added, disabled and removed on the page, and config.json follows (hearsay-tools/cezarion#279)', async () => {
-    const cezarDir = projectPaths(servedRoot()).write
-    const configFile = resolve(cezarDir, 'config.json')
+    const squawkDir = projectPaths(servedRoot()).write
+    const configFile = resolve(squawkDir, 'config.json')
     const savedConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
     const source = mkdtempSync(join(tmpdir(), 'cez-e2e-team-source-'))
     const name = 'e2e-source-skill'

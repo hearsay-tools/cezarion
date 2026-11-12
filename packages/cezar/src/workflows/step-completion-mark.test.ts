@@ -62,7 +62,7 @@ describe('step completion mark at settlement callers', () => {
       unused<LoopArgs[1]>('loopHost', { active, executionBlockedByRootFinish: () => false,
         owesDelivery: () => false, closingWakeDecision: () => 'settle' }),
       unused<LoopArgs[2]>('line'), unused<LoopArgs[3]>('autosave'),
-      unused<LoopArgs[4]>('humanWaits', { withdrawCezarHumanWaits: vi.fn() }), settlement,
+      unused<LoopArgs[4]>('humanWaits', { withdrawSquawkHumanWaits: vi.fn() }), settlement,
       unused<LoopArgs[6]>('stepSession'), unused<LoopArgs[7]>('gate', { holdsAgentWaits: () => false }), '');
     runId = store.createRun({ title: 'mark', task: 'work', workflow: 'chain', steps: [] }).id;
     store.addStep(runId, { id: step.id, name: step.id, kind: STEP_KIND.agent });

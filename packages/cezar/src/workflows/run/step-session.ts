@@ -231,7 +231,7 @@ export class StepSession {
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(runDataDir(this.context.dataDir, runId), 'runs'), profile.env),
           env: { ...profile.env, ...delegation?.env, ...ciTools?.env },
-          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
+          ...(ciTools ? { squawkTools: ciTools.descriptor } : {}),
           ...(delegation ? { restrictCrossSessionMessaging: delegation.restrictCrossSessionMessaging } : {}),
           model: launch.model.backendModel,
           effort: launch.model.effectiveEffort,

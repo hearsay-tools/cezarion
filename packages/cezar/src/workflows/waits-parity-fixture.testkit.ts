@@ -383,7 +383,7 @@ export async function expectAdmissionRetryCleared(runner: RunnerId, id: string) 
     failures: store.getRun(id)?.waitDeliveryFailures, attempts: ciNativeMessages(runner, root) }).toEqual(before);
 }
 export async function timerWaits(id: string) {
-  const tools = manager.cezarToolHandlers(id, toolGenerationOf(id));
+  const tools = manager.squawkToolHandlers(id, toolGenerationOf(id));
   const timerWait = async (seconds: number, note: string) => {
     const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
     if (!('wait' in registered)) throw Error('registration refused');

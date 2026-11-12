@@ -7,7 +7,7 @@ import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createDeliveryControl } from '../../cezar/scripts/mock-delivery-control.mjs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor, waitForStatus } from './poll'
 import { seedRuns } from './seed-runs'
@@ -124,7 +124,7 @@ beforeAll(async () => {
   // `running` for the whole spec without a timed turn.
   const control = createDeliveryControl(controlRoot, { kind: 'hold-response', match: HOLD })
   releaseHold = control.release
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(root, { CEZ_MOCK_DELIVERY_CONTROL: control.path }), stdio: 'ignore' }, { deadline })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)

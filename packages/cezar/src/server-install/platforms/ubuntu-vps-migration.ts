@@ -292,7 +292,7 @@ export function stopUbuntuService(ctx: InstallContext, rebrand: boolean): Promis
 
 export interface UbuntuHealth {
   identity: InstallStep;
-  waitForCezar(ctx: InstallContext, port: number): Promise<boolean>;
+  waitForSquawk(ctx: InstallContext, port: number): Promise<boolean>;
 }
 
 /** Prove nginx reads the recorded htpasswd: a probe login added there must pass the public site.
@@ -371,7 +371,7 @@ export async function startUbuntuService(ctx: InstallContext, health: UbuntuHeal
   if (ctx.dryRun) return;
   if (ctx.state.externalProxy) { await health.identity.run(ctx); return; }
   const unit = recordedUnit(ctx, rebrand).name;
-  if (!(await health.waitForCezar(ctx, ctx.state.primaryPort))) throw new StepAborted(`${unit} did not answer on port ${ctx.state.primaryPort}`);
+  if (!(await health.waitForSquawk(ctx, ctx.state.primaryPort))) throw new StepAborted(`${unit} did not answer on port ${ctx.state.primaryPort}`);
   const { vhostAvailable, htpasswd } = recordedSite(ctx, rebrand);
   if (opts.probeAuth) await withProbeLogin(ctx, htpasswd, (login) => checkPublicSite(ctx, vhostAvailable, login));
   else await checkPublicSite(ctx, vhostAvailable);

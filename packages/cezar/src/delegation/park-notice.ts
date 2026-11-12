@@ -3,7 +3,7 @@ import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 import { createHash } from 'node:crypto';
 import type { ConversationMessage, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import type { RunEvent, RunStore } from '../runs/store.ts';
-import { describeWait, isCezarHumanWait } from '../workflows/waits.ts';
+import { describeWait, isSquawkHumanWait } from '../workflows/waits.ts';
 import { uuidFrom } from './questions.ts';
 import { topLevelAssistantText } from './results.ts';
 
@@ -59,7 +59,7 @@ export function parkNoticeExcerpt(text: string): string | undefined {
 /** What the parent reads: who parked, what it waits on, what it last said, and what to do next. */
 export function formatParkNoticeText(input: { workerRunId: string; waitId: string; waits: readonly Wait[]; lastText?: string }): string {
   // A worker parked on a question gets no notice; its question reaches the parent instead.
-  const open = input.waits.filter(wait => wait.phase === 'open' && !WAIT_KINDS[wait.kind].userAnswers && !isCezarHumanWait(wait));
+  const open = input.waits.filter(wait => wait.phase === 'open' && !WAIT_KINDS[wait.kind].userAnswers && !isSquawkHumanWait(wait));
   const excerpt = input.lastText === undefined ? undefined : parkNoticeExcerpt(input.lastText);
   return [
     `Cezar notice: your worker ${input.workerRunId} parked before finishing. Your wait ${input.waitId} stays open; this message closes no wait.`,

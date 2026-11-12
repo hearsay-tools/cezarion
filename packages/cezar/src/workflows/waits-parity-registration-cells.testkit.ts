@@ -66,7 +66,7 @@ export function registrationCells(runners: RunnerId[], it: typeof registerTest =
       expect(manager.continueRun(run.id, { text: 'u26-continue' }).ok).toBe(true);
       await until(() => prompted(runner, 'u26-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
       // A wake with no live session: the failed launch keeps the result, and the retry delivers it.
-      const handlers = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const handlers = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u26-wake' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
       sessionOf(run.id).end();
@@ -158,7 +158,7 @@ export function registrationCells(runners: RunnerId[], it: typeof registerTest =
       process.env.CEZ_MOCK_RELEASE_FILE = release;
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
       await until(() => store.readEvents(run.id).some(event => event.type === 'turn.started'));
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const open = async (seconds: number, note: string) => {
         const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
         if (!('wait' in registered)) throw Error('registration refused');
@@ -204,7 +204,7 @@ export function registrationCells(runners: RunnerId[], it: typeof registerTest =
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const open = async (request: Parameters<typeof tools.registerWait>[0]) => {
         const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
         if (!('wait' in registered)) throw Error('registration refused');
@@ -258,7 +258,7 @@ export function registrationCells(runners: RunnerId[], it: typeof registerTest =
       expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('))
         .map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
       await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const refused = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
       expect(refused.answer).toMatchObject({ ok: false, code: 'wake_budget_spent' });
       sessionOf(run.id).end();

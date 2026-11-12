@@ -142,7 +142,7 @@ export const KILL_GRACE_MS = 4_000;
  * fresh session. Held against the recorded HTTP requests by the harness parity matrix.
  */
 export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'merged OPENCODE_CONFIG_CONTENT local mcp entry' },
+  squawkTools: { honored: true, via: 'merged OPENCODE_CONFIG_CONTENT local mcp entry' },
   systemPrompt: { honored: true, via: 'prepended to the opening prompt_async text through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'prompt_async text part' },
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
@@ -1201,7 +1201,7 @@ class OpencodeSession implements AgentSession {
   private maybeCaptureQuestion(part: Record<string, unknown>, state: Record<string, unknown>, status: string | undefined, name: string, messageID: string | undefined): void {
     const questionPartId = stringField(part, 'id') ?? stringField(part, 'callID') ?? messageID;
     const questionInput = state.input ?? state;
-    const questionReady = name === 'question' && (toCezarQuestions(questionInput) !== null || status !== 'pending');
+    const questionReady = name === 'question' && (toSquawkQuestions(questionInput) !== null || status !== 'pending');
     if (!questionReady || !this.turnActive || this.pendingQuestion !== undefined || this.questionCapture !== undefined || this.questionReply !== undefined || (questionPartId !== undefined && this.handledQuestionParts.has(questionPartId))) return;
     if (questionPartId) this.handledQuestionParts.add(questionPartId);
     const capture = this.captureQuestion(questionInput);
@@ -1240,7 +1240,7 @@ class OpencodeSession implements AgentSession {
   }
 
   private async captureQuestion(input: unknown): Promise<void> {
-    const questions = toCezarQuestions(input);
+    const questions = toSquawkQuestions(input);
     const turnSerial = this.turnSerial;
     let requestId: string | undefined;
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -1575,7 +1575,7 @@ function textOf(content: ContentBlock[]): string {
     .trim();
 }
 
-function toCezarQuestions(value: unknown): AskQuestion[] | null {
+function toSquawkQuestions(value: unknown): AskQuestion[] | null {
   if (!isRecord(value) || !Array.isArray(value.questions)) return null;
   if (value.questions.length < 1 || value.questions.length > 4) return null;
   const questions: AskQuestion[] = [];

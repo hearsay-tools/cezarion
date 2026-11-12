@@ -41,8 +41,8 @@ export function provisionWorkflowFixture() {
   let f: ReturnType<typeof fixture>, controller: DelegationController;
   const toolSessions = new Map<string, { manager: RunManager; generation: string }>();
   function observeTools(manager: RunManager) {
-    const handlers = manager.cezarToolHandlers.bind(manager);
-    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    const handlers = manager.squawkToolHandlers.bind(manager);
+    vi.spyOn(manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
       toolSessions.set(id, { manager, generation }); return handlers(id, generation);
     });
   }
@@ -121,7 +121,7 @@ export function provisionWorkflowFixture() {
     const runId = entry.spec.env!.CEZ_TASK_ID!;
     const tools = toolSessions.get(runId);
     if (!tools) throw new Error(`no tool launch for ${runId}`);
-    const answer = await tools.manager.cezarToolHandlers(runId, tools.generation).finishTurn({}, new AbortController().signal);
+    const answer = await tools.manager.squawkToolHandlers(runId, tools.generation).finishTurn({}, new AbortController().signal);
     if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
     entry.emit({ type: 'text', text });
     entry.emit({ type: 'turn-end' });

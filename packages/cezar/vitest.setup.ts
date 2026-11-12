@@ -51,7 +51,7 @@ process.env.PATH = hideHostCommands(HOST_RUNNER_COMMANDS, join(sandboxTemp, 'pat
 // the NEXT write pointed at the sandbox. A test that wants the unpinned default
 // deletes the variable inside its own body (see `src/paths.test.ts`) — that still
 // works, because this hook runs after the test, not during it. The write guard in
-// `assertCezarHomeWriteIsSandboxed` catches whatever still slips through.
+// `assertSquawkHomeWriteIsSandboxed` catches whatever still slips through.
 // Both homes live inside `sandboxTemp`, so its exit, signal and dead-owner cleanup removes them too.
 const sandboxUserHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-user-home-'))
 const sandboxHome = mkdtempSync(join(sandboxUserHome, 'cez-vitest-home-'))
@@ -62,7 +62,7 @@ const sandboxHome = mkdtempSync(join(sandboxUserHome, 'cez-vitest-home-'))
 linkSharedOmpNatives(sandboxUserHome)
 
 
-const testHome = configureTestHome({ userHome: sandboxUserHome, cezarHome: sandboxHome })
+const testHome = configureTestHome({ userHome: sandboxUserHome, squawkHome: sandboxHome })
 
 configureTestHomeSelector(home => testHome.select(home?.rootOverride ?? home?.root))
 const pinSandboxHome = testHome.pinHome

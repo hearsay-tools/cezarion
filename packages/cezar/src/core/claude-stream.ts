@@ -81,10 +81,10 @@ export function selectedModelRefusal(text: unknown): string | undefined {
 
 export function normalizeIntentionalTeardownResult(
   msg: ClaudeStreamMessage,
-  terminatedByCezar: boolean,
+  terminatedBySquawk: boolean,
 ): ClaudeStreamMessage {
   if (
-    terminatedByCezar
+    terminatedBySquawk
     && msg.type === 'result'
     && msg.is_error === true
     && msg.subtype === 'error_during_execution'

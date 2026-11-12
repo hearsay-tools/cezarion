@@ -57,7 +57,7 @@ async function besideWait(runId: string, kind: 'peer' | 'worker') {
     manager.registerWorkerListWait(runId, { workerIds: [child.id], timeoutSeconds: 600 }, 'cezar_wait');
   } else {
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', steps: [], runner: 'claude' });
-    const result = await manager.cezarToolHandlers(runId, toolGenerationOf(runId)).registerWait({ kind: WAIT_KIND.peer, peer_ids: [peer.id] }, 'cezar_wait', new AbortController().signal);
+    const result = await manager.squawkToolHandlers(runId, toolGenerationOf(runId)).registerWait({ kind: WAIT_KIND.peer, peer_ids: [peer.id] }, 'cezar_wait', new AbortController().signal);
     expect(result.answer.ok).toBe(true);
   }
 }
@@ -291,7 +291,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a parent turn the runner starts closes the subagent wait and every timer, and takes no wake', async () => {
     let timerId = '';
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      const handlers = manager.cezarToolHandlers(runId, toolGenerationOf(runId));
+      const handlers = manager.squawkToolHandlers(runId, toolGenerationOf(runId));
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw new Error('timer not registered');
       timerId = registered.wait.id;
@@ -314,7 +314,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a human message keeps the subagent wait and its timers open, and the turn end parks on it again', async () => {
     let timerId = '';
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      const handlers = manager.cezarToolHandlers(runId, toolGenerationOf(runId));
+      const handlers = manager.squawkToolHandlers(runId, toolGenerationOf(runId));
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw new Error('timer not registered');
       timerId = registered.wait.id;

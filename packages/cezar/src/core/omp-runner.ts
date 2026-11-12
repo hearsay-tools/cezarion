@@ -32,7 +32,7 @@ import { ompRequestedTools } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
-import { cezarToolNames } from '../ci-wait/tool-catalog.js';
+import { squawkToolNames } from '../ci-wait/tool-catalog.js';
 import { readNdjson } from './ndjson.js';
 import {
   createOmpUiState,
@@ -88,7 +88,7 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
  * support). Held against the mock's recorded argv and RPC by the harness parity matrix.
  */
 export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'explicit CI --extension; the cezar tools admitted when --tools is set' },
+  squawkTools: { honored: true, via: 'explicit CI --extension; the cezar tools admitted when --tools is set' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
@@ -124,7 +124,7 @@ export interface OmpToolSelection {
 export function ompTools(
   grant: ToolGrant,
   opts: {
-    cezarTools?: boolean;
+    squawkTools?: boolean;
     /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
     env?: NodeJS.ProcessEnv | undefined;
     /** OMP names the user's settings disabled (Ruling 13), removed from the list; never added to it. */
@@ -151,7 +151,7 @@ export function ompTools(
   for (const name of opts.exclude ?? []) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
   // Exactly the names omp-ci-wait.mjs registers (Ruling 11): OMP exits 2 on an unknown --tools name.
-  if (opts.cezarTools) for (const name of cezarToolNames(opts.env ?? {})) tools.add(name);
+  if (opts.squawkTools) for (const name of squawkToolNames(opts.env ?? {})) tools.add(name);
   return { flag: 'tools', tools: [...tools], dropped: [...dropped] };
 }
 
@@ -189,7 +189,7 @@ export function buildOmpArgs(
   opts: { omitAddDir?: boolean } = {},
 ): string[] {
   const args = ['--mode', 'rpc'];
-  if (spec.cezarTools) args.push('--extension', ompScriptPath('omp-ci-wait.mjs'));
+  if (spec.squawkTools) args.push('--extension', ompScriptPath('omp-ci-wait.mjs'));
   // OMP has no --session-id: a fresh session mints its id, which get_state reports.
   if (spec.resume && spec.sessionId) args.push('--resume', spec.sessionId);
   if (spec.systemPrompt) args.push('--append-system-prompt', spec.systemPrompt);
@@ -198,7 +198,7 @@ export function buildOmpArgs(
   if (effort) args.push('--thinking', effort);
   if (!opts.omitAddDir) for (const dir of spec.additionalDirectories ?? []) args.push('--add-dir', dir);
   const selection = ompTools(spec.toolGrant, {
-    cezarTools: spec.cezarTools !== undefined,
+    squawkTools: spec.squawkTools !== undefined,
     env: spec.env,
     exclude: excludeTools,
   });
@@ -305,7 +305,7 @@ export class OmpRunner implements AgentRunner {
     };
     let open = true;
     let timedOut = false;
-    let terminatedByCezar = false;
+    let terminatedBySquawk = false;
     let killWatchdog: PiEndWatchdog | undefined;
     let interruptKillTimer: NodeJS.Timeout | undefined;
     let ompUi = createOmpUiState();
@@ -347,7 +347,7 @@ export class OmpRunner implements AgentRunner {
     const outbox: Array<Record<string, unknown>> = [];
     const failInput = (failedChild: ChildProcessWithoutNullStreams, error: Error): void => {
       // EOF/abort teardown and an old refusal child's late errors are not new failures.
-      if (failedChild !== child || closedByCaller || terminatedByCezar || inputError) return;
+      if (failedChild !== child || closedByCaller || terminatedBySquawk || inputError) return;
       inputError = new Error(`omp input stream failed: ${error.message}`);
       open = false;
       outbox.length = 0;
@@ -436,7 +436,7 @@ export class OmpRunner implements AgentRunner {
       rpcInput.rejectAgentAck();
       flushOutbox();
       child.stdin.end();
-      killWatchdog = armEndWatchdog(() => child, killGraceMs, () => { terminatedByCezar = true; });
+      killWatchdog = armEndWatchdog(() => child, killGraceMs, () => { terminatedBySquawk = true; });
     };
     const interrupt = (): void => {
       if (!open) return;
@@ -444,7 +444,7 @@ export class OmpRunner implements AgentRunner {
       open = false;
       closedByCaller = true;
       rpcInput.rejectAgentAck();
-      terminatedByCezar = true;
+      terminatedBySquawk = true;
       signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
@@ -488,7 +488,7 @@ export class OmpRunner implements AgentRunner {
     // A refusal is only retried before any frame, once per class, and never after the caller or a
     // deadline ended the session; a spawn with nothing to drop has `uiHold` null.
     const retryPossible = (): boolean =>
-      !sawFrame && !(toolsRetried && flagsRetried) && !timedOut && !terminatedByCezar && !closedByCaller && uiHold !== null;
+      !sawFrame && !(toolsRetried && flagsRetried) && !timedOut && !terminatedBySquawk && !closedByCaller && uiHold !== null;
     const releaseFirstFrame = (): void => {
       if (sawFrame) return;
       sawFrame = true;
@@ -682,7 +682,7 @@ export class OmpRunner implements AgentRunner {
         settleEvent: 'session_settled',
         exitCode,
         signalCode: child.signalCode,
-        terminatedByCezar,
+        terminatedBySquawk,
         timedOut,
         limitMs,
         stderr,
@@ -706,7 +706,7 @@ export class OmpRunner implements AgentRunner {
           open = false;
           // The run is reported failed, so the CLI must not keep running tools in the worktree:
           // SIGTERM now, SIGKILL after the grace period (a timer `finally` does not clear).
-          terminatedByCezar = true;
+          terminatedBySquawk = true;
           signalSession(child, 'SIGTERM');
           const reap = setTimeout(() => {
             if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');

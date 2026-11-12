@@ -12,11 +12,11 @@ import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { WorkerWaitRequest } from '@open-mercato/cezar-contract/delegation';
-import { cezarAskRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { squawkAskRequestSchema, squawkWaitRequestSchema, type AskErrorCode, type SquawkAskRequest, type SquawkWaitRequest, type SquawkWaitRequestInput, type WaitErrorCode, type WaitVia, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { askErrorMessage, waitErrorMessage } from '../../ci-wait/errors.ts';
-import { toolSessionRefusal } from './cezar-tools.ts';
+import { toolSessionRefusal } from './squawk-tools.ts';
 import { askCardFields } from './turn-markers.ts';
 import { identicalWait, normalizePrUrl, openWaits, timerWaitEntry, prWaitEntry, processWaitEntry } from '../waits.ts';
 import { delegationWaitRefusal, workerListTarget } from '../wait-scope.ts';
@@ -181,8 +181,8 @@ export class WaitRegistry {
    * the user saw it returns it unchanged. An autonomous run assumes and continues instead, until
    * its automatic wakes are spent.
    */
-  async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> {
-    const card = askCardFields(cezarAskRequestSchema.parse(request));
+  async registerAsk(runId: string, request: SquawkAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> {
+    const card = askCardFields(squawkAskRequestSchema.parse(request));
     const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
     const turnId = active.waitIdentity.ensureCiTurn();
@@ -205,8 +205,8 @@ export class WaitRegistry {
    * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
    * returns the open wait it repeats.
    */
-  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> {
-    const parsed = cezarWaitRequestSchema.parse(request);
+  async registerWait(runId: string, request: SquawkWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> {
+    const parsed = squawkWaitRequestSchema.parse(request);
     const registration = registrationIdentity(parsed);
     const replay = replayRegistration(this.context.store.getRun(runId), registration);
     if (replay) return replay as PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry;
@@ -238,7 +238,7 @@ export class WaitRegistry {
 
   /** A timer or PR registration that repeats an open wait returns it; otherwise a full list refuses
    *  it. Counted as the store counts them, so a registration accepted here is never refused there. */
-  private repeatOrRefuseFull(runId: string, run: RunRecord, request: Extract<CezarWaitRequest, { kind: 'timer' | 'pr' }>, turnId: string,
+  private repeatOrRefuseFull(runId: string, run: RunRecord, request: Extract<SquawkWaitRequest, { kind: 'timer' | 'pr' }>, turnId: string,
     registration: RegistrationIdentity | undefined, refuse: (code: WaitErrorCode) => never): PrWaitEntry | TimerWaitEntry | ProcessWaitEntry | undefined {
     const existing = identicalWait(run.waits ?? [], request, turnId);
     if (existing) return repeatRegistration(this.context.store, runId, existing, WAIT_KINDS[request.kind].requestedTimeout(request), registration) as typeof existing;
@@ -246,7 +246,7 @@ export class WaitRegistry {
     return undefined;
   }
 
-  private async registerPrWait(runId: string, active: ActiveRun, pr: Extract<CezarWaitRequest, { kind: 'pr' }>, via: WaitVia, generation: string, turnId: string,
+  private async registerPrWait(runId: string, active: ActiveRun, pr: Extract<SquawkWaitRequest, { kind: 'pr' }>, via: WaitVia, generation: string, turnId: string,
     registration: RegistrationIdentity | undefined, assertCanRegister: () => unknown, refuse: (code: WaitErrorCode) => never,
     capabilitySignal: AbortSignal | undefined): Promise<PrWaitEntry | TimerWaitEntry> {
     const key = `${runId}\n${normalizePrUrl(pr.pr)}\n${pr.until}\n${pr.wake_on_conflict}`;
@@ -304,7 +304,7 @@ export class WaitRegistry {
    * A PID already gone is no error: the command was fast, and the wait resolves at once from its
    * exit file, or as exited.
    */
-  private registerProcessWait(runId: string, active: ActiveRun, run: RunRecord, request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, registration?: RegistrationIdentity): ProcessWaitEntry {
+  private registerProcessWait(runId: string, active: ActiveRun, run: RunRecord, request: Extract<SquawkWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, registration?: RegistrationIdentity): ProcessWaitEntry {
     const refuse = (code: WaitErrorCode): never => { throw Object.assign(new Error(waitErrorMessage(code)), { code }); };
     this.checkAutomaticWaitAdmission('process', runId, refuse);
     const roots = this.host.waitEngine.exitFileRoots(runId, run);

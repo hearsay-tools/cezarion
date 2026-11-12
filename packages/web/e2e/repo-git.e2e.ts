@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, readTestEnv } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
 // fixture-server starts: 1
 
@@ -218,7 +218,7 @@ describe('opening one commit’s structured diff, in a repository this spec buil
   beforeAll(async () => {
     repo = mkdtempSync(join(tmpdir(), 'cezar-e2e-repo-git-commit-'))
     buildCommitFixture(repo)
-    server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'], {
+    server = spawnFixtureServer([squawkCli, 'serve', '--repo', repo, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(repo),
       stdio: 'ignore',
     })

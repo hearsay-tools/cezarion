@@ -7,7 +7,7 @@ import { RUN_STATUS, STEP_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE,
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, type ContrastSample } from './contrast'
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { seedTranscript } from './seed-transcript'
@@ -77,7 +77,7 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
   seedRuns(dataRoot, RUNS)
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot, { CEZ_AUTONAME: '0' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   })

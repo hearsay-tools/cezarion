@@ -31,7 +31,7 @@ import { RUNNER_FACTS } from './runner-facts.js';
 import { unknownToolGrant } from './agent-runner.js';
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
-import { cezarToolNames } from '../ci-wait/tool-catalog.js';
+import { squawkToolNames } from '../ci-wait/tool-catalog.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
@@ -65,7 +65,7 @@ export interface PiRunnerOptions {
  * argv and RPC prompt by the harness parity matrix.
  */
 export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'explicit CI --extension and selected tool admission' },
+  squawkTools: { honored: true, via: 'explicit CI --extension and selected tool admission' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt message' },
   images: { honored: true, via: 'RPC prompt images' },
@@ -116,7 +116,7 @@ export class PiRunner implements AgentRunner {
     boundOutputDrainAfterExit(child);
     let open = true;
     let timedOut = false;
-    let terminatedByCezar = false;
+    let terminatedBySquawk = false;
     let explicitEnd = false;
     let automaticCleanupStarted = false;
     let killWatchdog: PiEndWatchdog | undefined;
@@ -191,7 +191,7 @@ export class PiRunner implements AgentRunner {
     }
     const failInput = (error: Error): void => {
       // Late errors from caller close/abort/deadline teardown are not new failures.
-      if (!open || terminatedByCezar || inputError) return;
+      if (!open || terminatedBySquawk || inputError) return;
       inputError = new Error(`pi input stream failed: ${error.message}`);
       open = false;
       rpcInput.rejectAgentAck(inputError);
@@ -236,19 +236,19 @@ export class PiRunner implements AgentRunner {
     const end = (): void => {
       if (child.exitCode === null && child.signalCode === null) {
         explicitEnd = true;
-        terminatedByCezar ||= automaticCleanupStarted;
+        terminatedBySquawk ||= automaticCleanupStarted;
       }
       if (!open) return;
       open = false;
       rpcInput.rejectAgentAck();
       child.stdin.end();
-      killWatchdog = armEndWatchdog(() => child, KILL_GRACE_MS, () => { terminatedByCezar = true; });
+      killWatchdog = armEndWatchdog(() => child, KILL_GRACE_MS, () => { terminatedBySquawk = true; });
     };
     const interrupt = (): void => {
-      if (child.exitCode === null && child.signalCode === null) terminatedByCezar = true;
+      if (child.exitCode === null && child.signalCode === null) terminatedBySquawk = true;
       if (!open) return;
       // Mark intent before the abort write: even a synchronous write failure is teardown.
-      terminatedByCezar = true;
+      terminatedBySquawk = true;
       write({ type: 'abort' });
       open = false;
       rpcInput.rejectAgentAck();
@@ -298,7 +298,7 @@ export class PiRunner implements AgentRunner {
         const state = await waitForEofExit(child);
         if (state !== 'exited') {
           automaticCleanupStarted = true;
-          terminatedByCezar ||= explicitEnd || state === 'live';
+          terminatedBySquawk ||= explicitEnd || state === 'live';
           terminateAfterOutput();
         }
       }
@@ -401,7 +401,7 @@ export class PiRunner implements AgentRunner {
         settleEvent: 'agent_settled',
         exitCode,
         signalCode: child.signalCode,
-        terminatedByCezar,
+        terminatedBySquawk,
         timedOut,
         limitMs,
         stderr,
@@ -424,7 +424,7 @@ export class PiRunner implements AgentRunner {
           // has actually exited so its capacity cannot be released early.
           open = false;
           rpcInput.rejectAgentAck();
-          terminatedByCezar = true;
+          terminatedBySquawk = true;
           const reap = terminateAfterOutput();
           await waitForExit(child);
           clearTimeout(reap);
@@ -474,7 +474,7 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   // pi loads a repo's .pi/skills and .agents/skills only for a trusted folder; the project-skills
   // extension offers them to an untrusted one without trusting it (hearsay-tools/cezarion#1295).
   const args = ['--mode', 'rpc', '--extension', piDegradedServiceRetryExtensionPath(), '--extension', piProjectSkillsExtensionPath()];
-  if (spec.cezarTools) args.push('--extension', fileURLToPath(new URL('../../scripts/pi-ci-wait.mjs', import.meta.url)));
+  if (spec.squawkTools) args.push('--extension', fileURLToPath(new URL('../../scripts/pi-ci-wait.mjs', import.meta.url)));
   if (spec.sessionId) args.push(spec.resume ? '--session' : '--session-id', spec.sessionId);
   if (spec.systemPrompt) args.push('--append-system-prompt', spec.systemPrompt);
   if (spec.model) args.push('--model', spec.model);
@@ -520,7 +520,7 @@ function piToolArgs(spec: AgentRunSpec, allowedTools: readonly string[], bashAll
     // The cezar tools need no name: pi activates an extension's tools on registration.
     return ['--no-builtin-tools', '--extension', piDefaultToolsExtensionPath(), '--cezar-builtin-tools', tools.join(',')];
   }
-  if (spec.cezarTools) tools.push(...cezarToolNames(spec.env ?? {}));
+  if (spec.squawkTools) tools.push(...squawkToolNames(spec.env ?? {}));
   return tools.length > 0 ? ['--tools', tools.join(',')] : ['--no-tools'];
 }
 

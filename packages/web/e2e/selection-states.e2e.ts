@@ -11,7 +11,7 @@ import { seedRuns } from './seed-runs'
 import { waitForSettledSample as rawSettledSample } from './visual-ready'
 import { normalizeColorExpression, normalizeColorSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, type ContrastQaVariant, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 // fixture-server starts: 1
 
@@ -47,7 +47,7 @@ beforeAll(async () => {
     ({ id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: RUN_STATUS.done, tokensUsed: 0,
       createdAt: new Date(Date.now() - 7_200_000).toISOString(), finishedAt: new Date(Date.now() - 7_200_000).toISOString(), archived: false, steps: [] } satisfies Partial<RunRecord>),
   ])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

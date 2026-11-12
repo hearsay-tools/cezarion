@@ -364,7 +364,7 @@ describe('Cursor print logical session', () => {
     scratch.push(extraRoot);
     const syntheticToken = 'synthetic-tool-token-590';
     spec.restrictCrossSessionMessaging = true;
-    spec.cezarTools = { name: 'cezar', command: 'node', args: ['/safe/mock-mcp.mjs'] };
+    spec.squawkTools = { name: 'cezar', command: 'node', args: ['/safe/mock-mcp.mjs'] };
     spec.env = { ...spec.env, CEZ_TOOL_TOKEN: syntheticToken, CEZ_TOOL_SOCKET: '/tmp/synthetic-tool-socket', HSQ_TOOL_TOKEN: syntheticToken, HSQ_AUTOMATIONS: '', CEZ_AUTOMATIONS: '0' };
     spec.additionalDirectories = [extraRoot];
     spec.effort = 'low';

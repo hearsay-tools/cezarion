@@ -22,8 +22,8 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     // The worker asks while the parent's turn holds its slot.
     const sessionOf = captureSessions();
     const accepted = new Set<string>();
-    const handlers = vi.mocked(manager.cezarToolHandlers).getMockImplementation()!;
-    vi.mocked(manager.cezarToolHandlers).mockImplementation((id, generation) => {
+    const handlers = vi.mocked(manager.squawkToolHandlers).getMockImplementation()!;
+    vi.mocked(manager.squawkToolHandlers).mockImplementation((id, generation) => {
       const tools = handlers(id, generation);
       return { ...tools, finishTurn: async (...args) => {
         const result = await tools.finishTurn(...args);

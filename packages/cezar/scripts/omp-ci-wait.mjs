@@ -13,11 +13,11 @@ const loadBuilt = (error) => {
   process.stderr.write('cezar: loading built cezar tools from dist/; rebuild after changing src/ci-wait\n');
   return import(built.href);
 };
-const { cezarTools } = await (existsSync(source) ? import(source.href).catch(loadBuilt) : import(built.href));
+const { squawkTools } = await (existsSync(source) ? import(source.href).catch(loadBuilt) : import(built.href));
 // #781: the shared cezar tool list, read in OMP's own process, whose env carries the opt-in.
 // `ompTools` admits exactly these names to `--tools`: OMP exits 2 on a name nothing registered.
 export default function ciWaitExtension(pi) {
-  for (const tool of cezarTools(process.env)) {
+  for (const tool of squawkTools(process.env)) {
     pi.registerTool({
       name: tool.definition.name,
       label: tool.label,

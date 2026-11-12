@@ -205,7 +205,7 @@ export type ScenarioClass = 'runner-code' | 'shared';
 
 const MAPPER = 'a turn shape every mapper emits alike (ui-parity holds the mappers); Cezar decides the outcome';
 const TURN_PATH = 'it differs only by a turn-path fact, which the shared runner set shows value by value';
-const CEZAR_TOOL = 'the same Cezar tool call on every wire';
+const SQUAWK_TOOL = 'the same Cezar tool call on every wire';
 const OWN_ERROR = 'the runner maps its own provider or process failure';
 const PERMISSION = 'a native permission or approval request exists only on some wires and each answers it its own way';
 const NATIVE_ASK = 'a native ask exists only where nativeAsk is answerable (codex, opencode)';
@@ -225,16 +225,16 @@ export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioC
   'turn-messages': ['shared', MAPPER],
   'silent-tail': ['shared', MAPPER],
   'silent-tail-again': ['shared', MAPPER],
-  'cezar-done': ['shared', CEZAR_TOOL],
-  'cezar-ask': ['shared', CEZAR_TOOL],
-  'cezar-wait': ['shared', CEZAR_TOOL],
-  autonomous: ['shared', CEZAR_TOOL],
-  'autonomous-cap': ['shared', CEZAR_TOOL],
-  'autonomous-cezar-ask-cap': ['shared', CEZAR_TOOL],
+  'cezar-done': ['shared', SQUAWK_TOOL],
+  'cezar-ask': ['shared', SQUAWK_TOOL],
+  'cezar-wait': ['shared', SQUAWK_TOOL],
+  autonomous: ['shared', SQUAWK_TOOL],
+  'autonomous-cap': ['shared', SQUAWK_TOOL],
+  'autonomous-cezar-ask-cap': ['shared', SQUAWK_TOOL],
   hold: ['shared', 'the mock delays its terminal turn signal; Cezar decides what happens meanwhile'],
   'hold-gated': ['shared', 'the mock holds its turn until a gate file exists; Cezar decides what happens meanwhile'],
-  'hold-cezar-done': ['shared', CEZAR_TOOL],
-  'hold-cezar-ask': ['shared', CEZAR_TOOL],
+  'hold-cezar-done': ['shared', SQUAWK_TOOL],
+  'hold-cezar-ask': ['shared', SQUAWK_TOOL],
   'steer-tool': ['shared', TURN_PATH],
   'steer-late': ['shared', TURN_PATH],
   'provider-error': ['runner-code', OWN_ERROR],

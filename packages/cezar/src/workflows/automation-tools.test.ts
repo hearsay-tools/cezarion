@@ -31,7 +31,7 @@ describe('RunManager automation tools', () => {
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
     // No live session entry: the handlers are built for a run nothing has started.
     expect(manager.isActive(run.id)).toBe(false);
-    const handlers = manager.cezarToolHandlers(run.id, 'generation');
+    const handlers = manager.squawkToolHandlers(run.id, 'generation');
     const scheduleTask = vi.fn(async () => created);
     const scheduledTasks = vi.fn(async () => listed);
     manager.setAutomationTools({ scheduleTask, scheduledTasks });
@@ -45,7 +45,7 @@ describe('RunManager automation tools', () => {
   it('a call made before the service is attached waits for it', async () => {
     const { store, manager } = fixture();
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
-    const handlers = manager.cezarToolHandlers(run.id, 'generation');
+    const handlers = manager.squawkToolHandlers(run.id, 'generation');
     const answer = handlers.scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal);
     manager.setAutomationTools({ scheduleTask: async () => created, scheduledTasks: async () => listed });
     await expect(answer).resolves.toEqual(created);
@@ -54,7 +54,7 @@ describe('RunManager automation tools', () => {
   it('no service within the startup window answers unavailable', async () => {
     const { store, manager } = fixture();
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
-    const handlers = manager.cezarToolHandlers(run.id, 'generation');
+    const handlers = manager.squawkToolHandlers(run.id, 'generation');
     vi.useFakeTimers();
     try {
       const first = handlers.scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal);
@@ -72,6 +72,6 @@ describe('RunManager automation tools', () => {
     const { store, manager } = fixture();
     manager.setCockpitAddress(undefined);
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
-    await expect(manager.cezarToolHandlers(run.id, 'generation').scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    await expect(manager.squawkToolHandlers(run.id, 'generation').scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
   });
 });

@@ -128,8 +128,8 @@ describe('fields this cezar does not know (the raw-record codec)', () => {
   it('survive import, an update and a reopen, while a removed known field stays removed', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', {
       pinned: true, pinnedAt: '2026-09-01T00:00:00.000Z',
-      fromNewerCezar: { nested: ['kept'] },
-      steps: [step('s1', { stepFromNewerCezar: 42 }), step('s2')],
+      fromNewerSquawk: { nested: ['kept'] },
+      steps: [step('s1', { stepFromNewerSquawk: 42 }), step('s2')],
     })]));
     const store = open();
     store.updateRun('a', { title: 'renamed' });
@@ -144,14 +144,14 @@ describe('fields this cezar does not know (the raw-record codec)', () => {
 
     const row = persisted('a');
     expect(row.title).toBe('renamed');
-    expect(row.fromNewerCezar).toEqual({ nested: ['kept'] });
-    expect(row.steps).toEqual([step('s1', { iterations: 2, stepFromNewerCezar: 42 }), step('s2', { status: STEP_STATUS.failed })]);
+    expect(row.fromNewerSquawk).toEqual({ nested: ['kept'] });
+    expect(row.steps).toEqual([step('s1', { iterations: 2, stepFromNewerSquawk: 42 }), step('s2', { status: STEP_STATUS.failed })]);
     expect(row).not.toHaveProperty('pinned');
     expect(row).not.toHaveProperty('pinnedAt');
   });
 
   it('do not include a field the salvage dropped as unreadable: that drop is the runtime\'s, as before', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { lastCiWait: { unreadable: true }, fromNewerCezar: 1 })]));
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { lastCiWait: { unreadable: true }, fromNewerSquawk: 1 })]));
     const store = open();
     // Store schema 4 reads the legacy field into the wait list's salvage (unified waits).
     expect(store.getRun('a')?.lastWaitsError).toContain('unreadable');
@@ -159,24 +159,24 @@ describe('fields this cezar does not know (the raw-record codec)', () => {
     store.flush();
     expect(persisted('a')).not.toHaveProperty('lastCiWait');
     expect(persisted('a')).not.toHaveProperty('lastWaits');
-    expect(persisted('a')).toMatchObject({ fromNewerCezar: 1, lastWaitsError: expect.stringContaining('unreadable') });
+    expect(persisted('a')).toMatchObject({ fromNewerSquawk: 1, lastWaitsError: expect.stringContaining('unreadable') });
   });
 
   it('are stored as runs.json held them until the run is first written', () => {
-    const original = record('a', { fromNewerCezar: 1, runner: 'claude-cli' });
+    const original = record('a', { fromNewerSquawk: 1, runner: 'claude-cli' });
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([original]));
     expect(open().getRun('a')?.runner).toBe('claude');
     expect(persisted('a')).toEqual(original);
   });
 
   it('survive an optimistic write and a durable commit of a run read cold', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { fromNewerCezar: 'kept' }), record('bb', { fromNewerCezar: 'kept too' })]));
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { fromNewerSquawk: 'kept' }), record('bb', { fromNewerSquawk: 'kept too' })]));
     const store = open();
     store.setArchived('a', true);
     store.flush();
     store.commitDelegation([{ id: 'bb', delegation: { role: 'invalid' } }]);
-    expect(persisted('a')).toMatchObject({ archived: true, fromNewerCezar: 'kept' });
-    expect(persisted('bb')).toMatchObject({ delegation: { role: 'invalid' }, fromNewerCezar: 'kept too' });
+    expect(persisted('a')).toMatchObject({ archived: true, fromNewerSquawk: 'kept' });
+    expect(persisted('bb')).toMatchObject({ delegation: { role: 'invalid' }, fromNewerSquawk: 'kept too' });
   });
 });
 

@@ -10,7 +10,7 @@
  * now structural.
  *
  * Contents:
- *   - `client.ts` — `createCezarClient<AppType>()`, the typed client over the versioned
+ *   - `client.ts` — `createSquawkClient<AppType>()`, the typed client over the versioned
  *     `/api/v1` surface. Types come from the server's own handlers; nothing is declared twice.
  *   - `@open-mercato/cezar-contract` — re-exported wholesale, so a consumer needs one import for
  *     both the client and the request/response schemas it speaks. The hand-written `dto/*` mirror

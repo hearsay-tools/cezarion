@@ -383,7 +383,7 @@ export interface PiFamilyExit {
   settleEvent: 'agent_settled' | 'session_settled';
   exitCode: number | null;
   signalCode: NodeJS.Signals | null;
-  terminatedByCezar: boolean;
+  terminatedBySquawk: boolean;
   timedOut: boolean;
   limitMs: number;
   stderr: readonly string[];
@@ -420,7 +420,7 @@ export function settlePiFamilyExit(exit: PiFamilyExit): AgentRunResult {
  */
 function reportPiFamilyExit(exit: PiFamilyExit): void {
   const { cli, exitCode, signalCode, onEvent } = exit;
-  if (exit.terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null))) {
+  if (exit.terminatedBySquawk && (isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null))) {
     onEvent?.({
       type: 'note',
       message: `${cli} CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? signalCode : `code ${exitCode}`})`,

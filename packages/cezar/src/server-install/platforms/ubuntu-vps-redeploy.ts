@@ -134,7 +134,7 @@ export async function freshRestartOrFail(
   }
 }
 
-/** The status and journal commands `confirmCezarRunning` runs for the scope. */
+/** The status and journal commands `confirmSquawkRunning` runs for the scope. */
 export function serviceDiagnostics(scope: 'user' | 'system', unit: string): { statusCmd: string; logsCmd: string } {
   return scope === 'user'
     ? { statusCmd: `systemctl --user status ${unit}`, logsCmd: `journalctl --user -u ${unit} -n 50 --no-pager` }

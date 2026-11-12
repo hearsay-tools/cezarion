@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, readTestEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { waitForStatus } from './poll'
 // fixture-server starts: 1
@@ -177,7 +177,7 @@ beforeAll(async () => {
   const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
   git('init', '-q', '-b', 'main')
   git('-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture')
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     // A plain nudge reply keeps the no-wait nudge from parking a plain reply on its own "Next step"
     // card: the tell test needs a task with no question card (hearsay-tools/cezarion#1463).
     env: fixtureServeEnv(root, { CEZ_VOICE: '1', CEZ_MOCK_NUDGE_REPLY: 'plain' }),

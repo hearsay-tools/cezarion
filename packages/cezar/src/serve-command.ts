@@ -88,7 +88,7 @@ export async function serveCommand(
   const previewHost = deps.previewToolEnabled() ? new deps.PreviewHost({ home }) : undefined;
   // The port the cockpit bound, once `startServer` listens; the preview tool refuses it.
   let boundPort: number | undefined;
-  const cezarPort = () => boundPort;
+  const squawkPort = () => boundPort;
   // #774: the listener is already bound, so the boot manager knows its address before recovery
   // resumes anything; startServer re-sets the same value once it serves.
   const listenerAddress = listener.address();
@@ -99,7 +99,7 @@ export async function serveCommand(
   // across projects, and the activity route reads every project's runs from it.
   const toolActivity = new deps.ToolActivityTracker();
   const manager: RunManager = new deps.RunManager(store, repoRoot, {
-    home, createRunner: deps.createRunner, semaphore, preview: previewHost, cezarPort, cockpit, toolActivity,
+    home, createRunner: deps.createRunner, semaphore, preview: previewHost, squawkPort, cockpit, toolActivity,
     sweepBranches: (keep) => void deps.sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
   const delegation = await deps.DelegationController.start();
@@ -150,7 +150,7 @@ export async function serveCommand(
     workspaceEvents,
     taskWebhooks,
     previewHost,
-    cezarPort,
+    squawkPort,
     toolActivity,
   }, port, listener);
   if (!server.listening) await deps.once(server, 'listening');

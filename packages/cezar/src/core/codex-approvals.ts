@@ -95,9 +95,9 @@ function offer() {
   return { options, responses, add };
 }
 
-/** `cezarServer` is the run's own MCP server, which is never worth a saved rule. */
-export function codexApproval(method: string, rpcId: number | string, raw: unknown, cezarServer?: string): CodexApproval | undefined {
-  if (method === MCP_ELICITATION_METHOD) return mcpToolApproval(rpcId, raw, cezarServer);
+/** `squawkServer` is the run's own MCP server, which is never worth a saved rule. */
+export function codexApproval(method: string, rpcId: number | string, raw: unknown, squawkServer?: string): CodexApproval | undefined {
+  if (method === MCP_ELICITATION_METHOD) return mcpToolApproval(rpcId, raw, squawkServer);
   const schema = method === 'item/commandExecution/requestApproval' ? commandParams
     : method === 'item/fileChange/requestApproval' ? fileParams : permissionsParams;
   const parsed = schema.safeParse(raw);
@@ -159,7 +159,7 @@ function approvalTitle(method: string, params: ApprovalParams): string {
   return 'Codex requests command execution';
 }
 
-function mcpToolApproval(rpcId: number | string, raw: unknown, cezarServer: string | undefined): CodexApproval | undefined {
+function mcpToolApproval(rpcId: number | string, raw: unknown, squawkServer: string | undefined): CodexApproval | undefined {
   const parsed = mcpToolParams.safeParse(raw);
   if (!parsed.success) return undefined;
   const { serverName, message, turnId, _meta: { codex_approval_kind: _kind, persist, tool_params_display: _display, ...meta } } = parsed.data;
@@ -169,7 +169,7 @@ function mcpToolApproval(rpcId: number | string, raw: unknown, cezarServer: stri
   add('Allow once', 'allow_once', { action: 'accept', content: null, _meta: null });
   if (remembers.has('session')) add('Allow this tool for this session', 'allow_always', { action: 'accept', content: null, _meta: { persist: 'session' } });
   // `always` saves an approve rule in the user's Codex config. cezar's server name is per run.
-  if (remembers.has('always') && serverName !== cezarServer) {
+  if (remembers.has('always') && serverName !== squawkServer) {
     add('Always allow this tool (saved in your Codex config)', 'allow_always', { action: 'accept', content: null, _meta: { persist: 'always' } });
   }
   // Codex reads `cancel` as the same skipped call, so one refusal is enough.

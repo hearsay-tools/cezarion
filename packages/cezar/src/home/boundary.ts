@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 
 /** Resolve missing descendants too, while refusing dangling links and lookup errors. */
 function canonical(path: string): string {
@@ -21,7 +21,7 @@ function canonical(path: string): string {
 export function assertHomePaths(root: string, paths: readonly string[]): string[] {
   const lexicalRoot = resolve(root);
   const home = canonical(lexicalRoot);
-  assertCezarHomeWriteIsSandboxed(home);
+  assertSquawkHomeWriteIsSandboxed(home);
   const checked = new Map([[lexicalRoot, home]]);
   return paths.map(path => {
     const rel = relative(lexicalRoot, resolve(path));
@@ -40,7 +40,7 @@ export function assertHomePaths(root: string, paths: readonly string[]): string[
       try {
         if (lstatSync(current).isSymbolicLink()) {
           target = canonical(current);
-          assertCezarHomeWriteIsSandboxed(target);
+          assertSquawkHomeWriteIsSandboxed(target);
         }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -51,7 +51,7 @@ export function assertHomePaths(root: string, paths: readonly string[]): string[
       }
       checked.set(current, target);
     }
-    assertCezarHomeWriteIsSandboxed(target);
+    assertSquawkHomeWriteIsSandboxed(target);
     return target;
   });
 }

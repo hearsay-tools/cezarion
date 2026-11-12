@@ -7,7 +7,7 @@ import { Home } from '../home/home.ts';
 import { NPM_LAUNCH_PACKAGES } from '../home/identity.ts';
 import { isForeignNpxExecStart, isNpxExecStart, ownedNpxPackage, refreshNpxCacheForRedeploy } from './npx-cache.ts';
 import { ownsLaunchdPlist } from './platforms/macosx-launchd-files.ts';
-import { cezarLaunchdPlist, resolveCezarArgv } from './platforms/macosx-ngrok.ts';
+import { squawkLaunchdPlist, resolveSquawkArgv } from './platforms/macosx-ngrok.ts';
 import { serviceExecStart, systemdUnit } from './platforms/ubuntu-vps.ts';
 import { freshServerState, type InstallContext } from './types.ts';
 import { createAutoUi } from './ui.ts';
@@ -114,24 +114,24 @@ describe('launchd ownership and selected command generation', () => {
     const ctx = context();
     const artifact = { kind: 'owned', type: 'launchd', name: 'ai.cezar.cockpit', path: '/tmp/cockpit.plist' } as const;
     for (const pkg of [...NPM_LAUNCH_PACKAGES, 'cez', 'cezar-cli', 'foreign-cezarion']) {
-      const xml = cezarLaunchdPlist('/repo', 4321, ['/usr/bin/npx', '--yes', pkg], false);
+      const xml = squawkLaunchdPlist('/repo', 4321, ['/usr/bin/npx', '--yes', pkg], false);
       expect(ownsLaunchdPlist(ctx, artifact, xml)).toBe((NPM_LAUNCH_PACKAGES as readonly string[]).includes(pkg));
     }
     for (const [argv, owned] of [[['/usr/bin/npx', '--yes', '-p', '@hearsay-tools/squawk', 'hsq'], true],
       [['/usr/bin/npx', '--yes', '-p', '@hearsay-tools/squawk', 'foreign'], false], [['/usr/bin/npx', '--yes', '-p', 'foreign', 'hsq'], false],
       [['/usr/bin/npx', '--yes', 'hsq'], false]] as const) {
-      expect(ownsLaunchdPlist(ctx, artifact, cezarLaunchdPlist('/repo', 4321, [...argv], false))).toBe(owned);
+      expect(ownsLaunchdPlist(ctx, artifact, squawkLaunchdPlist('/repo', 4321, [...argv], false))).toBe(owned);
     }
     const entry = fileURLToPath(new URL('../../dist/hsq.js', import.meta.url));
     for (const script of [entry, '/usr/local/bin/hsq', '/usr/local/bin/cez', '/usr/local/bin/cezarion', '/foreign/dist/hsq.js', '/usr/local/bin/cezar-cli']) {
-      const xml = cezarLaunchdPlist('/repo', 4321, ['/usr/bin/node', script], false);
+      const xml = squawkLaunchdPlist('/repo', 4321, ['/usr/bin/node', script], false);
       expect(ownsLaunchdPlist(ctx, artifact, xml)).toBe(!script.includes('/foreign/') && !script.endsWith('cezar-cli'));
     }
   });
   it.each([false, true])('selects the service entry and alias (switch %s)', async rebrand => {
     const ctx = context();
     ctx.dryRun = true;
-    const argv = await resolveCezarArgv(ctx, rebrand);
+    const argv = await resolveSquawkArgv(ctx, rebrand);
     expect(argv[1]).toMatch(rebrand ? /[\\/]dist[\\/]hsq\.js$/ : /[\\/]dist[\\/]index\.js$/);
     const opts = { node: '/bin/node', pkgRoot: '/pkg', entry: join('/pkg/dist', 'index.js'), entryExists: true, npxPath: '/bin/npx' };
     const selected = serviceExecStart(opts, rebrand);

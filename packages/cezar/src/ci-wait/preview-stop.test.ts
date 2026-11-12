@@ -1,6 +1,6 @@
 import type { ExtractSchema } from 'hono/types';
 import type { PreviewStopRequest, PreviewStopResult } from '@open-mercato/cezar-contract';
-import type { CezarToolHandlers, CiToolApp } from './controller.ts';
+import type { SquawkToolHandlers, CiToolApp } from './controller.ts';
 import { request } from 'node:http';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { previewStopRequestSchema, previewStopResultSchema } from '@open-mercato/cezar-contract/preview';
@@ -11,7 +11,7 @@ import { invokePreviewStopTool } from './tools.ts';
 const stopped = { ok: true, code: 'stopped' as const, message: 'Stopped.', hint: 'Continue.' };
 const controllers: CiToolController[] = [];
 afterEach(async () => { await Promise.all(controllers.map(controller => controller.close())); controllers.length = 0; vi.unstubAllEnvs(); });
-async function session(stop?: CezarToolHandlers['stopPreview']) {
+async function session(stop?: SquawkToolHandlers['stopPreview']) {
   const controller = await CiToolController.start(); controllers.push(controller);
   const notWait = async (): Promise<never> => { throw new Error('Not a CI test'); };
   return controller.provision({ registerWait: notWait, ask: notWait, cancelWait: notWait, finishTurn: notWait, stopPreview: stop });

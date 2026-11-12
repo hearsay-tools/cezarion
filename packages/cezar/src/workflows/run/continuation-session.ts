@@ -581,7 +581,7 @@ export class ContinuationSession {
           toolGrant: settings.toolGrant,
           additionalDirectories: agentDirectories(join(runDataDir(this.context.dataDir, runId), 'runs'), settings.profile.env),
           env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
-          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
+          ...(ciTools ? { squawkTools: ciTools.descriptor } : {}),
           ...(delegation ? { restrictCrossSessionMessaging: delegation.restrictCrossSessionMessaging } : {}),
           model: settings.backendModel,
           effort: settings.effort,
@@ -619,7 +619,7 @@ export class ContinuationSession {
     try {
       const result = await inputReceipts.sessionResultWithReceipts(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
       if (preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) return;
-      this.humanWaits.withdrawCezarHumanWaits(runId);
+      this.humanWaits.withdrawSquawkHumanWaits(runId);
       sessionEvents.persistWorkerAssistantResult(this.context, this.sharedHost, runId, stepId, result.text);
       // A durable CI wait keeps recovery live, not this failed attempt successful.
       if (turn.sessionError || state.inputState.agentInputError) throw new Error(turn.sessionError ?? state.inputState.agentInputError);

@@ -35,7 +35,7 @@ export interface PreviewHostLike {
 export type PreviewRegistrationInput = {
   request: PreviewServeRequest;
   worktreePath?: string | undefined;
-  cezarPort?: number | undefined;
+  squawkPort?: number | undefined;
   existing: PreviewServer[];
   owner?: { runId: string; title: string } | undefined;
   runId: string;
@@ -59,7 +59,7 @@ export function validateRegistration(input: PreviewRegistrationInput): { code: P
     if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return { code: 'cwd_outside_worktree' };
     cwd = inside || undefined;
   }
-  if (request.port === input.cezarPort) return { code: 'cezar_port' };
+  if (request.port === input.squawkPort) return { code: 'cezar_port' };
   if (input.owner && input.owner.runId !== input.runId) return { code: 'port_held' };
   const replaced = input.existing.some(server => server.port === request.port);
   if (!replaced && input.existing.length >= PREVIEW_MAX_SERVERS) return { code: 'too_many' };

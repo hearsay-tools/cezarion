@@ -4,7 +4,7 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { spawn } from 'node:child_process';
 import { onTestFinished, it as registerTest, expect } from 'vitest';
 import { WAIT_KIND, WAIT_PHASE, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import type { CezarWaitRequestInput, Wait } from '@open-mercato/cezar-contract';
+import type { SquawkWaitRequestInput, Wait } from '@open-mercato/cezar-contract';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { manager, until, store, toolGenerationOf } from './worker-wait-core.testkit.ts';
@@ -29,14 +29,14 @@ export function deadlineCells(runners: RunnerId[], it: typeof registerTest = reg
           nativeWire(runner);
           const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
           await until(() => store.getRun(run.id)?.status === 'waiting');
-          const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+          const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
           if (kind === 'peer') store.updateRun(run.id, { delegation: { role: 'root', permissions: ['wait', 'steer'], receipts: [] } });
           const pid = kind === 'process' ? sleeper() : undefined;
           const waits: Wait[] = [];
           for (let index = 0; index < 4; index++) {
             const peer = kind === 'peer' ? store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] }) : undefined;
             if (peer) setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['wait', 'steer'], receipts: [] } });
-            const request: CezarWaitRequestInput = kind === 'process'
+            const request: SquawkWaitRequestInput = kind === 'process'
               ? { kind, pid: pid!, exit_file: `u29-${index}.exit`, timeout_seconds: 600 + index }
               : { kind, peer_ids: [peer!.id], timeout_seconds: 600 + index };
             const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
@@ -67,7 +67,7 @@ export function deadlineCells(runners: RunnerId[], it: typeof registerTest = reg
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const pid = sleeper();
       const waits: Wait[] = [];
       for (const name of ['empty', 'exit', 'anchor']) {

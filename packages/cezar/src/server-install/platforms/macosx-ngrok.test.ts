@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cezarLaunchdPlist, launchdPlist, macosxNgrok } from './macosx-ngrok.ts';
+import { squawkLaunchdPlist, launchdPlist, macosxNgrok } from './macosx-ngrok.ts';
 import { availablePlatformIds, getStrategy } from '../strategies.ts';
 import { runInstall, runUninstall } from '../engine.ts';
 import { loadServerState } from '../state.ts';
@@ -41,8 +41,8 @@ describe('macosx-ngrok', () => {
     expect(p).toContain('<key>KeepAlive</key>');
   });
 
-  it('cezarLaunchdPlist embeds the argv, port, workdir and env', () => {
-    const p = cezarLaunchdPlist('/repo', 4321, ['/usr/local/bin/node', '/app/dist/index.js']);
+  it('squawkLaunchdPlist embeds the argv, port, workdir and env', () => {
+    const p = squawkLaunchdPlist('/repo', 4321, ['/usr/local/bin/node', '/app/dist/index.js']);
     expect(p).toContain('<string>/usr/local/bin/node</string>');
     expect(p).toContain('<string>/app/dist/index.js</string>');
     expect(p).toContain('<string>serve</string>');
@@ -237,11 +237,11 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
   function writeCockpitPlist(argv: string[]): void {
     writeFileSync(
       join(home, 'Library', 'LaunchAgents', 'ai.cezar.cockpit.plist'),
-      cezarLaunchdPlist('/repo', 4321, argv),
+      squawkLaunchdPlist('/repo', 4321, argv),
     );
   }
 
-  function plantCezarionCache(): string {
+  function plantSquawkCache(): string {
     const entry = join(cache, '_npx', 'aaaa', 'node_modules', 'cezarion');
     mkdirSync(entry, { recursive: true });
     writeFileSync(join(entry, 'x'), '');
@@ -338,7 +338,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
 
   it('clears the cached cezarion build before kickstart when the agent is an npx launch', async () => {
     writeCockpitPlist(['/n/npx', '--yes', 'cezarion']);
-    const cached = plantCezarionCache();
+    const cached = plantSquawkCache();
     const { interactive, calls } = recordingInteractive();
 
     await macosxNgrok.redeploy!(ctxFor(interactive));
@@ -349,7 +349,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
 
   it('does not clear the npx cache for a checkout-launched agent', async () => {
     writeCockpitPlist(['/usr/bin/node', '/home/cezar/cezar/dist/index.js']);
-    const cached = plantCezarionCache();
+    const cached = plantSquawkCache();
     const { interactive, calls } = recordingInteractive();
 
     await macosxNgrok.redeploy!(ctxFor(interactive));
@@ -360,7 +360,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
 
   it('does not clear the npx cache for a global-bin agent', async () => {
     writeCockpitPlist(['/usr/bin/node', '/usr/local/bin/cezarion']);
-    const cached = plantCezarionCache();
+    const cached = plantSquawkCache();
     const { interactive, calls } = recordingInteractive();
 
     await macosxNgrok.redeploy!(ctxFor(interactive));

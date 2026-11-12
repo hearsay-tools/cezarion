@@ -8,7 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
 
@@ -66,7 +66,7 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
   seedRuns(dataRoot, [seeded])
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot),
     stdio: 'ignore',
   })

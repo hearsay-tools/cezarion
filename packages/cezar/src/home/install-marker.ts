@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 import { assertTestHomeOutsideAccountHome } from './protected-roots.ts';
 import { replacePrivate } from './private-files.ts';
 import { withHomeLock } from './write-lock.ts';
@@ -30,7 +30,7 @@ export function readInstallMarker(root: string): InstallMarker | undefined {
 export function assertHomeReadable(root: string): InstallMarker {
   const marker = readInstallMarker(root);
   if (marker?.kind === 'live' && underTestRunner()) throw new Error(`${logPrefix()} refusing to write live home ${root} from a test runner`);
-  assertCezarHomeWriteIsSandboxed(root);
+  assertSquawkHomeWriteIsSandboxed(root);
   if (!marker) throw new Error(`${logPrefix()} refusing to write home ${root} without an install marker; start it through a CLI entry point`);
   return marker;
 }
@@ -60,7 +60,7 @@ export function writeMigrationMarker(root: string, migratedFrom: string, state: 
  */
 export function createInstallMarker(root: string, kind: InstallMarker['kind']): InstallMarker {
   if (kind === 'test') assertTestHomeOutsideAccountHome(root);
-  assertCezarHomeWriteIsSandboxed(root);
+  assertSquawkHomeWriteIsSandboxed(root);
   const marker = readInstallMarker(root);
   if (marker) return marker;
   assertHomeMetadata(root);

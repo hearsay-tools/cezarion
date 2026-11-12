@@ -50,7 +50,7 @@ describe('a teardown cezar initiated (codex app-server)', () => {
     );
     await firstText;
 
-    // The cancel path; the EOF watchdog reaches the same `terminatedByCezar`.
+    // The cancel path; the EOF watchdog reaches the same `terminatedBySquawk`.
     session.interrupt();
     const result = await session.result;
 
@@ -85,7 +85,7 @@ describe('a teardown cezar initiated (codex app-server)', () => {
  * #844 — the runner's own SIGTERM sets `ChildProcess.killed`, so a watchdog
  * gated on `!child.killed` refused to escalate for exactly the app-server it
  * was written for: one that handles the signal and keeps running. The guard now
- * tracks real termination, and `terminatedByCezar` (#703) is still set before
+ * tracks real termination, and `terminatedBySquawk` (#703) is still set before
  * every signal so the resulting 137/143 stays a teardown note, not a failure.
  */
 describe('SIGTERM→SIGKILL escalation for an app-server that survives SIGTERM', () => {

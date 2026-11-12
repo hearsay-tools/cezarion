@@ -36,7 +36,7 @@ export type TurnEndFacts = {
   /** The agent's own waits: every wait but Cezar's human waits. */
   agentWaits: boolean;
   /** Cezar's own human wait is open (`no-wait`, `budget`, `completion`). */
-  cezarHumanWait: boolean;
+  squawkHumanWait: boolean;
   /** The session's done completes a workflow step that is not the last, not the task
    *  (hearsay-tools/cezarion#1620). Only the nudge wording reads it. */
   stepScope: boolean;
@@ -108,7 +108,7 @@ function decideWithoutDone(facts: TurnEndFacts): TurnEndDecision {
   if (facts.inputTaken) return { kind: 'input' };
   if (facts.done && !facts.nativeAsk && !facts.inputInFlight && !facts.inputQueued) return { kind: 'done' };
   if (facts.nudgePending) return { kind: 'defer' };
-  if (facts.question || facts.agentWaits || facts.cezarHumanWait) return { kind: 'park' };
+  if (facts.question || facts.agentWaits || facts.squawkHumanWait) return { kind: 'park' };
   if (facts.budgetSpent) return { kind: 'human-wait', via: 'budget' };
   // An autonomous run is nudged on every such turn end until the budget is spent.
   const scoped = (text: string) => stepScopedNudge(text, facts.stepScope);

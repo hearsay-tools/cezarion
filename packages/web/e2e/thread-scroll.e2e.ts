@@ -10,7 +10,7 @@ import { seedTranscript } from './seed-transcript'
 import { waitForSettledSample } from './visual-ready'
 import { assistantWidthExpression } from './transcript-measurements'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
 import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
@@ -194,7 +194,7 @@ beforeAll(async () => {
 
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${REPLAY_ID}.ndjson`), replayEvents.map(line => JSON.stringify(line)).join('\n') + '\n')
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

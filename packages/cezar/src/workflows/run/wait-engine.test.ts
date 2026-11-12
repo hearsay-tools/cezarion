@@ -50,7 +50,7 @@ function fixture() {
       }
     },
     noticeParkedWorkers: vi.fn(),
-    withdrawCezarHumanWaits: vi.fn(),
+    withdrawSquawkHumanWaits: vi.fn(),
     isParked: vi.fn(() => false),
     parkOnWaits: vi.fn(),
     subagentSessionLive: () => true,
@@ -126,9 +126,9 @@ it.each([
   const f = current = fixture();
   const commit = vi.spyOn(f.store, 'commitWait');
   f.engine.open(f.run.id, undefined, makeTimerWait({ deadline: deadline() }), { withdraw, park: false });
-  if (!withdraw) { expect(f.host.withdrawCezarHumanWaits).not.toHaveBeenCalled(); return; }
-  expect(f.host.withdrawCezarHumanWaits).toHaveBeenCalledWith(f.run.id);
-  expect(vi.mocked(f.host.withdrawCezarHumanWaits).mock.invocationCallOrder[0]).toBeLessThan(commit.mock.invocationCallOrder[0]!);
+  if (!withdraw) { expect(f.host.withdrawSquawkHumanWaits).not.toHaveBeenCalled(); return; }
+  expect(f.host.withdrawSquawkHumanWaits).toHaveBeenCalledWith(f.run.id);
+  expect(vi.mocked(f.host.withdrawSquawkHumanWaits).mock.invocationCallOrder[0]).toBeLessThan(commit.mock.invocationCallOrder[0]!);
 });
 
 it('a receipt commits with the wait', () => {

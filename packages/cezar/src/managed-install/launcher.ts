@@ -13,7 +13,7 @@ import { closeSync, fchmodSync, mkdirSync, openSync, renameSync, rmSync, statSyn
 import { randomUUID } from 'node:crypto';
 import { join, win32 } from 'node:path';
 
-import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 
 import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 
@@ -114,8 +114,8 @@ function writeLauncher(path: string, contents: string, platform: NodeJS.Platform
 /** Write each supported binary launcher. Returns the bin directory. */
 export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand, platform: NodeJS.Platform = process.platform): string {
   const dir = binDir(env, home);
-  assertCezarHomeWriteIsSandboxed(dir, env);
-  assertCezarHomeWriteIsSandboxed(versionsDir(env, home), env);
+  assertSquawkHomeWriteIsSandboxed(dir, env);
+  assertSquawkHomeWriteIsSandboxed(versionsDir(env, home), env);
   mkdirSync(dir, { recursive: true });
   mkdirSync(versionsDir(env, home), { recursive: true });
   for (const name of BINARY_NAMES) {
