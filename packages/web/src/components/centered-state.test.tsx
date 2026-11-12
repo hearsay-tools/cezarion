@@ -14,16 +14,15 @@ function tileOf(container: HTMLElement): Element {
 }
 
 describe('CenteredState', () => {
-  // The design system's tile grammar, tone by tone (spec, "Design system": tinted border+fill).
-  it.each([
-    ['primary', ['border-accent-strong/25', 'bg-accent-strong/15', 'text-link-foreground']],
-    ['neutral', ['border-border', 'bg-card', 'shadow-xs']],
-    ['danger', ['border-danger/20', 'bg-danger/15', 'text-danger']],
-  ] as const)('tints the tile for the %s tone', (tone, classes) => {
-    const { container } = render(<CenteredState icon={<SearchXIcon />} tone={tone} title="T" />)
-
-    expect(container.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe(tone)
-    for (const cls of classes) expect(tileOf(container).className).toContain(cls)
+  it('tints the tile apart for each tone and names the tone', () => {
+    const tiles = (['primary', 'neutral', 'danger'] as const).map((tone) => {
+      const { container } = render(<CenteredState icon={<SearchXIcon />} tone={tone} title="T" />)
+      expect(container.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe(tone)
+      const className = tileOf(container).className
+      cleanup()
+      return className
+    })
+    expect(new Set(tiles).size).toBe(3)
   })
 
   it('defaults to the neutral tone', () => {

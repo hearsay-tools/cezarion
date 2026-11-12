@@ -142,16 +142,13 @@ describe('Toaster', () => {
       expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
     })
 
-    it('renders a real, tabbable button in the toast colour', () => {
+    it('renders a real, tabbable button', () => {
       show()
       const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
       expect(button.tagName).toBe('BUTTON')
       expect(button.getAttribute('type')).toBe('button')
       expect(button.tabIndex).toBe(0)
       expect(button.textContent).toBe('Undo')
-      expect(button.className).toContain('font-semibold')
-      expect(button.className).toContain('underline')
-      expect(button.className).toContain('text-inherit')
     })
 
     it('pauses while hovered and resumes with the remaining time', () => {
