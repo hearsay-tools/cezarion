@@ -53,7 +53,7 @@ test('the Vitest shards and the Squeal jobs read one exact Node version from .no
   const { jobs } = ci();
   const readers = Object.entries(jobs).filter(([, job]) => (job.steps ?? []).some((s) => s.with?.['node-version-file']))
     .map(([id]) => id);
-  assert.deepEqual(readers.sort(), ['squeal-export', 'squeal-gate-trial', 'squeal-publish', 'vitest'], 'other jobs keep their own Node setting');
+  assert.deepEqual(readers.sort(), ['squeal-coverage-proof', 'squeal-export', 'squeal-gate-trial', 'squeal-publish', 'vitest'], 'other jobs keep their own Node setting');
   for (const id of readers) {
     const setup = jobs[id].steps.find((s) => s.uses?.startsWith('actions/setup-node@'));
     assert.equal(setup.with['node-version-file'], '.node-version', id);
@@ -126,7 +126,8 @@ test('the merge-group step runs the test command under squeal ci record and retu
   }
 });
 
-const SQUEAL_JOBS = ['squeal-export', 'squeal-publish', 'squeal-gate-trial'];
+// The coverage proof (ci-squeal-coverage-proof.workflow.test.cjs) is a manual dispatch's, and gates nothing either.
+const SQUEAL_JOBS = ['squeal-export', 'squeal-publish', 'squeal-gate-trial', 'squeal-coverage-proof', 'squeal-coverage-proof-compare'];
 
 test('squeal-export runs after passing merge-group shards and only reads', () => {
   const { jobs, permissions } = ci();
@@ -251,7 +252,7 @@ test('every job that runs squeal sets up Squeal\'s pinned action once, after its
   for (const pin of pins) assert.equal(pin.trim(), SQUEAL_PIN);
   const users = Object.entries(jobs).filter(([, job]) => (job.steps ?? []).some((s) => /(^|\s)squeal (ci|code)\b/m.test(s.run ?? '')))
     .map(([id]) => id);
-  assert.deepEqual(users.sort(), ['squeal-export', 'squeal-gate-trial', 'squeal-publish', 'vitest']);
+  assert.deepEqual(users.sort(), ['squeal-coverage-proof', 'squeal-export', 'squeal-gate-trial', 'squeal-publish', 'vitest']);
   for (const [id, job] of Object.entries(jobs)) {
     const { steps = [] } = job;
     const action = steps.filter((s) => s.uses?.startsWith('hearsay-tools/squeal/'));

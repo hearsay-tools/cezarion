@@ -603,6 +603,47 @@ gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
 `.github/scripts/ci-squeal-gate-trial.workflow.test.cjs` pins the trigger, the job's
 permissions, its gate command and its summary.
 
+### Squeal coverage proof
+
+A manual proof checks that Squeal can record its per-test-file coverage beside the project's
+own V8 report in one run, without changing that report or adding cost above run-to-run noise
+(hearsay-tools/squeal spec 020 D19, row 020-26c; hearsay-tools/squeal#189). It runs only on
+request:
+
+```bash
+gh workflow run ci.yml --ref <branch> -f squeal_coverage_proof=true
+```
+
+- Only a dispatch with `squeal_coverage_proof` and no `pr_number` takes the proof. The rest of
+  that dispatch runs as a bare dispatch does, V8 coverage artifact included. Dispatches of one
+  branch share a concurrency group and cancel each other, so start the proof after the bare
+  proof of a `ci.yml` change ends (§ Proving a `ci.yml` change).
+- The `Squeal coverage proof <run>` jobs (`squeal-coverage-proof`) run Vitest shard 1/8, the
+  first of the eight shards, three times in parallel on the dispatched commit, each with
+  `npm test -- --shard=1/8 --maxWorkers=4 --coverage.enabled`, the shard command of a dispatch.
+  `squeal` runs it under `squeal ci record` after Squeal's action, so Squeal reads the V8
+  provider's payloads into its parts. `v8` and `v8-control` run it alone; `v8-control` is the
+  run-to-run control. Each keeps its exit code, its wall and CPU (user + sys) time, the runner's
+  CPU count, CPU model and load, and `coverage-final.json`, and uploads them as
+  `squeal-coverage-proof-<run>` with the parts for `squeal`, kept 14 days.
+- The `Compare the Squeal coverage proof` job (`squeal-coverage-proof-compare`) runs after the
+  three end in any way but skipped. It downloads them and runs
+  `.github/scripts/squeal-coverage-proof.cjs`, which writes the job summary and uploads
+  `comparison.json` as `squeal-coverage-comparison`, kept 14 days.
+- The summary compares covered statements of `squeal` against `v8`, and of `v8` against
+  `v8-control`, by source location: statements whose covered state differs and the files they
+  are in. A difference between `squeal` and `v8` reads as Squeal's only when it is well above
+  the control's. Then it gives the parts' test files with and without a record and why, the
+  part header's collector (`v8` expected) and the test files that loaded `node:inspector`;
+  then each run's time, the two differences against `v8`, and Squeal's own time from the parts.
+- Nothing depends on it. Both jobs are outside `verify.needs` and the merge-queue roster, only a
+  manual dispatch runs them, every step continues on error and both jobs set
+  `continue-on-error`. The proof never runs on a pull request, in a merge group or on a push.
+
+`.github/scripts/ci-squeal-coverage-proof.workflow.test.cjs` pins the trigger, the three runs,
+their artifacts and the steps' scripts; `.github/scripts/squeal-coverage-proof.test.cjs` pins the
+comparison.
+
 ### Upstream scan PRs
 
 The weekly upstream scan also creates PRs with the repository's existing release

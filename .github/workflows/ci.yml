@@ -28,6 +28,13 @@ on:
         required: false
         type: boolean
         default: false
+      # The Squeal coverage proof (§ Squeal coverage proof in docs/sdlc/ci.md): only a dispatch
+      # without pr_number takes it; it never gates anything.
+      squeal_coverage_proof:
+        description: Run Vitest shard 1/8 with V8 coverage under squeal ci record and twice alone, and compare the three (no pr_number)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -1196,6 +1203,165 @@ jobs:
         with:
           name: squeal-gate-trial
           path: ${{ runner.temp }}/squeal-gate-trial/
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
+  # Squeal coverage proof (hearsay-tools/squeal spec 020 D19, row 020-26c; hearsay-tools/squeal#189).
+  # Only a manual dispatch with squeal_coverage_proof and no pr_number runs it. Vitest shard 1/8,
+  # one of the eight, runs three times on the dispatched commit, each with the project's V8
+  # coverage: `squeal` under `squeal ci record`, which reads the V8 provider's payloads into its
+  # parts, and `v8` and `v8-control` alone, the second as the run-to-run control.
+  # squeal-coverage-proof-compare compares the three. Neither job gates anything: every step
+  # continues on error, both jobs set continue-on-error, and both are outside verify.needs and
+  # the queue roster.
+  # See docs/sdlc/ci.md § Squeal coverage proof.
+  squeal-coverage-proof:
+    name: Squeal coverage proof ${{ matrix.run }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.squeal_coverage_proof == true && inputs.pr_number == '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [ squeal, v8, v8-control ]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+
+    # Runs the dispatched code (install, tests), so it only reads.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the dispatched commit
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        continue-on-error: true
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      # The shards' Node, so the three runs and a Vitest shard see the same V8.
+      - name: Set up Node.js
+        continue-on-error: true
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install pnpm dependencies
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
+
+      # Squeal's pinned action, as in the shards; it never fails the job (hearsay-tools/squeal
+      # spec 018 D20). Only the `squeal` run records.
+      - name: Set up Squeal
+        if: matrix.run == 'squeal'
+        continue-on-error: true
+        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+
+      # The shard command of a dispatch, with its V8 coverage. Bash's `time` gives the wall and
+      # CPU (user + sys) time of the command and every process it waited for. The step keeps
+      # the exit code, the times and the coverage report, and exits 0.
+      - name: Run Vitest shard 1/8 with V8 coverage
+        id: shard
+        continue-on-error: true
+        env:
+          VITEST_FILE_DURATION_CAP: '1'
+          PROOF_RUN: ${{ matrix.run }}
+        run: |
+          out="$RUNNER_TEMP/squeal-coverage-proof"
+          mkdir -p "$out"
+          set -- npm test -- --shard=1/8 --maxWorkers=4 --coverage.enabled
+          if [ "$PROOF_RUN" = squeal ]; then
+            set -- squeal ci record --out "$out/parts" -- "$@"
+          fi
+          load_before="$(cut -d ' ' -f 1 /proc/loadavg 2> /dev/null || true)"
+          code=0
+          TIMEFORMAT='%3R %3U %3S'
+          { time "$@" 2>&3 || code=$?; } 3>&2 2> "$out/time.txt"
+          load_after="$(cut -d ' ' -f 1 /proc/loadavg 2> /dev/null || true)"
+          read -r wall user sys < "$out/time.txt" || true
+          if ! cp .ai/qa/coverage/coverage-final.json "$out/coverage-final.json"; then
+            echo "::warning title=Squeal coverage proof $PROOF_RUN::No V8 coverage report (exit $code)."
+          fi
+          jq -n --arg run "$PROOF_RUN" --argjson code "$code" --arg wall "$wall" --arg user "$user" --arg sys "$sys" \
+            --arg root "$GITHUB_WORKSPACE" --arg cpus "$(getconf _NPROCESSORS_ONLN)" --arg model "$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo 2> /dev/null | head -n 1)" \
+            --arg loadBefore "$load_before" --arg loadAfter "$load_after" --argjson command "$(printf '%s\0' "$@" | jq -cRs 'split("\u0000")[:-1]')" \
+            '{format: "squeal-coverage-proof-run/1", run: $run, command: $command, exitCode: $code,
+              wallSeconds: ($wall | tonumber? // null), userSeconds: ($user | tonumber? // null), sysSeconds: ($sys | tonumber? // null),
+              root: $root, cpus: ($cpus | tonumber? // null), cpuModel: $model,
+              loadBefore: ($loadBefore | tonumber? // null), loadAfter: ($loadAfter | tonumber? // null)}' > "$out/run.json"
+          echo "Squeal coverage proof $PROOF_RUN: exit $code, wall ${wall:-unknown} s, CPU ${user:-unknown} s user and ${sys:-unknown} s sys."
+
+      - name: Upload the proof run
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: squeal-coverage-proof-${{ matrix.run }}
+          path: ${{ runner.temp }}/squeal-coverage-proof/
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
+  squeal-coverage-proof-compare:
+    name: Compare the Squeal coverage proof
+    needs: [squeal-coverage-proof]
+    # A status function in the condition: without one GitHub adds success(), and a proof run
+    # that failed or timed out would skip the comparison of the other two.
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.squeal_coverage_proof == true && inputs.pr_number == '' && needs.squeal-coverage-proof.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the comparison script
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Set up Node.js
+        continue-on-error: true
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - name: Download the proof runs
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: squeal-coverage-proof-*
+          path: ${{ runner.temp }}/squeal-coverage-proof
+
+      # The script writes the job summary and comparison.json, and exits 0 whatever it finds.
+      - name: Compare the proof runs
+        if: always()
+        continue-on-error: true
+        run: |
+          out="$RUNNER_TEMP/squeal-coverage-comparison"
+          mkdir -p "$out"
+          node .github/scripts/squeal-coverage-proof.cjs --input "$RUNNER_TEMP/squeal-coverage-proof" --json "$out/comparison.json" \
+            >> "$GITHUB_STEP_SUMMARY" || echo "The comparison did not finish (exit $?); see the step log." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the comparison
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: squeal-coverage-comparison
+          path: ${{ runner.temp }}/squeal-coverage-comparison/
           if-no-files-found: warn
           retention-days: 14
           overwrite: true
