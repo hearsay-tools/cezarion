@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { onceResolved } from '@/lib/automation-format'
-import { TimeField } from './editor-schedule-fields'
+import { TimeField } from './time-field'
 
 /** "Latest start": how late after its time a one-time schedule may still launch. `none` = no limit. */
 const LATEST_START: readonly { minutes: number | undefined; label: string }[] = [
