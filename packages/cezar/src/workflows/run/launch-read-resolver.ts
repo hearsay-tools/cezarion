@@ -647,8 +647,12 @@ function continuationNextStep(store: Pick<RunStore, 'getRun'>, runId: string, wa
 /** The workflow agent step a provider-error hold resumes (hearsay-tools/squawk#3337): the failed one,
  *  so a successful retry runs the steps after it instead of settling the run. */
 function heldWorkflowStepId(run: RunRecord): string | undefined {
-  return run.workflowResumeStepId ?? run.workflowDef?.steps.find(step => stepKind(step) === 'agent' &&
-    run.steps.find(persisted => persisted.id === step.id)?.status === 'failed')?.id;
+  if (run.workflowResumeStepId) return run.workflowResumeStepId;
+  // The step this run is on; else the latest failed agent step, since an earlier step that a retry
+  // already recovered keeps its failed status (`settleResumedWorkflowStep`).
+  const failed = (run.workflowDef?.steps ?? []).filter(step => stepKind(step) === 'agent' &&
+    run.steps.find(persisted => persisted.id === step.id)?.status === 'failed');
+  return (failed.find(step => step.id === run.currentStepId) ?? failed.at(-1))?.id;
 }
 
 function ciWorkflowResumeStepIndex(run: RunRecord): number {
@@ -734,8 +738,12 @@ function ownedJob(context: RunModuleContext, host: { historyDeletionPending(runI
 
 function acceptedImages(input: StartRunInput): PastedContent[] | undefined { return input.images; }
 function acceptedTask(input: StartRunInput): string { return input.task; }
-/** A provider-error retry that starts the first session carries the task (hearsay-tools/squawk#3337). */
-function retriedTask(run: Pick<RunRecord, 'task'>): string { return run.task; }
+/** A provider-error retry that starts the first session carries what that step was asked
+ *  (hearsay-tools/squawk#3337): the held workflow step's own prompt, rendered with the task. */
+function retriedTask(run: RunRecord): string {
+  const step = run.workflowDef?.steps.find(candidate => candidate.id === run.workflowResumeStepId);
+  return step ? applyTemplate(step.prompt ?? '{{task}}', run.task) : run.task;
+}
 function acceptedSkillHint(workflow: WorkflowDef): string | undefined {
   return workflow.steps.find(candidate => stepKind(candidate) === 'agent' && candidate.skill)?.skill?.trim();
 }

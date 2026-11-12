@@ -47,9 +47,9 @@ const AUTO_RESUME_PROMPT =
 const PROVIDER_RETRY_PROMPT =
   'A provider error interrupted this task, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
 
-/** A provider error before the first agent session: the retry starts one, so it carries the task. */
-const freshRetryPrompt = (task: string) =>
-  `A provider error stopped this task before its agent session started, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) for any context. The task:\n\n${task}`;
+/** A provider error before the step's first session: the retry starts one, so it carries the step's prompt. */
+const freshRetryPrompt = (prompt: string) =>
+  `A provider error stopped this step before its agent session started, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) for any context. Your instructions:\n\n${prompt}`;
 
 /** Why a run is on hold and when it resumes; written in the same status write as the hold. */
 export type HoldPlan = { autoResumeAt: string; autoResumeReason: 'usage-limit' | 'provider-error'; message: string };

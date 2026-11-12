@@ -3,7 +3,7 @@ import { useTestHome } from '../../home/test-home.testkit.ts';
 import { testHome } from '../../home/test-home.testkit.ts';
 // Load compile-only fixture functions so the quality report can measure their bodies.
 import '../launch-read-resolver.types.testkit.ts';
-import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { STEP_KIND, STEP_STATUS, RUN_STATUS, makeRunRecord, makeStepState } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -185,4 +185,24 @@ it('P6-25 task metadata reads the current model lock after input acceptance', as
   mkdirSync(join(root, '.ai/cezar'), { recursive: true });
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({ modelsLocked: true }));
   expect(await atTaskHead.modelIdentity(root, 'claude', bindLaunchSource(input), testHome())).toBeUndefined();
+});
+
+// hearsay-tools/squawk#3337: the workflow step a provider-error hold resumes, and what a fresh retry asks.
+const twoAgentSteps = { name: 'two', source: 'built-in' as const, steps: [
+  { id: 'build', name: 'Build', prompt: 'Build: {{task}}' },
+  { id: 'review', name: 'Review', prompt: 'Review this change: {{task}}. Do not edit files.' },
+] };
+const heldRun = (statuses: Record<string, (typeof STEP_STATUS)[keyof typeof STEP_STATUS]>, currentStepId: string) => makeRunRecord({
+  status: RUN_STATUS.running, task: 'add the parser', workflowDef: twoAgentSteps, currentStepId,
+  steps: Object.entries(statuses).map(([stepId, status]) => makeStepState({ id: stepId, name: stepId, kind: STEP_KIND.agent, status })),
+});
+it('holds the failing workflow step, not an earlier one a retry already recovered', () => {
+  expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.failed }, 'review'))).toBe('review');
+  expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.pending }, 'build'))).toBe('build');
+  expect(atContinue.heldStep({ ...heldRun({ build: STEP_STATUS.failed }, 'build'), workflowResumeStepId: 'build' })).toBe('build');
+});
+it('gives a fresh retry the held step\'s own prompt', () => {
+  const run = { ...heldRun({ build: STEP_STATUS.done, review: STEP_STATUS.failed }, 'review'), workflowResumeStepId: 'review' };
+  expect(atContinue.task(run)).toBe('Review this change: add the parser. Do not edit files.');
+  expect(atContinue.task(makeRunRecord({ task: 'add the parser' }))).toBe('add the parser');
 });
