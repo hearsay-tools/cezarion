@@ -603,7 +603,7 @@ only a successful run whose head carries the final workflow files. From the
 final pushed PR head, compare the cited run's workflow files with `HEAD`:
 
 ```bash
-sha=$(gh run view <run-id> --repo hearsay-tools/cezarion --json headSha --jq .headSha)
+sha=$(gh run view <run-id> --repo hearsay-tools/squawk --json headSha --jq .headSha)
 git diff --quiet "$sha" HEAD -- .github/workflows/ && echo current || echo stale
 ```
 
@@ -741,10 +741,10 @@ green CI shards are. A failure in a file the branch touches never qualifies: fix
 Count a test file's observed CI failure annotations across rerun attempts with:
 
 ```bash
-node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/squawk --runs 20
 # Or select runs by creation time (inclusive UTC timestamps):
 
-node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/squawk --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
 ```
 
 The command uses authenticated `gh` reads and defaults to the current repository's
@@ -771,9 +771,9 @@ rerun it can show the passing log. Read a failed attempt that a rerun replaced
 by its job ID:
 
 ```bash
-gh api --allow-escape-sequences repos/hearsay-tools/cezarion/actions/jobs/<job-id>/logs > job.log
+gh api --allow-escape-sequences repos/hearsay-tools/squawk/actions/jobs/<job-id>/logs > job.log
 # List the job IDs of one attempt of a run:
-gh api repos/hearsay-tools/cezarion/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
+gh api repos/hearsay-tools/squawk/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
 ```
 
 Without `--allow-escape-sequences`, `gh api` exits 1 and writes no log.

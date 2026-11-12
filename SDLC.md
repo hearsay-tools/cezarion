@@ -8,7 +8,7 @@ it. Add a rule only when its absence causes a real failure.
 
 Issue intake labels each new issue with a type and an area when it is
 confident. Apply only a label that
-`gh label list -R hearsay-tools/cezarion --limit 1000` shows. Do not create a label;
+`gh label list -R hearsay-tools/squawk --limit 1000` shows. Do not create a label;
 the maintainer owns the label set.
 
 ## The QA gate
