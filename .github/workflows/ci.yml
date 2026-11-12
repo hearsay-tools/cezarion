@@ -1308,8 +1308,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
-          node scripts/e2e-affected.mjs --ci --allow-skip --shard=${{ matrix.shard }}/8 2>&1 | tee e2e.log
-          node .github/scripts/require-e2e-passed.cjs < e2e.log
+          node scripts/e2e-affected.mjs --ci --allow-skip --shard=${{ matrix.shard }}/8 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          node .github/scripts/require-e2e-passed.cjs < "$RUNNER_TEMP/e2e.log"
 
       - name: Run cockpit browser E2E
         id: e2e

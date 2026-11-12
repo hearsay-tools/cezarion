@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ import {
 // hearsay-tools/cezarion#1816: npm run test:e2e:affected chooses browser specs from the spec map.
 
 const script = fileURLToPath(new URL('./e2e-affected.mjs', import.meta.url));
+const yaml = createRequire(import.meta.url)('yaml');
 const COMMIT = 'a'.repeat(40);
 const spec = name => `packages/web/e2e/${name}.e2e.ts`;
 
@@ -313,6 +315,37 @@ test('CI runs selected specs with shard flags and uses full fallback for empty o
     assert.match(fallback.stdout, /arg=--shard=2\/8/);
     assert.doesNotMatch(fallback.stdout, /arg=.*e2e.ts|passWithNoTests/);
   }
+});
+
+test('PR browser workflow logs leave the mapped selection intact', t => {
+  const { dir, put, map } = repository(t);
+  put('.ai/scripts/e2e.sh', 'printf "arg=%s\\n" "$@"; echo TEST_E2E_STATUS=passed\n');
+  execFileSync('git', ['add', '.'], { cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'browser command'], { cwd: dir });
+  const mapFile = map().slice('--map='.length);
+  put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
+  const temp = tempDir(t);
+  // Keep the workflow command intact. Only map download and the costly browser are fixture seams.
+  temp.put('node', `#!/bin/sh
+if [ "$1" = scripts/e2e-affected.mjs ]; then
+  shift
+  exec "$REAL_NODE" "$SELECTOR_SCRIPT" "$@" "--map=$MAP_FILE"
+fi
+exec "$REAL_NODE" "$MARKER_SCRIPT" "$@"
+`);
+  chmodSync(join(temp.dir, 'node'), 0o755);
+  const workflow = yaml.parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'));
+  const run = workflow.jobs['cockpit-browser'].steps.find(step => step.id === 'e2e-pr').run;
+  const result = spawnSync('bash', ['-eu', '-c', run.replace('${{ matrix.shard }}', '1')], {
+    cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${temp.dir}:${process.env.PATH}`,
+      RUNNER_TEMP: temp.dir, REAL_NODE: process.execPath, SELECTOR_SCRIPT: script, MAP_FILE: mapFile,
+      MARKER_SCRIPT: fileURLToPath(new URL('../.github/scripts/require-e2e-passed.cjs', import.meta.url)) },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Selected 2 of 3 specs/);
+  assert.match(result.stdout, /arg=packages\/web\/e2e\/artifact-project-links.e2e.ts/);
+  assert.match(result.stdout, /arg=packages\/web\/e2e\/chat-code-fence.e2e.ts/);
+  assert.doesNotMatch(result.stdout, /arg=.*smoke.e2e.ts/);
 });
 
 test('mock function edits select only specs that executed that function, plus incomplete specs', () => {
