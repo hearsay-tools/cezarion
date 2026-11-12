@@ -58,8 +58,10 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     if (run.delegation?.role !== 'worker') throw Error('worker');
     f.store.commitDelegation([{ id: workerId, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete',
       remaining: ['worktree', 'branch'] } } }]);
-    f.store.commitDestroyRetry(workerId, { attempts: 7, nextAt: new Date(Date.now() + 2_000).toISOString() });
-    const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
+    // One instant for the persisted attempt and the restarted service's clock: no wall time passes between them.
+    const restartedAt = Date.now();
+    f.store.commitDestroyRetry(workerId, { attempts: 7, nextAt: new Date(restartedAt + 2_000).toISOString() });
+    const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 }, now: () => restartedAt });
     const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       const [cleanup] = workerCleanupInternals(restarted);
@@ -69,8 +71,7 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
       const delay = timers.mock.calls[timers.mock.results.findIndex(result => result.value === armed)]?.[1];
       timers.mockRestore();
       // The first tick waits out the persisted next attempt, 2 s out, not the 40 ms floor.
-      expect(delay).toBeGreaterThan(1_000);
-      expect(delay).toBeLessThanOrEqual(2_000);
+      expect(delay).toBe(2_000);
       expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', retry: { attempts: 7 } });
       expect(existsSync(workspace.path)).toBe(true);
     } finally { detach(); }
