@@ -8,7 +8,7 @@ import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts'
 import { resolveCapabilities } from '../../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../../automations/prompts.ts';
 import { createAutomationSkill } from '../../automations/builtin-skill.ts';
-import { registryEntry } from '../../runs/webhook.ts';
+import { registryEntry } from '../../workspace/registry-entry.ts';
 import { agentWebhooksPrompt, webhookCliCommand } from '../../webhooks/prompt.ts';
 import { agentWebhooks } from '../../workspace/webhooks.ts';
 import type { Skill } from '../../skills.ts';
