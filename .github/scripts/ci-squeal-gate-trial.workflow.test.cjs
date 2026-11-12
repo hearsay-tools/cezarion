@@ -71,6 +71,8 @@ test('the trial reads only, holds no token, never fails its job, and checks out 
   assert.deepEqual(checkout.with, { ref: '${{ github.sha }}', 'persist-credentials': false, 'fetch-depth': 1 });
   const history = (id) => step(jobs[id], 'Fetch the history the gate compares').run;
   assert.equal(history('squeal-gate-trial'), history('complexity-gate'), 'this commit and main, never every branch');
+  // Squeal's pinned action puts `squeal` on the PATH, as in the shards (ci-squeal-results.workflow.test.cjs).
+  assert.equal(step(job, 'Set up Squeal').uses, step(jobs.vitest, 'Set up Squeal').uses);
   const download = step(job, 'Download Squeal parts');
   assert.deepEqual(download.with, { pattern: 'squeal-parts-shard-*', path: '${{ runner.temp }}/squeal-parts' });
   const upload = step(job, 'Upload the trial report');
@@ -90,7 +92,7 @@ test('the gate step runs squeal code on every shard\'s parts and keeps its exit 
   for (const shard of [1, 2]) fs.mkdirSync(path.join(directory, 'squeal-parts', `squeal-parts-shard-${shard}`), { recursive: true });
   const out = (file) => fs.readFileSync(path.join(directory, 'squeal-gate-trial', file), 'utf8');
   for (const code of [0, 1, 3, 2]) {
-    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\necho "$*"\necho "squeal code: a note" >&2\nexit ${code}\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'squeal'), `#!/bin/sh\necho "$*"\necho "squeal code: a note" >&2\nexit ${code}\n`, { mode: 0o755 });
     const result = runStep(directory, run, { PATH: `${bin}:/usr/bin:/bin` });
     assert.equal(result.status, 0, `exit ${code}: the verdict never fails the step`);
     assert.equal(out('exit-code'), `${code}\n`);
@@ -99,7 +101,7 @@ test('the gate step runs squeal code on every shard\'s parts and keeps its exit 
     assert.match(result.stderr, /squeal code: a note/, 'the log shows the gate\'s notes');
   }
   const parts = path.join(directory, 'squeal-parts');
-  assert.equal(out('report.json'), `${directory}/squeal/plugins/claude-code/dist/cli/squeal.mjs code --base origin/main --json `
+  assert.equal(out('report.json'), 'code --base origin/main --json '
     + `--parts ${parts}/squeal-parts-shard-1 ${parts}/squeal-parts-shard-2\n`);
 });
 

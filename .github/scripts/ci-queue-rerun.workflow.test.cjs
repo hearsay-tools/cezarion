@@ -38,7 +38,7 @@ function context(event, first, rerun = 'skipped') {
     github: { event_name: event },
     inputs: { pr_number: '', squeal_gate_trial: false },
     needs: { },
-    steps: { squeal: { outcome: 'success' }, record: { outcome: first }, e2e: { outcome: first }, rerun: { outcome: rerun }, 'e2e-rerun': { outcome: rerun } },
+    steps: { record: { outcome: first }, e2e: { outcome: first }, rerun: { outcome: rerun }, 'e2e-rerun': { outcome: rerun } },
     runner: { temp: '/runner/temp' },
     matrix: { shard: 2 },
     cancelled: () => false,
@@ -91,12 +91,12 @@ test('the Vitest rerun records into a new parts directory, and only its parts up
   assert.deepEqual({ ...rerun.env, PARTS_DIR: record.env.PARTS_DIR }, record.env, 'the same environment apart from the parts directory');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-queue-rerun-'));
   try {
-    fs.writeFileSync(path.join(temp, 'node'), '#!/bin/sh\necho "node $*"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(temp, 'squeal'), '#!/bin/sh\necho "squeal $*"\n', { mode: 0o755 });
     const script = rerun.run.replaceAll('${{ matrix.shard }}', '2');
     const result = spawnSync('bash', ['-e', '-c', script], {
-      encoding: 'utf8', env: { PATH: `${temp}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: 'success', PARTS_DIR: rerun.env.PARTS_DIR },
+      encoding: 'utf8', env: { PATH: `${temp}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', PARTS_DIR: rerun.env.PARTS_DIR },
     });
-    assert.equal(result.stdout.trim(), 'node /runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci record --out /runner/temp/squeal-parts-rerun -- npm test -- --shard=2/8 --maxWorkers=4');
+    assert.equal(result.stdout.trim(), 'squeal ci record --out /runner/temp/squeal-parts-rerun -- npm test -- --shard=2/8 --maxWorkers=4');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

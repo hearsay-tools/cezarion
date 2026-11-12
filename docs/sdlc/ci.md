@@ -390,6 +390,14 @@ CI and review recognize the configured `RELEASE_APP_BOT_LOGIN`
 as well as legacy `github-actions[bot]` bumps, with the same file and version
 checks. See [release App setup](../publishing.md#release-app-setup).
 
+### Pinned actions
+
+Workflows pin each action to a full commit SHA, most with the release tag in a comment
+(`uses: owner/action@<commit> # v<version>`). Dependabot (`.github/dependabot.yml`) checks
+these actions weekly and opens one pull request that moves every outdated pin, and its
+version comment, to a newer release. That includes Squeal's action, which it follows through
+Squeal's `v<version>` tags (§ Squeal shared results).
+
 ### Checking issue citations
 
 The build/package job's `Check issue citations` step runs
@@ -510,12 +518,18 @@ Merge groups publish their Vitest results for Squeal, so a new worktree at a mai
 can import those passes instead of running the same test files again
 (hearsay-tools/squeal spec 018, D8, D9, D13 and D17).
 
-- In a merge group, each `Vitest shard N/8` job fetches the pinned Squeal release (tag and
-  commit in the `Fetch the Squeal release` step) and runs its unchanged `npm test` command
-  under `squeal ci record --out "$RUNNER_TEMP/squeal-parts" --`. The command's output and
-  exit code are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3
-  days. If the fetch fails, the shard runs the plain command with a warning. Other events run
-  the command exactly as before.
+- Every job that runs Squeal sets it up with Squeal's GitHub Action after its Node setup:
+  `uses: hearsay-tools/squeal/ci@<commit> # v<version>`, pinned to a full commit SHA like
+  every other action, with the release tag in the comment. The action puts `squeal` on the
+  `PATH` and runs it with that Node. It never fails the job: when Squeal cannot run, it
+  warns, `squeal ci record` runs the command alone with its exit code, and `squeal ci export`
+  and `squeal ci publish` warn and exit 0. Only a usage error fails the step
+  (hearsay-tools/squeal spec 018 D20).
+- In a merge group, each `Vitest shard N/8` job runs its unchanged `npm test` command under
+  `squeal ci record --out "$RUNNER_TEMP/squeal-parts" --`. The command's output and exit code
+  are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3 days. When
+  Squeal cannot run, the shard runs the plain command with a warning and uploads no parts.
+  Other events run the command exactly as before.
 - A shard that reruns after a failed first run (§ Rerun of a failed queue shard) records
   the rerun into `$RUNNER_TEMP/squeal-parts-rerun`, and only those parts upload. Each shard
   so has one complete part, which `squeal ci export` needs: it refuses two parts for one
@@ -527,8 +541,8 @@ can import those passes instead of running the same test files again
   kept 3 days. It runs the queued code, so it never holds write access.
 - The `Publish Squeal shared results` job (`squeal-publish`) is the only job with
   `contents: write`, and it runs no repository code: no install, build or package script. It
-  checks out the same commit with full history and no stored credentials, sets up Node,
-  fetches the Squeal release, downloads the export and runs `squeal ci publish --keep 100`.
+  checks out the same commit with full history and no stored credentials, sets up Node and
+  Squeal's action, downloads the export and runs `squeal ci publish --keep 100`.
   That pushes `refs/squeal/<sha>` and deletes refs beyond the newest 100 main commits; it
   runs only git and reads `squeal.config.json`. The token reaches only that step, as a git
   extra header in its environment.
@@ -545,11 +559,12 @@ can import those passes instead of running the same test files again
   the tests' input files while the command runs.
 
 `.github/scripts/ci-squeal-results.workflow.test.cjs` pins the event selection, the
-unchanged command and exit code, both jobs' permissions, the publish job's token handling
-and their absence from required checks. `.github/scripts/main-ci-escalation.test.cjs` pins
-the ref check.
-To move to another Squeal release, change `SQUEAL_TAG` and `SQUEAL_COMMIT` in the vitest job's
-`Fetch the Squeal release` step; both Squeal jobs reuse it.
+unchanged command and exit code, the action's pin and its place after Node in each job, both
+jobs' permissions, the publish job's token handling and their absence from required checks.
+`.github/scripts/main-ci-escalation.test.cjs` pins the ref check.
+Dependabot's weekly actions pull request moves the Squeal pin to a newer `v<version>` tag
+(§ Pinned actions). To move it by hand, change the commit and the `# v<version>` comment on
+every `Set up Squeal` step in `ci.yml` together; the workflow test requires one pin.
 
 ### Squeal quality gate trial
 
@@ -572,7 +587,7 @@ gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
   `squeal-parts-shard-N`; the run collects and merges no V8 coverage.
 - The `Squeal quality gate trial` job (`squeal-gate-trial`) runs after the shards pass or
   fail. It checks out the dispatched commit with the history of main, installs dependencies,
-  fetches the pinned Squeal release, downloads the parts and runs
+  sets up Squeal's action, downloads the parts and runs
   `squeal code --base origin/main --json --parts <shard directories>`. A selected test file
   whose part certifies its inputs here comes from the parts; the gate runs the others itself,
   for up to 600 seconds.
@@ -587,6 +602,47 @@ gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
 
 `.github/scripts/ci-squeal-gate-trial.workflow.test.cjs` pins the trigger, the job's
 permissions, its gate command and its summary.
+
+### Squeal coverage proof
+
+A manual proof checks that Squeal can record its per-test-file coverage beside the project's
+own V8 report in one run, without changing that report or adding cost above run-to-run noise
+(hearsay-tools/squeal spec 020 D19, row 020-26c; hearsay-tools/squeal#189). It runs only on
+request:
+
+```bash
+gh workflow run ci.yml --ref <branch> -f squeal_coverage_proof=true
+```
+
+- Only a dispatch with `squeal_coverage_proof` and no `pr_number` takes the proof. The rest of
+  that dispatch runs as a bare dispatch does, V8 coverage artifact included. Dispatches of one
+  branch share a concurrency group and cancel each other, so start the proof after the bare
+  proof of a `ci.yml` change ends (§ Proving a `ci.yml` change).
+- The `Squeal coverage proof <run>` jobs (`squeal-coverage-proof`) run Vitest shard 1/8, the
+  first of the eight shards, three times in parallel on the dispatched commit, each with
+  `npm test -- --shard=1/8 --maxWorkers=4 --coverage.enabled`, the shard command of a dispatch.
+  `squeal` runs it under `squeal ci record` after Squeal's action, so Squeal reads the V8
+  provider's payloads into its parts. `v8` and `v8-control` run it alone; `v8-control` is the
+  run-to-run control. Each keeps its exit code, its wall and CPU (user + sys) time, the runner's
+  CPU count, CPU model and load, and `coverage-final.json`, and uploads them as
+  `squeal-coverage-proof-<run>` with the parts for `squeal`, kept 14 days.
+- The `Compare the Squeal coverage proof` job (`squeal-coverage-proof-compare`) runs after the
+  three end in any way but skipped. It downloads them and runs
+  `.github/scripts/squeal-coverage-proof.cjs`, which writes the job summary and uploads
+  `comparison.json` as `squeal-coverage-comparison`, kept 14 days.
+- The summary compares covered statements of `squeal` against `v8`, and of `v8` against
+  `v8-control`, by source location: statements whose covered state differs and the files they
+  are in. A difference between `squeal` and `v8` reads as Squeal's only when it is well above
+  the control's. Then it gives the parts' test files with and without a record and why, the
+  part header's collector (`v8` expected) and the test files that loaded `node:inspector`;
+  then each run's time, the two differences against `v8`, and Squeal's own time from the parts.
+- Nothing depends on it. Both jobs are outside `verify.needs` and the merge-queue roster, only a
+  manual dispatch runs them, every step continues on error and both jobs set
+  `continue-on-error`. The proof never runs on a pull request, in a merge group or on a push.
+
+`.github/scripts/ci-squeal-coverage-proof.workflow.test.cjs` pins the trigger, the three runs,
+their artifacts and the steps' scripts; `.github/scripts/squeal-coverage-proof.test.cjs` pins the
+comparison.
 
 ### Upstream scan PRs
 
