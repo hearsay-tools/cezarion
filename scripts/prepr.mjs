@@ -169,8 +169,9 @@ export function patchLimitLines(base, io = realIo) {
       : facts.bytes > limit ? `its diff is ${facts.bytes} bytes, over GitHub's ${limit}-byte per-file patch limit` : '';
     if (cause) refused.push(entry(false, `patch limits: ${JSON.stringify(paths.at(-1))}: ${cause}, so GitHub returns no patch and the PR gate fails. Split the change.`));
   }
-  if (refused.length) return refused;
-  return [entry(true, `patch limits: every file diff is at most ${limit} bytes with no NUL byte; ${added + deleted} changed lines (+${added}/-${deleted}) in ${rows.length} file${rows.length === 1 ? '' : 's'}`)];
+  const total = `${added + deleted} changed lines (+${added}/-${deleted}) in ${rows.length} file${rows.length === 1 ? '' : 's'}`;
+  if (refused.length) return [...refused, entry(false, `patch limits: ${refused.length} of ${rows.length} file diffs refused; ${total}`)];
+  return [entry(true, `patch limits: every file diff is at most ${limit} bytes with no NUL byte; ${total}`)];
 }
 
 function changedFiles(base, io) {

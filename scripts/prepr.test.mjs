@@ -239,6 +239,7 @@ test('patch limits refuse a file diff over the GitHub bound and a NUL byte, nami
   assert.match(text, new RegExp(`"large\\.md": its diff is \\d+ bytes, over GitHub's ${GITHUB_PATCH_LIMITS.fileBytes}-byte per-file patch limit`));
   assert.match(text, /"nul\.txt": its diff contains a NUL byte/);
   assert.doesNotMatch(text, /small\.txt|image\.bin/);
+  assert.match(lines.at(-1).text, /FAIL: patch limits: 2 of 4 file diffs refused; \d+ changed lines \(\+\d+\/-0\) in 4 files/);
 });
 
 test('patch limits pass under the bound and print the total changed lines', async t => {
