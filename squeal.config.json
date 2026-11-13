@@ -35,10 +35,39 @@
   "complexity": {
     "enabled": true
   },
+  "coverage": {
+    "exclude": [
+      "packages/cezar/scripts/mock-autonomous.mjs",
+      "packages/cezar/scripts/mock-ci-tool.mjs",
+      "packages/cezar/scripts/mock-claude-model-refusal.mjs",
+      "packages/cezar/scripts/mock-claude-subagents.mjs",
+      "packages/cezar/scripts/mock-claude.mjs",
+      "packages/cezar/scripts/mock-codex-app-server.mjs",
+      "packages/cezar/scripts/mock-codex-coalesce-steer.mjs",
+      "packages/cezar/scripts/mock-codex-reverse-steer.mjs",
+      "packages/cezar/scripts/mock-codex-subagents.mjs",
+      "packages/cezar/scripts/mock-cursor-hang-stdin-late.mjs",
+      "packages/cezar/scripts/mock-cursor-hang-stdin.mjs",
+      "packages/cezar/scripts/mock-cursor-print.mjs",
+      "packages/cezar/scripts/mock-deferred-turn-start.mjs",
+      "packages/cezar/scripts/mock-env-record.mjs",
+      "packages/cezar/scripts/mock-multi-pr.mjs",
+      "packages/cezar/scripts/mock-nudge.mjs",
+      "packages/cezar/scripts/mock-omp-rpc.mjs",
+      "packages/cezar/scripts/mock-opencode-serve.mjs",
+      "packages/cezar/scripts/mock-pi-rpc.mjs",
+      "packages/cezar/scripts/mock-provider-failures.mjs",
+      "packages/cezar/scripts/mock-runner-crash.mjs",
+      "packages/cezar/scripts/mock-silent-tail.mjs",
+      "packages/cezar/scripts/mock-turn-messages.mjs",
+      "packages/cezar/scripts/mock-wire-evidence.config.mjs",
+      "packages/cezar/scripts/mock-wire-recorder.mjs",
+      "packages/cezar/scripts/mock-wire-tools.mjs",
+      ".ai/scripts/probe-*.ts",
+      ".ai/scripts/test-env-lease.mjs"
+    ]
+  },
   "inputs": {
-    ".ai/skills/check-code-quality/scripts/restart-wrapper.test.mjs": [
-      ".ai/skills/check-code-quality/references/tool.md"
-    ],
     "packages/cezar/src/ast-grep-rules.test.ts": [
       "sgconfig.yml",
       ".ai/ast-grep/**"

@@ -548,8 +548,8 @@ base SHA, because `github.sha` there is the combined commit and holds the pull r
 (`refs/heads/gh-readonly-queue/main/pr-<N>-<sha>`) names. The merge count is 1, so each group holds one
 pull request at build concurrency 1 or 2. Any other ref reads no label, so growth then fails. The job's name is in the queue proof roster (`REQUIRED_QUEUE_JOBS`).
 
-A failure names each function, both complexity values, the `metrics.mjs` commands that print them
-and the decision points (`--breakdown`). Reproduce a run from the repository root:
+A failure names each function, both complexity values and the function's decision points at the
+head. Reproduce a run from the repository root:
 
 ```bash
 node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base origin/main --head HEAD
@@ -587,10 +587,8 @@ runs keep their existing skips.
 The optional `Merge Vitest coverage` job uploads `vitest-coverage-<head SHA>`, holding
 `coverage-final.json` (Istanbul, paths relative to the repository root, test files included)
 and `provenance.json` (tested ref, head and base SHA, run ID and attempt), kept 14 days.
-The legacy statistics collector can use this artifact; see
-`.ai/skills/check-code-quality/references/tool.md`. The local pre-PR gate runs
-Squeal's one-shot check and requires its complete report. It does not reuse this
-CI artifact yet; see `.ai/skills/check-code-quality/references/pre-pr.md`.
+The local pre-PR gate runs Squeal's one-shot check and requires its complete report.
+It does not reuse this CI artifact; see `.ai/skills/check-code-quality/references/pre-pr.md`.
 
 Test failures, unhandled errors, coverage startup failures and worker failures still fail the
 required shard. The coverage-only reporter catches errors from report conversion and writing

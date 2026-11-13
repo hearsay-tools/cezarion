@@ -3,10 +3,9 @@ import { join } from 'node:path';
 
 // Keeps test files in Vitest's coverage report.
 //
-// `check-code-quality` measures changed test functions, and it exits 2 for a file the report lacks.
+// A coverage report measures changed test functions too, so it must hold the test files.
 // Vitest appends every project's `test.include` globs to `coverage.exclude` after it resolves the
-// config, and no setting turns that off. `check-code-quality/scripts/vitest-coverage.mjs` removes
-// them the same way for its own runs. The root config's `projects` setting stops plugin hooks from
+// config, and no setting turns that off. The root config's `projects` setting stops plugin hooks from
 // reaching this file, so the working place is a reporter: `onInit` runs before any test starts.
 
 /** True when the command line asks Vitest for coverage. A run without it never sees this reporter. */

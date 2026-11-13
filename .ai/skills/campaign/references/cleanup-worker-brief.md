@@ -8,7 +8,7 @@ Changing that contract requires a feature plan before dispatch continues.
 
 Measure the issue's named target on current main and after integration: lines,
 bytes, complexity or the agreed test-quality metric. For complexity, use
-`node .ai/skills/check-code-quality/scripts/metrics.mjs <file> --json`.
+`squeal code <file> --json`.
 
 ## Worker brief
 
