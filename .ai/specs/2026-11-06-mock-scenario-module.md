@@ -73,7 +73,6 @@ more mocks is **shared**; this campaign moves the shared scenarios.
 | `multi-pr-refs` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-multi-pr.mjs` |
 | `no-progress-*` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | hearsay-tools/cezarion#1529 |
 | `silent-tail-*` and the final-message nudge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-silent-tail.mjs` |
-| `tool-tail` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
 | `turn-messages` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | decoder in `mock-turn-messages.mjs` |
 | `ack-only` | ✓ | ✓ | ✓ | ✓ | ✓ | – | a per-turn process cannot hold an ack |
 | `busy-progress` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | OMP matches it in the same entry as `no-progress` |
@@ -214,11 +213,9 @@ release before text) and Cursor F10 (`silent-tail-slow-done`: release the tail
 through the release file rather than a sleep). Cursor also keeps the `cezar-done`
 text `Done.` plus the unchanged lifecycle note, pinned by
 `packages/cezar/test/e2e/cursor-print.test.ts:43`; other runners keep the shared
-completion text. Cursor F3 (`silent-tail-again`) keeps its reasoning in the
-README read-tool result, with no thinking frames on the opening or nudge turn;
-`packages/cezar/src/core/workflow-final-message-cells.testkit.ts:319` pins that
-tool output in fresh and continued runs. Other runners keep the shared thinking
-script. All retain their pinned tests.
+completion text. All retain their pinned tests. The `tool-tail` scenario and the
+Cursor F3 scenario lost their last parity rows with F1–F6 and were deleted
+(hearsay-tools/squawk#3020).
 
 Unification changes test-only fixture output, never what a user sees: shared
 scenarios start only from a `mock:` token, and the untokened reply stays

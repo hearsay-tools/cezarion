@@ -429,9 +429,9 @@ adapter, which is the point):
   every scenario **including `subagent` and `subagent-after-park`**). Exemptions only where the
   wire genuinely lacks the cell, each with an OMP-specific reason: R16 (`text_end.content` is the
   one text channel for v1 and v2), I2 (the settle predicate reads a queued steer before
-  settling, Ruling 16), A9 (plain `--mode rpc` never constructs the ask tool, Ruling 15) and
-  A13/A14 (no portable-answer HTTP ACK retained after turn completion; shared with every
-  runner). No S9, R12 or R15 exemption.
+  settling, Ruling 16) and A9 (plain `--mode rpc` never constructs the ask tool, Ruling 15).
+  No S9, R12 or R15 exemption. Rows A13/A14 and their exemptions were later deleted: no runner
+  could construct them (hearsay-tools/squawk#2452).
 - `model-discovery-guard`, `agent-descriptors.test`, the `UiBackend` exactness test,
   `dry-run-backends`, contract parity, and every `RUNNER_IDS`-driven table (conversation,
   CI-wait, CI-wait refusal R27, workflow timeout and no-progress, owned input delivery,

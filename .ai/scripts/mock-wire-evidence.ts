@@ -21,9 +21,9 @@ const shared = [
   'deferred-turn-start', 'hold', 'hold-cezar-ask', 'hold-cezar-done', 'hold-gated',
   'multi-pr-refs', 'no-progress', 'no-progress-ignore-term', 'no-progress-held-pipe',
   'no-progress-ack-only', 'no-progress-leftover', 'no-progress-input-closed', 'no-progress-gated-ack',
-  'silent-tail', 'silent-tail-again', 'silent-tail-ack-delay', 'silent-tail-no-reply',
+  'silent-tail', 'silent-tail-ack-delay', 'silent-tail-no-reply',
   'silent-tail-late-reply', 'silent-tail-late-turn-start', 'silent-tail-slow-done',
-  'tool-tail', 'turn-messages', 'ack-only', 'busy-progress', 'provider-error',
+  'turn-messages', 'ack-only', 'busy-progress', 'provider-error',
   'resume-cezar-done', 'steer-tool', 'steer-late', 'subagent-after-park',
 ] as const;
 const gaps: Array<{ runner: RunnerId; scenario: string; reason: string }> = [];

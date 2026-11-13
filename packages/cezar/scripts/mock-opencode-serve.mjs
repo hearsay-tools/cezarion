@@ -770,7 +770,7 @@ async function preparePromptTurn(res, url, body, received, prepared) {
   if (delivery) await delivery.holdResponse(deliveryText);
   if (await playSlot(['ack-only'], url, body)) return true;
   if (scenarioAt(body, 'autonomous')?.variant) autonomousCap = true;
-  const silent = scenarioAt(body, 'silent-tail') ?? scenarioAt(body, 'tool-tail');
+  const silent = scenarioAt(body, 'silent-tail');
   if (silent) {
     prepared.silent = await prepareSilentScenario(silent, url, body);
     if (!prepared.silent) return true;
@@ -856,7 +856,7 @@ function scenarioEncoder(scenario, url, body) {
     },
     toolStart({ call }) {
       // These native fixtures report completed snapshots, not a running transition.
-      if (['multi-pr-refs', 'silent-tail', 'tool-tail'].includes(name)) return;
+      if (['multi-pr-refs', 'silent-tail'].includes(name)) return;
       if (name === 'subagent-after-park' && call.name === 'task') {
         send({ type: 'message.part.updated', properties: { part: { id: 'park-task', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'subtask', prompt: 'Review', description: 'Review', agent: 'general' } } });
         return;
@@ -891,20 +891,19 @@ function scenarioTextId(name, index, nudge) {
   if (name === 'agent-echo') return `prt_echo_${++echoSerial}`;
   if (name === 'autonomous') return `autonomous-${++autonomousTurn}`;
   if (name === 'silent-tail') return nudge ? (index === 0 && finalMessageNudgeKind() === 'slow-done' ? 'silent-nudge-prefix' : 'silent-nudge-done') : 'silent-open';
-  if (name === 'tool-tail') return 'tool-tail-open';
   return TEXT_IDS[name] ?? `prt_scenario_${index}`;
 }
 function scenarioToolPart(name, call, status) {
   const ids = {
     'multi-pr-refs': ['multi-tool', 'multi-read'], 'silent-tail': ['silent-gh', 'call_silent_gh'],
-    'tool-tail': ['tool-tail-git', 'call_tool_tail'], 'steer-tool': ['prt_steer_tool', 'call_steer'],
+    'steer-tool': ['prt_steer_tool', 'call_steer'],
   };
   const [id, callID] = ids[name] ?? [call.id, call.id];
   send({ type: 'message.part.updated', properties: { part: {
     id, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool',
     ...(name === 'multi-pr-refs' ? { tool: call.name, callID } : { callID, tool: call.name }),
     state: { status, input: name === 'multi-pr-refs' ? { filePath: call.input.path } : call.input, ...(status === 'completed' ? { output: call.output } : {}),
-      ...(['multi-pr-refs', 'silent-tail', 'tool-tail'].includes(name) ? { time: { start: 1, end: 2 } } : {}) },
+      ...(['multi-pr-refs', 'silent-tail'].includes(name) ? { time: { start: 1, end: 2 } } : {}) },
   } } });
 }
 function playScenarioChild(step, playChild, encoder) {

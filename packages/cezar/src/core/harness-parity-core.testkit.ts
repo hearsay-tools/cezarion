@@ -42,7 +42,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | Scenario | The mock must |
  * | --- | --- |
  * | `baseline` | one text, one tool call and result, a later visible assistant message, usage, then its terminal turn signal |
- * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
  * | `mcp-approval` | ask the native client before another MCP server's tool call, then echo the exact answer and end the turn |
  * | `cezar-done` | the same, calling `cezar_done` before its final text so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
@@ -74,7 +73,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  * | `silent-tail` | visible assistant text, a tool, then reasoning that names cezar_done, and no later message |
- * | `silent-tail-again` | the same first turn; a final-message nudge is answered with reasoning only |
  * | `silent-tail-ack-delay` | silent-tail as a follow-up whose transport ACK is held until after turn-end |
  * | `silent-tail-no-reply` | the same first turn; a final-message nudge is ACKed and never opens a turn |
  * | `silent-tail-late-reply` | the same first turn; a final-message nudge is ACKed, then replies after the bound |
@@ -111,15 +109,12 @@ export const SCENARIOS = [
   'autonomous',
   'autonomous-cap',
   'autonomous-cezar-ask-cap',
-  'autonomous-readiness-idle',
   'silent-tail',
-  'silent-tail-again',
   'silent-tail-ack-delay',
   'silent-tail-no-reply',
   'silent-tail-late-reply',
   'silent-tail-late-turn-start',
   'silent-tail-slow-done',
-  'tool-tail',
   'baseline',
   'cezar-done',
   'hold',
@@ -242,8 +237,6 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A10', scenario: 'cezar-ask', name: 'never continues past a persisted unanswered question' },
   { id: 'A11', scenario: 'autonomous-cezar-ask-cap', name: 'continues after a refused cezar_ask and delayed readiness' },
   { id: 'A12', scenario: 'autonomous-cezar-ask-cap', name: 'continues a resumed refused cezar_ask after delayed readiness' },
-  { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
-  { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
 /** #544: workflow-final-message-cells.testkit.ts, the no-wait nudge's reply bound on every native wire. */
@@ -395,11 +388,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
-      'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
-      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -451,12 +442,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
-      'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-late-turn-start': 'mock:silent-tail-late-turn-start',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
-      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -513,12 +502,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
-      'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-ack-delay': 'mock:silent-tail f7-delay-ack',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
-      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -555,9 +542,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
-      'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
-      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -585,9 +570,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
-      'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
-      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -633,11 +616,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
-      'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
-      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'no-progress-ack-only': BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -778,14 +759,6 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion, backend, kind: 'capability-absent' as const,
     reason: 'This wire writes or steers a mid-turn human follow-up immediately; discardQueuedMessages cannot unwrite it. OpenCode and Cursor queue and drop (H2 live rows).',
   })); }),
-  ...(['A13', 'A14'] as const).flatMap(criterion => { return (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
-    criterion, backend, kind: 'scenario-unconstructible' as const,
-    reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
-  })); }),
-  ...(['A13', 'A14'] as const).map(criterion => ({
-    criterion, backend: 'opencode' as const, kind: 'scenario-unconstructible' as const,
-    reason: 'The refused autonomous nudge was reached only through the retired ask line, whose nudge went out as human input and left its HTTP ACK outstanding (hearsay-tools/cezarion#2397). A tool-era nudge is agent input, which OpenCode admits at the boundary. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
-  })),
   ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'F7', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate HTTP ACK retained after turn completion. Turn frames and the transport ACK share one stream, so a silent-tail turn cannot end while its agent-input ACK is still pending.',

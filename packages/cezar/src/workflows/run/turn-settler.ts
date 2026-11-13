@@ -189,8 +189,8 @@ export class TurnSettler {
   private decideSettledTurn(runId: string, state: ActiveRun, session: AgentSession | undefined, entry: 'turn-end' | 'ack' | 'ready' | 'gate',
     turn: SettledTurn, refused: CompletionRefusal | undefined, noteRefusal: () => void): { decision: TurnEndDecision; tried: boolean } {
     // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
-    // timer alias opens now. A refused done decides before any alias, as before.
-    if (entry !== 'turn-end' || (turn.ask && !refused)) this.openTurnTimerAlias(runId, state, session, turn);
+    // timer alias opens now.
+    if (entry !== 'turn-end' || turn.ask) this.openTurnTimerAlias(runId, state, session, turn);
     // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
     const decision = decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, entry === 'turn-end' || entry === 'gate' ? undefined : false));
     this.keepSettledDone(state, entry, turn, refused, decision);

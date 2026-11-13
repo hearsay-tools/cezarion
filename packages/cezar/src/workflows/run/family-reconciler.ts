@@ -134,12 +134,6 @@ export class FamilyReconciler {
     }
   }
 
-  reconcileAllWorkerFamilies(): void {
-    // Another process's families are its own to repair (#779, plan step 3).
-    for (const rootId of this.context.store.listConversationRootIds()) if (!this.context.store.writeRefusal(rootId)) this.host.reconcileWorkerWaits(rootId);
-    this.host.reconcileWorkerWaits();
-  }
-
   /** Authority and wait live on disk; these collections are admission/timer caches only. One
    *  family by its root's id, or (no id) every family with a live member. */
   reconcileWorkerWaits(familyRootId?: string): void {

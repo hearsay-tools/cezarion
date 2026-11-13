@@ -16,7 +16,7 @@ const CONTEXT = 'The task stopped without a next step.';
 const messages = (texts) => `mock:turn-messages:${Buffer.from(JSON.stringify(texts)).toString('base64')}`;
 const base64url = (text) => Buffer.from(text).toString('base64url');
 
-/** A session that opened a silent-tail or tool-tail scenario answers the nudge in that scenario. */
+/** A session that opened a silent-tail scenario answers the nudge in that scenario. */
 export function silentNudge(prompt) {
   return typeof prompt === 'string' && prompt.includes(NUDGE) && silentTailOpened();
 }
