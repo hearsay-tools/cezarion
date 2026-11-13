@@ -6,8 +6,6 @@ on:
       - '.ai/scripts/e2e.sh'
       - '.github/scripts/test-env-windows*'
       - '.github/workflows/test-env-windows.yml'
-      - 'packages/cezar/src/delegation/idle-test-app*'
-      - 'packages/cezar/src/delegation/windows-test-app*'
       - 'packages/cezar/src/delegation/windows-workspace*'
       - 'packages/cezar/scripts/windows-workspace-identity.*'
       - 'packages/cezar/src/delegation/workspace.ts'
@@ -118,27 +116,3 @@ jobs:
       - name: Verify production lease on native Windows
         shell: pwsh
         run: node --test .github/scripts/test-env-windows.test.mjs
-      - name: Prove worker cleanup regression on native Windows
-        shell: pwsh
-        run: |
-          git fetch --depth=1 origin 471fc954423631d021c94e870ef0bd3976e209a4
-          # Keep the current watcher API; restore only the old app-cleanup implementation.
-          $file = 'packages/cezar/src/delegation/idle-test-app.ts'
-          $current = Get-Content $file -Raw
-          $old = (git show "471fc954423631d021c94e870ef0bd3976e209a4:$file") -join "`n"
-          $oldCleanup = $old.Substring(0, $old.IndexOf('/** The app watcher checks'))
-          $watcher = $current.Substring($current.IndexOf('/** Read command lines'))
-          Set-Content $file ("import { spawnSync } from 'node:child_process';`n" + $oldCleanup + $watcher)
-          try {
-            $output = npm test -- packages/cezar/src/delegation/windows-test-app.test.ts -t 'stops the owned app' 2>&1 | Out-String
-            $failed = $LASTEXITCODE -ne 0
-            Write-Output $output
-            if (!$failed -or $output -notmatch '"state": "complete"') {
-              throw 'Expected the pre-fix worker cleanup to remain incomplete'
-            }
-          } finally {
-            git checkout -- packages/cezar/src/delegation/idle-test-app.ts
-          }
-          $global:LASTEXITCODE = 0
-      - name: Verify worker cleanup on native Windows
-        run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts packages/cezar/src/delegation/idle-test-app-refusal.test.ts packages/cezar/src/delegation/idle-test-app.test.ts

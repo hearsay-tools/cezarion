@@ -1,94 +1,87 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-
-import { DatabaseSync } from 'node:sqlite';
 
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
-import { leaseIdentity, processStartToken } from '../detached-process.ts';
-import { stopWorktreeServices } from './worktree-services.ts';
+import { projectPaths } from '../project-paths.ts';
+import { runWorktreeTeardown } from './worktree-teardown.ts';
 import { f, linux, cadence, settled, destroyOf, useDestroyBackoffFixture } from './service-destroy-backoff.testkit.ts';
 
-/** A process titled as Squeal titles its daemon, validating `root`, with its cwd there and its own
- * process group. */
-async function fakeSquealDaemon(root: string): Promise<ChildProcess> {
-  const title = `squeal repo daemon @0000 /cli/squeal.mjs daemon ${root}`;
-  const child = spawn(process.execPath, ['-e', "process.title = process.argv[1]; console.log('ready'); setInterval(() => {}, 1e6)", title],
-    { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+/** A process in its own group with its cwd in `root`, as a test server or file watcher a worktree
+ * started for itself. */
+async function worktreeService(root: string): Promise<ChildProcess> {
+  const child = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(() => {}, 1e6)"], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], detached: true });
   onTestFinished(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* gone */ } });
   await new Promise(resolve => child.stdout!.once('data', resolve));
   return child;
 }
 
-/** A `squeal` on PATH that records its arguments and, after `failures` calls that change nothing,
- * ends `pid` as `squeal stop` ends its daemon. With `gate`, it first waits for that file to exist.
- * Returns the recorded calls. */
-function fakeSquealCli(pid: number, failures = 0, gate?: string): () => string {
-  const bin = mkdtempSync(join(tmpdir(), 'cez-squeal-bin-')); const log = join(bin, 'calls');
-  onTestFinished(() => rmSync(bin, { recursive: true, force: true }));
-  // Like `squeal stop`, it returns once the daemon is gone (bound: 10 s for the gate and for the exit).
-  writeFileSync(join(bin, 'squeal'), `#!/bin/sh\necho "$@" >> '${log}'\n` +
-    (gate ? `for i in $(seq 200); do [ -f '${gate}' ] && break; sleep 0.05; done\n` : '') +
-    `[ "$(wc -l < '${log}')" -gt ${failures} ] || exit 1\n` +
-    `kill ${pid}\nfor i in $(seq 200); do kill -0 ${pid} 2>/dev/null || exit 0; sleep 0.05; done\n`);
-  chmodSync(join(bin, 'squeal'), 0o755);
-  vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
-  return () => { try { return readFileSync(log, 'utf8').trim(); } catch { return ''; } };
+/** A scratch directory outside every checkout, removed after the test. */
+function scratchDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-teardown-'));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
 }
+
+/** The project's `worktreeTeardown` in its config file. */
+function useTeardown(...commands: string[]): void {
+  const dir = projectPaths(f.root).write; mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'config.json');
+  const config = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  writeFileSync(file, JSON.stringify({ ...config, worktreeTeardown: { commands, timeoutSeconds: 10 } }));
+}
+
+/** A shell command that ends `pid` and returns once it is gone (bound: the teardown's 10 s timeout). */
+const stop = (pid: number) => `kill ${pid}; while kill -0 ${pid} 2>/dev/null; do sleep 0.05; done`;
 
 describe('destroy backoff holder', { timeout: 30_000 }, () => {
   useDestroyBackoffFixture();
 
-  // hearsay-tools/squawk#914, hearsay-tools/squawk#1926: the daemon's test run holds the worktree,
-  // and its e2e global setup holds the test-env lease, as Squeal runs the browser files.
-  it.runIf(linux)("destroys in one call a worker whose own Squeal daemon holds its worktree and test-env lease", async () => {
+  // hearsay-tools/squawk#914, hearsay-tools/squawk#1926: the worktree's own service holds it; the
+  // project's teardown stops it before the holder scan, in the worktree.
+  it.runIf(linux)("destroys in one call a worker whose own service holds its worktree, through the project's worktreeTeardown", async () => {
     await cadence();
     const { workerId, workspace } = await settled(false);
-    const daemon = await fakeSquealDaemon(workspace.path);
-    const calls = fakeSquealCli(daemon.pid!);
-    const qa = join(workspace.path, '.ai/qa'); mkdirSync(qa, { recursive: true });
-    // A live app in its own group with its cwd in the worktree, as test-env-up.sh starts it.
-    const app = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(() => {}, 1e6)"], { cwd: workspace.path, stdio: ['ignore', 'pipe', 'ignore'], detached: true });
-    onTestFinished(() => { try { process.kill(-app.pid!, 'SIGKILL'); } catch { /* gone */ } });
-    await new Promise(resolve => app.stdout!.once('data', resolve));
-    writeFileSync(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: app.pid, start: processStartToken(app.pid!) } }));
-    const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
-    try {
-      db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
-      db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, ?)').run('squeal', 'token', daemon.pid!, leaseIdentity(daemon.pid!).start!, daemon.pid!);
-    } finally { db.close(); }
+    const service = await worktreeService(workspace.path);
+    const ran = join(scratchDir(), 'ran'); const path = realpathSync(workspace.path);
+    useTeardown(`pwd -P > '${ran}'`, stop(service.pid!));
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
-    expect(calls()).toBe(`stop --until-start ${workspace.path}`);
-    await vi.waitFor(() => expect(app.exitCode ?? app.signalCode).not.toBeNull()); // bound: the default 1 s for the exit event
+    expect(readFileSync(ran, 'utf8').trim()).toBe(path);
     expect(existsSync(workspace.path)).toBe(false);
   });
 
-  it.runIf(linux)("a scheduled retry stops the worktree's Squeal daemon again after a failed stop", async () => {
+  it.runIf(linux)('a failed worktreeTeardown ends in the refusal that names the holder, and a scheduled retry runs it again', async () => {
     await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
-    const daemon = await fakeSquealDaemon(workspace.path);
-    const calls = fakeSquealCli(daemon.pid!, 1);
-    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    const holder = spawn('sleep', ['30'], { cwd: workspace.path, stdio: 'ignore' });
+    onTestFinished(() => { holder.kill('SIGKILL'); });
+    const calls = join(scratchDir(), 'calls');
+    // The first run fails and stops nothing; the second stops the holder.
+    const failing = `echo run >> '${calls}'; [ "$(wc -l < '${calls}')" -gt 1 ] || exit 3`;
+    useTeardown(failing, stop(holder.pid!));
+    const refused = await f.service.destroy(f.caller, { workerId });
+    expect(refused).toMatchObject({ state: 'incomplete' });
+    expect(refused.error).toMatch(new RegExp(`processes ${holder.pid} \\(sleep 30\\)`));
+    expect(f.store.readEvents(workerId).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('worktree teardown failed:')))
+      .toEqual([expect.objectContaining({ message: expect.stringMatching(/^worktree teardown failed: `echo run .*` exited 3$/) })]);
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
-    expect(calls().split('\n')).toHaveLength(2);
+    expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
   });
 
-  it.runIf(linux)('a project replaced while the services stop runs starts no termination through the old manager', async () => {
+  it.runIf(linux)('a project replaced while the worktree teardown runs starts no termination through the old manager', async () => {
     await cadence();
-    const { workerId, workspace } = await settled(false);
-    const daemon = await fakeSquealDaemon(workspace.path);
-    const gate = join(mkdtempSync(join(tmpdir(), 'cez-squeal-gate-')), 'release');
-    onTestFinished(() => rmSync(dirname(gate), { recursive: true, force: true }));
-    const calls = fakeSquealCli(daemon.pid!, 0, gate);
+    const { workerId } = await settled(false);
+    const dir = scratchDir(); const started = join(dir, 'started'); const gate = join(dir, 'release');
+    useTeardown(`touch '${started}'; while [ ! -f '${gate}' ]; do sleep 0.05; done`);
     const termination = vi.spyOn(f.manager, 'awaitRunTermination');
     const explicit = f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => expect(calls()).not.toBe(''), { timeout: 10_000 });
+    await vi.waitFor(() => expect(existsSync(started)).toBe(true), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
     try {
@@ -98,18 +91,15 @@ describe('destroy backoff holder', { timeout: 30_000 }, () => {
     } finally { detachReplacement(); replacementManager.dispose(); }
   });
 
-  // A destroy reaches only the services of the worktree it owns: never another checkout's, even
-  // through a worker path replaced by a symlink to it.
-  it.runIf(linux).each(['elsewhere', 'replaced'] as const)("never stops another checkout's Squeal daemon (%s)", async mode => {
-    const other = mkdtempSync(join(tmpdir(), 'cez-other-checkout-'));
-    onTestFinished(() => rmSync(other, { recursive: true, force: true }));
-    const daemon = await fakeSquealDaemon(other);
-    const calls = fakeSquealCli(daemon.pid!);
+  // A destroy runs the teardown only in the worktree it owns: never in another checkout, even through a
+  // worker path replaced by a symlink to it.
+  it.runIf(linux)('never runs the worktreeTeardown in another checkout', async () => {
+    const other = scratchDir();
     const { workspace } = await settled(false);
-    if (mode === 'replaced') { renameSync(workspace.path, `${workspace.path}.moved`); symlinkSync(other, workspace.path); }
-    expect(await stopWorktreeServices(f.root, workspace)).toBe(true);
-    expect(calls()).toBe('');
-    expect(daemon.exitCode).toBeNull();
+    renameSync(workspace.path, `${workspace.path}.moved`); symlinkSync(other, workspace.path);
+    useTeardown('touch ran');
+    expect(await runWorktreeTeardown({ root: f.root, home: testHome() }, workspace)).toBeUndefined();
+    expect(existsSync(join(other, 'ran'))).toBe(false);
   });
 
   it.runIf(linux)('a holder that moves out of the worktree ends the skipping', async () => {

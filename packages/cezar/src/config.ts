@@ -122,6 +122,11 @@ const configSchema = z.object({
    * run instead of resetting this whole file to defaults or being dropped without a word.
    */
   worktreeSetup: z.unknown().optional(),
+  /**
+   * Commands that stop what a worker's worktree started for itself before destroy looks for holders
+   * (hearsay-tools/squawk#914). Same shape as `worktreeSetup`, judged by the same resolver.
+   */
+  worktreeTeardown: z.unknown().optional(),
 });
 
 export type CezConfig = z.infer<typeof configSchema>;

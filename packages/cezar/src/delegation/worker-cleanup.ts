@@ -9,7 +9,7 @@ import { DelegationPolicyError } from './policy.ts';
 import { gitCommonDir } from './workspace-git.ts';
 import { describeProcesses } from './process-liveness.ts';
 import { WorkspaceHeldError } from './workspace-removal.ts';
-import { stopWorktreeServices } from './worktree-services.ts';
+import { runWorktreeTeardown } from './worktree-teardown.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 import type { DelegationProject, WorkerCleanupFactory } from './service.ts';
@@ -203,10 +203,10 @@ export class WorkerCleanup {
      * failure. A complete destroy keeps nothing, and neither does a failure no key input or named
      * holder accounts for (lock contention, a failed Git step, an unnamed blocker): it can clear
      * without changing anything a tick could see, so the next tick attempts in full. */
-    // A worktree service that outlived its stop is retried by the next tick's full attempt.
-    let servicesStopped = true;
+    // A failed worktree teardown runs again in the next tick's full attempt.
+    let tornDown = true;
     const observed = (result: WorkerDestroyResult, holders: readonly number[], explained: boolean) => {
-      this.observeAttempt(project, workerId, result.state === 'complete' || !explained || !servicesStopped ? undefined : { key, holders: recordHolders(holders) });
+      this.observeAttempt(project, workerId, result.state === 'complete' || !explained || !tornDown ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
     const terminationFailure = (): WorkerDestroyResult => {
@@ -302,9 +302,11 @@ export class WorkerCleanup {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
       // Before either holder scan: the termination proof of a crashed generation scans the worktree too.
-      servicesStopped = await stopWorktreeServices(project.root, workspace);
-      // A project replaced during the stop keeps its old manager alive: never reap through it.
+      const teardownError = await runWorktreeTeardown(project, workspace);
+      // A project replaced during the teardown keeps its old manager alive: never reap through it.
       assertAttached();
+      tornDown = !teardownError;
+      if (teardownError) project.store.appendEvent(workerId, { type: 'lifecycle', message: `worktree teardown failed: ${teardownError}` });
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();
       key = observe();

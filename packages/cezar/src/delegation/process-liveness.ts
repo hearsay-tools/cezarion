@@ -141,7 +141,7 @@ function processCommand(pid: number): string | undefined {
     args = ps.status === 0 ? ps.stdout.trim().split(' ') : undefined;
   }
   const [program = '', ...rest] = args?.filter(Boolean) ?? [];
-  // A process title (`squeal <repo> daemon …`) is one argument with spaces, not a program path.
+  // A process title (`tool <repo> daemon …`) is one argument with spaces, not a program path.
   const command = [program.includes(' ') ? program : basename(program), ...rest].join(' ').replace(/\s+/g, ' ').trim();
   return !command ? undefined : command.length > 160 ? `${command.slice(0, 159)}…` : command;
 }
