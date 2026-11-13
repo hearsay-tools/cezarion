@@ -41,6 +41,12 @@ a subset. The complete body has a 50,000-byte limit; exceeding it fails before
 summary creation or routing. Do not remove members to fit the limit. User notes
 outside the managed block survive reporter retries.
 
+A summary lists one report per cause, not per job. A test failure groups by test file,
+test name and diagnostic; another recognized error by stage, step and error line; an
+unrecognized failure by workflow, job (matrix digits ignored) and step. A `Require every …`
+gate job that fails beside another failed job is no member: the failed job carries the
+cause ([matching](../failure-reporting.md#matching-and-duplicate-handling)).
+
 Replaying an attempt whose summary is closed leaves it closed and does not route
 it. A different attempt gets a separate summary, even when it reuses signature
 reports. The reporter never reopens a closed report. It changes no Squawk run state

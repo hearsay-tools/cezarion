@@ -220,7 +220,7 @@ test('a gate behind jobs that failed only on the GitHub API rate limit files not
  assert.equal((await reportFailure(h.options)).reported,0);assert.equal(h.state.issues.length,0);
 });
 test('a refusal of a dispatched Release files nothing',async()=>{
- const h=harness();h.state.log='Error: The last stable release was published 2026-11-11T18:15:31.289Z. A second stable release within 24 hours is refused; use a rollback for a broken release.';
+ const h=harness();h.state.log='Error: Release refused: the last stable release was published 2026-11-11T18:15:31.289Z. A second stable release within 24 hours is refused; use a rollback for a broken release.';
  assert.equal((await reportFailure(h.options)).reported,0);
  assert.ok(!h.calls.some(([route])=>route.startsWith('POST ')));
 });
@@ -290,3 +290,21 @@ for(const [seedName,firstPass] of Object.entries(FIRST_PASS)) for(const [shape,l
   assert.deepEqual(snapshot(h),first);
  });
 }
+
+// Attempts an earlier reporter recorded keep their issues, comments and summary.
+test('a replay keeps a gate member that an earlier reporter recorded',async()=>{
+ const h=harness();mainCi(h);withGate(h);await reportWithMainSelection(h);
+ const first=snapshot(h);assert.match(first.summary,/issues\/2\)/);
+ await reportFailure(h.options);
+ assert.deepEqual(snapshot(h),first);
+});
+test('a replay with readable logs keeps an unknown cause keyed by its occurrence',async()=>{
+ const h=harness();mainCi(h);h.state.log=null;await reportFailure(h.options);
+ // What a reporter before hearsay-tools/squawk#1447 wrote: the same records under the per-occurrence key.
+ const {causesForStep}=require('./failure-diagnostics.cjs');
+ const [{signature,legacySignature}]=causesForStep({run:h.state.run,job:h.state.jobs[0],step:h.state.jobs[0].steps.find(step=>step.conclusion==='failure'),log:''});
+ for(const entry of [...h.state.issues,...h.state.comments]) entry.body=entry.body.replaceAll(signature,legacySignature);
+ const first=snapshot(h);
+ h.state.log=fixture.log;await reportFailure(h.options);
+ assert.deepEqual(snapshot(h),first);
+});

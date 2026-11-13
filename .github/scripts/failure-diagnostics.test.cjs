@@ -45,13 +45,15 @@ test('an unrecognized failure keeps one signature per workflow, job and step acr
   }
 });
 // hearsay-tools/squawk#3335 filed the 24-hour limit of release-plan.cjs as a setup failure.
-test('a refusal in the Release workflow is no cause; the same line elsewhere still is', () => {
-  const refusal = '2026-09-10T11:50:00Z Error: The last stable release was published 2026-11-11T18:15:31.289Z. A second stable release within 24 hours is refused; use a rollback for a broken release.';
-  const a = release(); a.log = fixture.log + '\n' + refusal;
+test('a release-plan refusal in the Release workflow is no cause; other lines and workflows still are', () => {
+  const a = release();
   a.step = {...a.step, name:'Plan the release', started_at:'2026-09-10T11:50:00Z', completed_at:'2026-09-10T11:50:01Z'};
-  assert.deepEqual(causesForStep(a), []);
-  assert.deepEqual(causesForStep({...a, log: a.log.replace('Error: The last', 'Error: Release refused:\n- The last')}), []);
-  assert.match(causesForStep({...a, run: {...a.run, name: 'Nightly'}})[0].failureIdentity, /^Error: The last stable release .* is refused;/);
+  const at = line => ({...a, log: `${fixture.log}\n2026-09-10T11:50:00Z ${line}`});
+  for (const line of ['Error: Release refused: the last stable release was published 2026-11-11T18:15:31.289Z.', 'Error: Release refused:', 'Error: Promotion refused:', 'Error: Staging refused: the candidate commit publishes x']) {
+    assert.deepEqual(causesForStep(at(line)), [], line);
+  }
+  assert.equal(causesForStep(at('Error: connect: connection refused'))[0].failureIdentity, 'Error: connect: connection refused');
+  assert.match(causesForStep({...at('Error: Release refused:'), run: {...a.run, name: 'Nightly'}})[0].failureIdentity, /Release refused/);
 });
 test('publishing error differs from verification and ignores unrelated timestamped steps', () => {
   const a = release(); a.step = {...a.step, name:'Publish nightly',started_at:'2026-09-10T12:00:00Z',completed_at:'2026-09-10T12:01:00Z'};
