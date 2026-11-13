@@ -216,6 +216,9 @@ test('the daily digest checks whether each merged fix made its signal go quiet b
     `after ${INBOX.fixQuietDays} quiet days`,
   ]) assert.ok(prompt.includes(text), text);
   assert.ok(prompt.indexOf('fix check') < prompt.indexOf('4. Give each group one verdict'), 'the fix check runs before the verdicts');
+  assert.ok(prompt.includes('read the watch list, the act groups it carried forward and its fix check results'), 'fix check results carry across digests');
+  assert.ok(prompt.includes('A fix marked "came back" stays so'), 'a later quiet day cannot clear a recurrence');
+  assert.ok(prompt.includes('never a group that holds a "came back" finding'), 'a closed issue does not drop its recurrence');
 });
 
 test('inbox labels stay out of the routing labels the intake applicator manages', () => {

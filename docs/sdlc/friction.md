@@ -58,7 +58,7 @@ previous digest carried forward, by root cause. It checks each group against
 | --- | --- |
 | Act | One run lost more than 30 minutes to it, it gave a wrong result, or it occurred in two or more runs |
 | Watch | A first occurrence below that bar. The digest carries it forward with its count and first-seen date |
-| Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days |
+| Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days. A group with a `came back` finding is never dropped as fixed |
 
 **Fix check.** A merged fix is not proof that the problem stopped. For each
 issue that a digest filed in the last 30 days and that a merged pull request
@@ -68,8 +68,11 @@ counts when it has the same root cause, or when it comes from a mechanism that
 pull request added. The digest lists each counted finding under the filed issue
 and marks the fix `came back`. Otherwise it marks the fix
 `quiet since <merge date>`. A finding from a cockpit that still ran the code
-from before the merge does not count, and the digest says so. An issue leaves
-the check after 14 quiet days.
+from before the merge does not count, and the digest says so. A fix marked
+`came back` stays so: the issue leaves the check, and the group that names it
+carries the recurrence. An issue leaves the check after 14 quiet days. The
+digest comment carries every other result forward, with its counted findings and
+dates, and the next digest reads it with the watch list.
 
 For each Act group, the digest names the smallest fix that removes the whole
 class, and places any new rule as
