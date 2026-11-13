@@ -173,31 +173,36 @@ function serve({
       requests.push({ method, url, body })
 
       // Workspace-level: never scoped (project-scope.ts `WORKSPACE_LEVEL`).
-      if (url === '/api/v1/projects') return json(registry)
-      if (url === '/api/v1/health') return json(health)
-      if (url === '/api/v1/providers/status') return json(PROVIDERS)
-      // The rail's hand-picked order, opposite to registry order.
-      if (url === '/api/v1/workspace/ui-state' && method === 'GET') return json({ sidebar: { projectOrder: [OTHER, BOOT] } })
+      const workspace: Record<string, unknown> = {
+        'GET /api/v1/projects': registry,
+        'GET /api/v1/health': health,
+        'GET /api/v1/providers/status': PROVIDERS,
+        // The rail's hand-picked order, opposite to registry order.
+        'GET /api/v1/workspace/ui-state': { sidebar: { projectOrder: [OTHER, BOOT] } },
+      }
+      if (`${method} ${url}` in workspace) return json(workspace[`${method} ${url}`])
 
       // Split the scope off the path so each route is written once.
       const scoped = url.startsWith(`/api/v1/p/${OTHER}/`)
       const path = scoped ? `/api/v1${url.slice(`/api/v1/p/${OTHER}`.length)}` : url
       const pick = <T,>(boot: T, other: T): T => (scoped ? other : boot)
 
-      if (path === '/api/v1/health') return json(health)
-      if (path === '/api/v1/skills') return json(pick(BOOT_SKILLS, OTHER_SKILLS))
-      if (path === '/api/v1/workflows' && method === 'GET') return json(pick(BOOT_WORKFLOWS, OTHER_WORKFLOWS))
-      if (path === '/api/v1/repo') return json(pick(REPO, OTHER_REPO))
-      if (path === '/api/v1/ui-state' && method === 'GET') return json({})
-      if (path === '/api/v1/ui-state' && method === 'PUT') return json(body ?? {})
-      if (path === '/api/v1/config' && method === 'GET')
-        return json({
+      const project: Record<string, unknown> = {
+        'GET /api/v1/health': health,
+        'GET /api/v1/skills': pick(BOOT_SKILLS, OTHER_SKILLS),
+        'GET /api/v1/workflows': pick(BOOT_WORKFLOWS, OTHER_WORKFLOWS),
+        'GET /api/v1/repo': pick(REPO, OTHER_REPO),
+        'GET /api/v1/ui-state': {},
+        'PUT /api/v1/ui-state': body ?? {},
+        'GET /api/v1/config': {
           baseBranch: null,
           defaultRunner: 'claude',
           systemPrompt: null,
           // The Model pill's label is config-driven, so it proves the CONFIG re-resolved too.
           defaultModels: pick({ claude: 'sonnet' }, { claude: 'opus' }),
-        })
+        },
+      }
+      if (`${method} ${path}` in project) return json(project[`${method} ${path}`])
       if (path === '/api/v1/runs' && method === 'POST') return json({ id: 'run-1' }, 201)
       return json({ error: `unmocked ${method} ${url}` }, 404)
     }),
