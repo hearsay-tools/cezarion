@@ -136,7 +136,7 @@ import {
   setProjectWebhooks,
   taskWebhooks as taskWebhookList,
 } from '../workspace/webhooks.ts';
-import { detectEnvironment } from '../core/backend-detect.ts';
+import type { detectEnvironment } from '../core/backend-detect.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
@@ -372,6 +372,7 @@ export interface ServerDeps extends ActivityServerDeps {
   modelCatalog?: RunnerModelCatalog;
   /** Host-wide provider authentication discovery. Tests inject deterministic probes. */
   providerAuth?: ProviderAuthService;
+  detectEnvironment?: typeof detectEnvironment; // Host CLI detection behind health's availability checks. Tests inject a fake.
   /** Global provider enablement preferences. Tests may inject an in-memory store. */
   workspaceConfig?: {
     load: (path?: string) => ReturnType<typeof loadWorkspaceConfig>;
@@ -674,8 +675,7 @@ export function createApp(deps: ServerDeps) {
   const bootRoot = deps.repoRoot;
   const bootDataDir = projectPaths(bootRoot).write;
   // The host-wide services and the provider closures built on them live in `./server-deps.ts`.
-  const { modelCatalog, providerAuth, workspaceConfig, openTerminal, openFile, openApp } =
-    resolveServerDeps(deps, bootRoot);
+  const { modelCatalog, providerAuth, workspaceConfig, openTerminal, openFile, openApp, detectEnvironment } = resolveServerDeps(deps, bootRoot);
   const { providerStatus, providerActionError, invalidateHostModels } =
     createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
