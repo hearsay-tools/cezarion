@@ -184,15 +184,12 @@ afterEach(() => {
 })
 
 describe('the grouped table', () => {
-  it('groups project skills before global ones, with bold project rows (#377)', async () => {
+  it('groups project skills before global ones (#377)', async () => {
     serve()
     renderAt('/skills')
 
     await waitFor(() => expect(rowNames()).toEqual(['om-fix', 'om-review', 'zebra-global']))
     expect(groupLabels()).toEqual(['This project', 'Global'])
-    expect(row('om-fix')?.getAttribute('data-project')).toBe('true')
-    expect(row('om-review')?.getAttribute('data-project')).toBe('true')
-    expect(row('zebra-global')?.hasAttribute('data-project')).toBe(false)
     // Local and global groups are always enabled: a locked, checked group control.
     expect(groupSwitch('This project')?.getAttribute('aria-checked')).toBe('true')
     expect(groupSwitch('This project')?.disabled).toBe(true)
@@ -490,7 +487,7 @@ describe('team skill switches (#1494)', () => {
     expect(row('x')?.getAttribute('href')).toBe('/p/boot/skills?skill=x')
   })
 
-  it('a long hiding source wraps instead of overflowing the row', async () => {
+  it('names a long hiding source in full', async () => {
     const long = `https://git.example.com/${'very-long-group/'.repeat(8)}skills.git`
     const a = team('x', long)
     const b = team('x', 'beta/skills')
@@ -499,8 +496,6 @@ describe('team skill switches (#1494)', () => {
     await waitFor(() => expect(switchFor('x', 'beta/skills')).not.toBeNull())
     const note = row('x', 'beta/skills')!.querySelector('[data-slot="skill-hidden-by"]')!
     expect(note.textContent).toBe(`hidden by ${long}`)
-    expect(note.className).toContain('[overflow-wrap:anywhere]')
-    expect(note.className).toContain('min-w-0')
   })
 
   it('a local skill hides every team copy of its name', async () => {

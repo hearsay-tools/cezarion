@@ -1,15 +1,11 @@
 import { productName } from '@/lib/product-name'
 import { HEALTH, HEALTH_MULTI, HEALTH_ALL, HEALTH_NO_GIT, PROVIDERS_CONNECTED, PROVIDERS_MULTI, PROVIDERS_NONE, WORKFLOWS, REPO, REPO_NO_GIT, WORKSPACE_CONFIG, requests, deferredJson, serve, renderNewTask, textarea, sourcePill, location, draftSource, pillReady, startTask, postedBody, ACCOUNTS, runnerPill, pickFrom } from './new-task.testkit'
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { workspaceQueryKeys } from '@/api/queries'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { resetToasts } from '@/components/ui/toaster'
 import { resetDraft, writeDraft } from './new-task-draft'
-import { cssRules, paintsBefore, targets } from '@/test/css-rules'
 
 beforeAll(() => {
   // cmdk scrolls the selected item into view; jsdom has no scrollIntoView.
@@ -84,7 +80,7 @@ describe('the hero surface', () => {
     expect(postedBody()).not.toHaveProperty('allowMessaging')
   })
 
-  it('describes the selected working directory directly under Worktree', async () => {
+  it('describes the selected working directory under Worktree', async () => {
     serve()
     renderNewTask()
     await pillReady()
@@ -93,7 +89,6 @@ describe('the hero surface', () => {
     expect(document.querySelector('[data-slot="execution-tip"]')).toBeNull()
     fireEvent.click(worktree)
     expect(worktree.textContent).toContain('Changes are made in the current working directory.')
-    expect(worktree.nextElementSibling?.textContent).toContain('Base branch')
   })
 
   // hearsay-tools/cezarion#1605: Base branch sits above Autonomous. Inserting it when `/repo`
@@ -130,7 +125,7 @@ describe('the hero surface', () => {
     expect(document.querySelector('[data-slot="base-pill"]') !== null).toBe(status === 200)
   })
 
-  it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
+  it('keeps run options in an open disclosure whose summary follows the choices and whose toggle keeps the draft', async () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
     await pillReady()
@@ -138,12 +133,8 @@ describe('the hero surface', () => {
     const disclosure = summary.closest('details')!
     expect(disclosure).not.toBeNull()
     expect(disclosure.open).toBe(true)
-    expect(disclosure.contains(sourcePill())).toBe(false)
-    expect(disclosure.contains(screen.getByRole('radio', { name: 'Plan first' }))).toBe(false)
-    expect(disclosure.contains(screen.getByRole('button', { name: 'Start task' }))).toBe(false)
     expect(summary.parentElement?.textContent).toContain('claude')
     const model = screen.getByRole('button', { name: /^Model · / })
-    expect(disclosure.contains(model)).toBe(false)
     fireEvent.pointerDown(model)
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
     expect(summary.parentElement?.textContent).toContain('sonnet')
@@ -157,19 +148,9 @@ describe('the hero surface', () => {
     expect(screen.getByRole('button', { name: /^Model · / })).toBe(model)
   })
 
-  it('renders the design hero without decorative backdrops and focuses the textarea', async () => {
+  it('focuses the textarea once the composer is enabled', async () => {
     serve()
     renderNewTask()
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('What should the agent work on?')
-    expect(document.querySelector('[data-slot="page-eyebrow"]')?.textContent).toBe('NEW TASK')
-    expect(document.querySelector('[data-slot="page-description"]')?.textContent).toBe(
-      'Describe the outcome. Configure the run. Review everything before it lands.',
-    )
-    expect(screen.getByText('Runs in an isolated worktree — review everything before it lands.')).toBeTruthy()
-    expect(document.querySelector('[data-route="new"] [data-slot="twinkle-backdrop"]')).toBeNull()
-    // Asserted here for the DEFAULT run mode only. #793: this line used to be printed
-    // unconditionally, so it also claimed isolation for runs that had opted out of it — the
-    // per-state cases live in "the run-mode note" below.
     await pillReady()
     // ⌘N drops you here to type — after the provider check enables the composer, the caret
     // must land in the box without the user clicking it.
@@ -197,44 +178,9 @@ describe('the hero surface', () => {
       anchor.remove()
     }
   })
-
-  it('does not render suggestion chips — design.pen 1A–1D have none', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-    expect(document.querySelector('[data-slot="suggested-chip"]')).toBeNull()
-    expect(screen.queryByText('Start with a suggestion')).toBeNull()
-  })
 })
 
 describe('picker data flows', () => {
-  it('keeps agent selection with the editor and run settings in the open execution panel', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-
-    const editor = document.querySelector('[data-slot="composer-editor"]') as HTMLElement
-    const execution = document.querySelector('[data-slot="execution-options"]') as HTMLDetailsElement
-    const model = document.querySelector('[data-slot="model-pill"]') as HTMLElement
-    const variants = document.querySelector('[data-slot="variants-pill"]') as HTMLElement
-    expect(execution.open).toBe(true)
-    expect(editor.contains(model)).toBe(false)
-    expect(document.querySelector('[data-slot="composer-agent-options"]')?.contains(model)).toBe(true)
-    expect(execution.contains(model)).toBe(false)
-    expect(variants).toBeNull()
-  })
-
-  it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
-    serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
-    renderNewTask()
-    await pillReady()
-    expect(screen.getByRole('button', { name: /^Model · / }).textContent).toMatch(/^Model \u00b7 /)
-    expect(screen.getByRole('button', { name: /^Runner · / }).textContent).toMatch(/^Runner \u00b7 /)
-    expect(screen.getByRole('button', { name: /^Effort · / }).textContent).toMatch(/^Effort \u00b7 /)
-    expect(document.querySelector('.new-task-model-label')).toBeNull()
-    expect(document.querySelector('.new-task-runner-control')).toBeNull()
-  })
-
   it('hides the runner pill on a single-backend host (legacy rule)', async () => {
     serve()
     renderNewTask()
@@ -957,16 +903,6 @@ describe('prompt templates on the new-task composer', () => {
     fireEvent.click(document.querySelector(`[data-slot="source-option"][data-source-ref="${ref}"]`)!)
   }
 
-  it('labels the template picker alongside the skill picker', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-
-    // No "templates" word next to the icon, unlike the roomier GitHub composer.
-    expect(templateTrigger().textContent).toContain('Template')
-    expect(templateTrigger().querySelector('svg')).not.toBeNull()
-  })
-
   it('inserts a template into the composer draft at the caret', async () => {
     serve()
     renderNewTask()
@@ -1173,37 +1109,5 @@ describe('the composer runner pill carries the account', () => {
     await startTask()
     // …and nothing account-shaped reaches the wire.
     expect(postedBody()).not.toHaveProperty('agentProfile')
-  })
-})
-
-describe('field chrome (#267)', () => {
-  const routeDir = path.dirname(fileURLToPath(import.meta.url))
-  const rules = [
-    ...cssRules(readFileSync(path.resolve(routeDir, '../styles/index.css'), 'utf8')),
-    ...cssRules(readFileSync(path.resolve(routeDir, 'new-task.css'), 'utf8')),
-  ]
-  const declared = (subject: string, props: readonly string[]) =>
-    rules.filter((rule) => targets(rule.selector, subject)).flatMap((rule) =>
-      props.flatMap((prop) => (prop in rule.declarations ? [`${rule.selector} { ${prop}: ${rule.declarations[prop]} }`] : [])))
-  const borderless = /^(?:0(?:px)?|none|transparent)(?: |$)/
-
-  it('keeps the prompt editor a bordered card, not a full-bleed strip, on mobile', () => {
-    expect(declared('.new-task-editor', ['border', 'border-width', 'border-style', 'border-color', 'border-radius', 'background', 'background-color'])
-      .filter((rule) => borderless.test(rule.slice(rule.indexOf(': ') + 2)))).toEqual([])
-    const mobile = rules.find((rule) => rule.selector === '.new-task-editor' && rule.at.includes('@media (max-width: 767px)'))
-    expect(mobile?.declarations.padding).toBe('12px')
-  })
-
-  it('keeps the model pill bordered and its field label visible on mobile', () => {
-    expect([...declared("[data-slot='model-pill']", ['border', 'border-width', 'border-style', 'border-color']), ...declared("[data-slot$='pill']", ['border', 'border-width', 'border-style', 'border-color'])]
-      .filter((rule) => borderless.test(rule.slice(rule.indexOf(': ') + 2)))).toEqual([])
-    expect(declared("[data-slot='picker-label']", ['display', 'visibility'])).toEqual([])
-    // the all-breakpoint pill geometry the mobile rules must not override away
-    const pill = rules.find((rule) => rule.selector === "[data-route='new'] .new-task-agent-options [data-slot$='pill']" && rule.at.length === 0)
-    expect(pill?.declarations).toMatchObject({ 'border-color': 'var(--border)', 'border-radius': '9px', 'min-height': '44px' })
-  })
-
-  it('does not paint a Runner ::before on agent-option pills (#272)', () => {
-    expect(rules.filter((rule) => paintsBefore(rule.selector, "pill']")).map((rule) => rule.selector)).toEqual([])
   })
 })

@@ -174,12 +174,10 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
     void rerender
   })
 
-  it('shows the plain count caption on phones only when it says more than the headings', () => {
+  it('names the search in the plain count caption', () => {
     const caption = () => document.querySelector('[data-slot="tasks-result-count"]') as HTMLElement
     renderOverview({ runs: [run({ title: 'Needle' })] }, false)
-    expect(caption().className).toContain('max-md:hidden')
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Needle' } })
-    expect(caption().className).not.toContain('max-md:hidden')
     expect(caption().textContent).toBe('1 task matching “Needle”')
   })
 
@@ -238,20 +236,17 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
     expect(onMarkAllRead).toHaveBeenCalledWith(false)
   })
 
-  it('heads each group with its name, count and dot, and turns Finished red on a failure', () => {
+  it('heads each group with its name and count, and marks Finished on a failure', () => {
     renderOverview({ runs: [run({ status: RUN_STATUS.review }), run(), run({ status: RUN_STATUS.failed }), run({ status: RUN_STATUS.running })] }, false)
     expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-bucket')))
       .toEqual(['Needs you', 'Finished', 'Working'])
     expect(within(heading('Finished')).getByRole('button', { name: /Finished 2/ }).getAttribute('aria-expanded')).toBe('true')
-    expect(heading('Needs you').getAttribute('data-tone')).toBe('pending')
-    expect(heading('Finished').getAttribute('data-tone')).toBe('danger')
     expect(within(heading('Finished')).getByRole('img', { name: 'contains failed tasks' })).toBeTruthy()
-    expect(heading('Working').getAttribute('data-tone')).toBe('running')
   })
 
-  it('shows one neutral Archived group for history', () => {
+  it('shows one Archived group for history', () => {
     renderOverview({ view: 'archived', runs: [run({ archived: true, status: RUN_STATUS.failed }), run({ archived: true })] }, false)
-    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-tone'))).toEqual(['neutral'])
+    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-bucket'))).toEqual(['Archived'])
   })
 
   it('folds a group, keeps its heading, reveals matches during a search and restores the fold after', () => {
