@@ -65,7 +65,7 @@ describe('ProjectPanel', () => {
     const asks = run({ runId: 'asks', status: RUN_STATUS.waiting, rung: 'needs-you', wait: { kind: ACTIVITY_WAIT_KIND.human, since: iso(-1_000), detail: { reason: 'turn-end' } } })
     const { container } = renderPanel(project({ tasks: [asks] }))
     const pill = container.querySelector('[data-activity-pill="asks"]') as HTMLElement
-    expect(pill.getAttribute('data-action')).toBe('answer')
+    expect(pill.getAttribute('data-action')).toBe('open')
     expect(pill.querySelector('[data-slot="activity-pill-line"]')?.textContent).toBe('Needs you · Your turn')
   })
 
