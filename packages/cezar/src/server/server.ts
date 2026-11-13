@@ -2611,9 +2611,7 @@ export function createApp(deps: ServerDeps) {
         // exist; checkout roots use `mkdir -p`. Both get a real write probe.
         // Any failure → 400 and NO change persisted.
         const expanded = expandTilde(configuredRoot);
-        if (!isAbsoluteHostPath(expanded)) {
-          return c.json({ error: `not writable: ${configuredRoot} is not an absolute path` }, 400);
-        }
+        if (!isAbsoluteHostPath(expanded)) return c.json({ error: `not writable: ${configuredRoot} is not an absolute path` }, 400);
         if (!create) {
           try {
             if (!(await stat(expanded)).isDirectory()) {
