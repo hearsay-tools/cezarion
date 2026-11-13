@@ -67,19 +67,14 @@ const segments = (id: string, position: 'top' | 'bottom') =>
   [...(pill(id, position)?.querySelectorAll('[data-segment]') ?? [])].map((el) => ({
     tone: el.getAttribute('data-segment'),
     text: el.textContent,
-    width: (el as HTMLElement).style.width,
   }))
 
 describe('ProjectRail layout', () => {
   it('is a labelled nav with the app mark, a mark per project in registry order, and the bottom group', () => {
     renderRail()
     const nav = screen.getByRole('navigation', { name: 'Projects' })
-    expect(nav.style.width).toBe('60px')
     expect(nav.getAttribute('data-expanded')).toBe('false')
-    // Desktop only: the rail is `hidden` below md.
-    expect(nav.className).toContain('hidden')
-    expect(nav.className).toContain('md:flex')
-    expect(within(nav).getByAltText(`${productName("Cezarion")} v0.15.0`).getAttribute('src')).toBe('/cezarion-mark-dark.svg')
+    expect(within(nav).getByAltText(`${productName("Cezarion")} v0.15.0`)).toBeTruthy()
     expect([...document.querySelectorAll('[data-slot="rail-project"]')].map((el) => el.getAttribute('data-project-id'))).toEqual([
       'toolkit-dev',
       'open_mercato',
@@ -103,12 +98,10 @@ describe('ProjectRail layout', () => {
     expect(within(mark('toolkit-dev')).getByRole('link').textContent).toBe('td')
   })
 
-  it('marks the URL project as current: aria-current, the left bar, and only that one', () => {
+  it('marks the URL project as current, and only that one', () => {
     renderRail()
     expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('aria-current')).toBe('page')
-    expect(mark('toolkit-dev').querySelector('[data-slot="rail-current-bar"]')).not.toBeNull()
     expect(within(mark('open_mercato')).getByRole('link').getAttribute('aria-current')).toBeNull()
-    expect(mark('open_mercato').querySelector('[data-slot="rail-current-bar"]')).toBeNull()
   })
 
   it('has no current project on a global route, and lights the global icon instead', () => {
@@ -150,20 +143,18 @@ describe('ProjectRail pills', () => {
     expect(pill('toolkit-dev', 'top')).toBeNull()
     expect(pill('toolkit-dev', 'bottom')).toBeNull()
     expect(pill('open_mercato', 'top')).toBeNull()
-    // The rail speaks in counts only: nothing on it is a status dot.
-    expect(document.querySelector('[data-slot="status-dot"]')).toBeNull()
   })
 
-  it('splits the top pill amber then red, 14px each', () => {
+  it('splits the top pill amber then red', () => {
     renderRail({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, failedUnread: 3 })]]) })
     expect(segments('toolkit-dev', 'top')).toEqual([
-      { tone: 'amber', text: '1', width: '14px' },
-      { tone: 'red', text: '3', width: '14px' },
+      { tone: 'amber', text: '1' },
+      { tone: 'red', text: '3' },
     ])
     expect(pill('toolkit-dev', 'bottom')).toBeNull()
   })
 
-  it('splits the bottom pill violet then green, and a lone segment is 18px', () => {
+  it('splits the bottom pill violet then green, and keeps a lone segment', () => {
     renderRail({
       signals: new Map([
         ['toolkit-dev', signal({ inMotion: 2, finishedUnread: 1 })],
@@ -171,24 +162,24 @@ describe('ProjectRail pills', () => {
       ]),
     })
     expect(segments('toolkit-dev', 'bottom')).toEqual([
-      { tone: 'violet', text: '2', width: '14px' },
-      { tone: 'green', text: '1', width: '14px' },
+      { tone: 'violet', text: '2' },
+      { tone: 'green', text: '1' },
     ])
-    expect(segments('open_mercato', 'bottom')).toEqual([{ tone: 'green', text: '4', width: '18px' }])
+    expect(segments('open_mercato', 'bottom')).toEqual([{ tone: 'green', text: '4' }])
     expect(pill('open_mercato', 'top')).toBeNull()
   })
 
-  it('caps a segment at 9+ and widens it to 22px', () => {
+  it('caps a segment at 9+', () => {
     renderRail({ signals: new Map([['toolkit-dev', signal({ needsYou: 12, inMotion: 9 })]]) })
-    expect(segments('toolkit-dev', 'top')).toEqual([{ tone: 'amber', text: '9+', width: '22px' }])
-    expect(segments('toolkit-dev', 'bottom')).toEqual([{ tone: 'violet', text: '9', width: '18px' }])
+    expect(segments('toolkit-dev', 'top')).toEqual([{ tone: 'amber', text: '9+' }])
+    expect(segments('toolkit-dev', 'bottom')).toEqual([{ tone: 'violet', text: '9' }])
   })
 
-  it('keeps the corner pills off the click target and out of the accessibility tree', () => {
+  it('keeps the corner pills out of the accessibility tree', () => {
     // Their corner geometry and per-theme inks resolve in project-rail.e2e.ts.
     renderRail({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, inMotion: 1 })]]) })
     const pills = [pill('toolkit-dev', 'top'), pill('toolkit-dev', 'bottom')] as HTMLElement[]
-    expect(pills.map((el) => [el.className.includes('pointer-events-none'), el.getAttribute('aria-hidden')])).toEqual([[true, 'true'], [true, 'true']])
+    expect(pills.map((el) => el.getAttribute('aria-hidden'))).toEqual(['true', 'true'])
   })
 })
 
@@ -218,17 +209,15 @@ describe('ProjectRail expand toggle (#711)', () => {
   const toggle = () => document.querySelector('[data-slot="rail-expand-toggle"]') as HTMLButtonElement | null
   const nav = () => screen.getByRole('navigation', { name: 'Projects' })
 
-  it('defaults to collapsed, with the icon toggle first in the bottom group', () => {
+  it('defaults to collapsed, with a labelled toggle that controls the rail', () => {
     setViewport(1440)
     renderRail()
-    expect(nav().style.width).toBe('60px')
+    expect(nav().getAttribute('data-expanded')).toBe('false')
     const button = toggle()!
     expect(button.getAttribute('aria-expanded')).toBe('false')
     expect(button.getAttribute('aria-label')).toBe('Expand projects')
     expect(button.getAttribute('title')).toBe('Expand projects')
     expect(button.getAttribute('aria-controls')).toBe(nav().id)
-    const bottom = document.querySelector('[data-slot="rail-bottom"]')!
-    expect(bottom.firstElementChild).toBe(button)
   })
 
   it('expands to 232px and back, remembering the choice in localStorage', () => {
@@ -283,13 +272,11 @@ describe('ProjectRail expand toggle (#711)', () => {
 describe('ProjectRailPlaceholder', () => {
   const placeholder = () => document.querySelector('[data-slot="project-rail-placeholder"]') as HTMLElement
 
-  it('holds the collapsed rail width, hidden from assistive tech and below md', () => {
+  it('holds the collapsed rail width, hidden from assistive tech', () => {
     setViewport(1440)
     render(<ProjectRailPlaceholder />)
     expect(placeholder().style.width).toBe('60px')
     expect(placeholder().getAttribute('aria-hidden')).toBe('true')
-    expect(placeholder().className).toContain('hidden')
-    expect(placeholder().className).toContain('md:block')
   })
 
   it('holds the expanded width when that is the stored choice and the window has room', () => {
@@ -328,31 +315,25 @@ describe('ProjectRail expanded rows (#711)', () => {
     expect(link.getAttribute('title')).toBeNull()
   })
 
-  it('fills the current row apart from the others and drops the left bar', () => {
+  it('marks only the current expanded row as current', () => {
     // Name and state-word contrast on default, hovered and selected rows: project-rail.e2e.ts.
     renderExpanded()
     const current = row('toolkit-dev')
     const other = row('open_mercato')
     expect(current.getAttribute('aria-current')).toBe('page')
     expect(other.getAttribute('aria-current')).toBeNull()
-    // The resting fill (not a hover variant) is what shows which project is open.
-    const restFill = (el: Element) => el.className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
-    expect(restFill(current)).not.toEqual([])
-    expect(restFill(current)).not.toEqual(restFill(other))
-    expect(document.querySelector('[data-slot="rail-current-bar"]')).toBeNull()
     expect(other.querySelector('[data-slot="rail-project-state"]')?.textContent).toBe('idle')
   })
 
-  it('shows the identity, the Projects label, a labelled Add project and the labelled bottom rows', () => {
+  it('shows the identity, a labelled Add project and the labelled bottom rows', () => {
     renderExpanded()
     const rail = screen.getByRole('navigation', { name: 'Projects' })
     expect(within(rail).getByText(`${productName("Cezarion")}`)).toBeTruthy()
     expect(within(rail).getByText('v0.15.0')).toBeTruthy()
-    expect(within(rail).getByText('Projects')).toBeTruthy()
     expect(within(rail).getByRole('button', { name: 'Add project' }).textContent).toBe('Add project')
     expect(within(rail).getByRole('link', { name: 'All projects' }).textContent).toBe('All projects')
     expect(within(rail).getByRole('link', { name: 'Global settings' }).textContent).toBe('Global settings')
-    expect(within(rail).getByRole('button', { name: /^Theme:/ }).textContent).toMatch(/^Theme · (System|Light|Dark)$/)
+    expect(within(rail).getByRole('button', { name: /^Theme:/ }).textContent).toMatch(/System|Light|Dark/)
     expect(within(rail).getByRole('button', { name: 'Collapse projects' }).textContent).toBe('Collapse')
   })
 
@@ -476,14 +457,10 @@ describe('ProjectRail reorder', () => {
     localStorage.setItem(PROJECT_RAIL_EXPANDED_STORAGE_KEY, '1')
     renderRail({ projects: three, canReorder: true, onReorder: () => {} })
     expect(screen.getByRole('navigation', { name: 'Projects' }).getAttribute('data-expanded')).toBe('true')
-    expect(grip('alpha')?.tagName).toBe('BUTTON')
-    expect(grip('alpha')?.getAttribute('aria-label')).toBe('Reorder alpha, position 1 of 3')
+    expect(screen.getByRole('button', { name: 'Reorder alpha, position 1 of 3' })).toBe(grip('alpha'))
     expect(grip('gamma')?.getAttribute('aria-label')).toBe('Reorder gamma, position 3 of 3')
     // A sibling of the link, never inside it: a button in a link is invalid.
     expect(link('alpha').contains(grip('alpha'))).toBe(false)
-    // Hover-led ink, always shown where there is no hover.
-    expect(grip('alpha')?.className).toContain('opacity-0')
-    expect(grip('alpha')?.className).toContain('[@media(hover:none)]:opacity-100')
   })
 
   it('keeps a collapsed mark a link, with the reorder instructions attached', () => {

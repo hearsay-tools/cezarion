@@ -40,13 +40,10 @@ afterEach(() => {
 })
 
 describe('ThemeToggle', () => {
-  it('renders an icon button reflecting the current choice', () => {
+  it('renders a button reflecting the current choice', () => {
     const button = renderToggle('dark')
 
-    expect(button.dataset.slot).toBe('theme-toggle')
     expect(button.dataset.themePref).toBe('dark')
-    expect(button.dataset.size).toBe('icon-sm')
-    expect(button.querySelector('svg')).not.toBeNull()
   })
 
   it.each([

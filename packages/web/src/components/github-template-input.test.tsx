@@ -16,7 +16,7 @@ function Harness() {
 function highlighted(input: HTMLElement): string | null {
   const id = input.getAttribute('aria-activedescendant')
   if (!id) return null
-  return document.getElementById(id)?.querySelector('.font-mono')?.textContent ?? null
+  return document.getElementById(id)?.getAttribute('data-value') ?? null
 }
 
 describe('GithubTemplateInput keyboard', () => {

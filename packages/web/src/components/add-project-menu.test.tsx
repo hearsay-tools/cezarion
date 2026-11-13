@@ -15,14 +15,16 @@ function openMenu() {
 }
 
 describe('AddProjectMenu', () => {
-  it('lists New project first, then the two existing flows', () => {
+  it.each([
+    ['New project…', 'New project'],
+    ['Open local folder…', 'Choose local folder'],
+    ['Clone from GitHub…', 'Clone repository'],
+  ])('opens its own dialog from %s', (item, dialog) => {
     render(<AddProjectMenu />)
     openMenu()
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'New project…',
-      'Open local folder…',
-      'Clone from GitHub…',
-    ])
+    fireEvent.click(screen.getByRole('menuitem', { name: item }))
+    expect(screen.getByRole('dialog', { name: dialog })).toBeTruthy()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
 
   it('mounts the New project dialog only once it is chosen', () => {

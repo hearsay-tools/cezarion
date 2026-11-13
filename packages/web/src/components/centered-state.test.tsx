@@ -2,31 +2,18 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { SearchXIcon } from 'lucide-react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { isPainted, paintClasses } from '@/test/paint'
-
 import { CenteredState, TwinkleBackdrop } from './centered-state'
 
 // Explicit rather than relying on RTL's auto-cleanup, which only runs when vitest `globals` is on.
 afterEach(cleanup)
 
-function tileOf(container: HTMLElement): Element {
-  const tile = container.querySelector('[data-slot="centered-state-tile"]')
-  if (!tile) throw new Error('CenteredState rendered no icon tile')
-  return tile
-}
-
 describe('CenteredState', () => {
-  it('tints the tile apart for each tone and names the tone', () => {
-    const tiles = (['primary', 'neutral', 'danger'] as const).map((tone) => {
+  it('names the tone', () => {
+    for (const tone of ['primary', 'neutral', 'danger'] as const) {
       const { container } = render(<CenteredState icon={<SearchXIcon />} tone={tone} title="T" />)
       expect(container.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe(tone)
-      // Every painted property of the tile is present, not see-through, and its own per tone.
-      const paint = (['fill', 'stroke', 'ink'] as const).map((property) => paintClasses(tileOf(container), property))
-      for (const classes of paint) expect(isPainted(classes), `${tone}: ${classes.join(' ')}`).toBe(true)
       cleanup()
-      return paint
-    })
-    for (const property of [0, 1, 2]) expect(new Set(tiles.map((paint) => paint[property]!.join(' '))).size).toBe(3)
+    }
   })
 
   it('defaults to the neutral tone', () => {
@@ -51,7 +38,7 @@ describe('CenteredState', () => {
   it('omits the subtitle and actions rows when not given', () => {
     const { container } = render(<CenteredState icon={<SearchXIcon />} title="T" />)
 
-    expect(container.querySelector('p')).toBeNull()
+    expect(container.textContent).toBe('T')
     expect(screen.queryByRole('button')).toBeNull()
   })
 

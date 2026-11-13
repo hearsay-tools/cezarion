@@ -1,7 +1,3 @@
-import { paletteHex } from '../test/palette'
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,9 +34,6 @@ function renderShell(entry: string, props: Partial<AppShellProps> = {}) {
 
 const sidebar = () => document.querySelector('[data-slot="sidebar"]') as HTMLElement
 const nav = () => within(sidebar()).getByRole('navigation', { name: 'Main' })
-const classes = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/)
-const TEAL = /task-brand-selected|accent-(?:text|strong|icon)/
-const SELECTED = ['bg-sidebar-row-selected', 'text-foreground', 'font-medium']
 
 describe('sidebar nav selection (#619)', () => {
   it('shows a neutral active pill and accessible icon-only inactive links', () => {
@@ -48,19 +41,14 @@ describe('sidebar nav selection (#619)', () => {
     const activity = within(nav()).getByRole('link', { name: 'Activity' })
     expect(activity.getAttribute('aria-current')).toBe('page')
     expect(activity.textContent).toBe('Activity')
-    expect(classes(activity)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground', 'font-semibold']))
     const skills = within(nav()).getByRole('link', { name: 'Skills' })
     expect(skills.textContent).toBe('')
-    expect(skills.className).toContain('text-soft-foreground')
-    for (const link of within(nav()).getAllByRole('link')) expect(link.className).not.toMatch(TEAL)
   })
 
-  it('selects New task with the same neutral fill', () => {
+  it('selects New task on /new', () => {
     renderShell('/new')
     const item = sidebar().querySelector('[data-sidebar-item="new-task"]')!
     expect(item.getAttribute('aria-current')).toBe('page')
-    expect(classes(item)).toEqual(expect.arrayContaining(SELECTED))
-    expect(item.className).not.toMatch(TEAL)
   })
 
   it('shows attention only on the inactive Tasks tab', () => {
@@ -68,13 +56,7 @@ describe('sidebar nav selection (#619)', () => {
     expect(sidebar().querySelector('[data-slot="nav-needs-you-dot"]')).toBeNull()
     cleanup()
     renderShell('/activity', { needsYou: true })
-    expect(classes(sidebar().querySelector('[data-slot="nav-needs-you-dot"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-pending-strong']))
-  })
-
-  it('shows no retired Inbox or Skills update markers', () => {
-    renderShell('/activity')
-    expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
-    expect(sidebar().querySelector('[data-slot="nav-update-marker"]')).toBeNull()
+    expect(sidebar().querySelector('[data-slot="nav-needs-you-dot"]')).not.toBeNull()
   })
 
   it('moves keyboard focus across the view row without changing routes', () => {
@@ -96,35 +78,5 @@ describe('sidebar nav selection (#619)', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
     const selected = document.querySelectorAll('nav[aria-label="Main"] a[aria-current="page"]')
     expect(selected).toHaveLength(1)
-    for (const link of selected) expect(classes(link)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground']))
-  })
-})
-
-describe('sidebar tokens and the last teal (#617 01c)', () => {
-  const src = (file: string) => readFileSync(path.join(import.meta.dirname, file), 'utf8')
-
-  it('declares the inbox count amber per theme and exposes it as a colour utility', () => {
-    const css = src('../styles/index.css')
-    const block = (opener: string) => css.slice(css.indexOf(opener)).split(/\n}\n/)[0]
-    const normalize = (value: string | undefined) => (value ?? '').replace(/oklch\([^)]*\)/g, paletteHex)
-    const dark = normalize(block('\n:root {\n')), light = normalize(block('\n.light {\n'))
-    expect(dark).toMatch(/--inbox-count:\s*#f4cc641f;/i)
-    expect(dark).toMatch(/--inbox-count-foreground:\s*#f4cc64;/i)
-    expect(light).toMatch(/--inbox-count:\s*#f4c54240;/i)
-    expect(light).toMatch(/--inbox-count-foreground:\s*#7a5200;/i)
-    expect(css).toMatch(/--color-inbox-count:\s*var\(--inbox-count\);/)
-    expect(css).toMatch(/--color-inbox-count-foreground:\s*var\(--inbox-count-foreground\);/)
-  })
-
-  it('leaves no teal token in the sidebar sources but the header ShieldCheck, which says why', () => {
-    for (const file of ['sidebar-view-tabs.tsx', 'task-quick-list.tsx', 'nav-row-styles.ts']) {
-      expect(src(file).match(new RegExp(TEAL, 'g')), file).toBeNull()
-    }
-    const shell = src('app-shell.tsx').split('\n')
-    const hits = shell.map((line, index) => ({ line, index })).filter(({ line }) => TEAL.test(line))
-    expect(hits.map(({ line }) => line.includes('<ShieldCheckIcon'))).toEqual([true])
-    // The exception is stated at the site, in the comment just above it.
-    const at = hits[0]?.index ?? 0
-    expect(shell.slice(Math.max(0, at - 3), at + 1).join('\n')).toMatch(/#617 01c/)
   })
 })

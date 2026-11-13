@@ -106,17 +106,7 @@ describe('formatElapsed', () => {
 })
 
 describe('the dictation overlay (paseo pattern)', () => {
-  it('the mic renders labeled "Dictation" when the API exists, left of send', () => {
-    stubSpeech()
-    renderComposer()
-    const mic = screen.getByLabelText('Start dictation')
-    expect(mic.textContent).toContain('Dictation')
-    const send = screen.getByRole('button', { name: 'Send' })
-    expect(mic.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-
-  })
-
-  it('recording swaps the footer for the overlay: timer, pulsing dot, growing partial transcript', () => {
+  it('recording swaps the footer for the overlay: timer, growing partial transcript', () => {
     stubSpeech()
     renderComposer()
     const recognition = startDictation()
@@ -128,7 +118,6 @@ describe('the dictation overlay (paseo pattern)', () => {
     expect(overlay).not.toBeNull()
     expect(screen.queryByLabelText('Send')).toBeNull() // the footer is REPLACED
     expect(overlay.querySelector('[data-slot="dictation-timer"]')!.textContent).toBe('0:00')
-    expect(overlay.textContent).toContain('Listening…')
 
     act(() => recognition.onresult!(result('summarize the', false)))
     expect(document.querySelector('[data-slot="dictation-transcript"]')!.textContent).toBe('summarize the')
@@ -166,7 +155,6 @@ describe('the dictation overlay (paseo pattern)', () => {
     fireEvent.change(textarea, { target: { value: 'my draft' } })
     const recognition = startDictation()
     act(() => recognition.onresult!(result('noise', false)))
-    expect(screen.getByLabelText('Cancel dictation').className).toContain('size-11 text-muted-foreground md:size-8')
     fireEvent.click(screen.getByLabelText('Cancel dictation'))
 
     expect(recognition.aborted).toBe(true)

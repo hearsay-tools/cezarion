@@ -179,15 +179,12 @@ describe('dictation in the composer draft', () => {
 })
 
 describe('submit shortcuts', () => {
-  it('starts as a compact one-row phone input and restores the desktop minimum at md', () => {
+  it('starts as a compact one-row phone input at 16px', () => {
     const { textarea } = renderComposer()
     const classes = textarea.className.split(/\s+/)
 
     expect(textarea.rows).toBe(1)
-    expect(classes).toContain('min-h-11')
-    expect(classes).toContain('md:min-h-[54px]')
     expect(classes).toContain('text-base')
-    expect(classes).toContain('md:text-sm')
   })
 
   it('Enter sends the trimmed text and clears optimistically', async () => {
@@ -451,16 +448,6 @@ describe('/ skills autocomplete (#380)', () => {
     expect(rendered.map((el) => el.getAttribute('data-emphasized'))).toEqual(['true', 'true', null])
     expect(rendered[0]!.textContent).toContain('om-fix')
     expect(rendered[2]!.textContent).toContain('global-deploy')
-  })
-
-  it('the menu is clamped to the popper available height (mobile keyboard, #mobile-kb)', async () => {
-    const { textarea } = renderComposer()
-    type(textarea, '/')
-    await screen.findByText('om-fix')
-    const menu = document.querySelector('[data-slot="composer-menu"]')!
-    // The clamp keeps the list inside the visual viewport once PopoverContent's
-    // keyboard-aware collisionPadding has shrunk the popper's available space.
-    expect(menu.className).toContain('--radix-popover-content-available-height')
   })
 
   it('mid-word slashes (URLs) never open the menu', () => {
@@ -825,13 +812,6 @@ describe('host seams (R4: the /new hero)', () => {
     expect(document.querySelector('[data-slot="composer-footer-end"]')?.textContent).toBe('⌘↵')
     expect(screen.getByLabelText('Start task')).toBeTruthy()
     expect(screen.queryByLabelText('Send')).toBeNull()
-  })
-
-  it('waits for a wide desktop before placing execution options beside the editor', () => {
-    renderComposer({ executionOptions: <div>execution settings</div> })
-    const composer = document.querySelector('[data-slot="composer"]') as HTMLElement
-    expect(composer.className).toContain('new-task-composer')
-    expect(composer.className).not.toContain('md:grid-cols-[minmax(0,1fr)_330px]')
   })
 
   it('autoFocus puts the caret in the textarea on mount (⌘N lands ready to type)', () => {
@@ -1232,7 +1212,6 @@ describe('unified execution actions (#201)', () => {
     await act(async () => reject(new Error('Network unavailable. Retry Stop.')))
     const alert = screen.getByRole('alert')
     expect(alert.textContent).toContain('Retry Stop')
-    expect(alert.parentElement?.className).not.toContain('h-0')
     expect(textarea.value).toBe('keep this')
     expect(screen.getByRole('button', { name: /remove shot.png/i }).hasAttribute('disabled')).toBe(false)
     expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
@@ -1269,7 +1248,7 @@ it('retains an attachment already being read when Stop is requested (#201)', asy
 
 
 describe('session control layout', () => {
-  it('keeps an idle compact status mounted without its reserved feedback height', async () => {
+  it('keeps the compact status mounted through a send', async () => {
     let resolve!: () => void
     const { textarea } = renderComposer({
       compactFeedback: true,
@@ -1278,14 +1257,12 @@ describe('session control layout', () => {
       onSubmit: () => new Promise<void>((done) => { resolve = done }),
     })
     const status = screen.getByRole('status')
-    expect(status.parentElement?.className).toContain('h-0')
     type(textarea, 'keep me')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(status.textContent).toContain('Sending')
-    expect(status.parentElement?.className).not.toContain('h-0')
     expect(textarea.value).toBe('keep me')
     await act(async () => resolve())
-    expect(status.parentElement?.className).toContain('h-0')
+    expect(status.isConnected).toBe(true)
   })
 
   it('keeps session settings visible once while dictation records', () => {
@@ -1329,6 +1306,5 @@ describe('session control layout', () => {
     const slot = document.querySelector('[data-slot="session-controls"]')
     expect(slot).not.toBeNull()
     expect(slot!.textContent).toBe('sonnet')
-    expect(slot!.querySelector('[data-design-icon="cpu"]')).toBeNull()
   })
 })

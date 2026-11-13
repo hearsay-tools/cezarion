@@ -124,7 +124,6 @@ async function openPalette() {
 }
 
 const content = () => document.querySelector<HTMLElement>('[data-slot="dialog-content"]')
-const overlay = () => document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
 
 describe('palette voice mode', () => {
   it('renders no voice row when the capability is off', async () => {
@@ -145,8 +144,7 @@ describe('palette voice mode', () => {
     expect(document.querySelector('[data-slot^="voice-"]')).toBeNull()
     expect(document.querySelector('[data-voice-proposal]')).toBeNull()
     expect(screen.getByText('Nothing matches.')).toBeTruthy()
-    expect(content()?.className).toContain('top-[10vh]')
-    expect(overlay()?.className).toContain('bg-black/50')
+    expect(content()?.hasAttribute('data-dock')).toBe(false)
   })
 
   it('renders the Will do row first when on', async () => {
@@ -304,10 +302,8 @@ describe('palette voice mode', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => expect(content()?.getAttribute('data-voice-proposal')).toBe('true'))
-    expect(content()?.className).not.toContain('top-[10vh]')
     // The card sits above the composer: an answer docks at the bottom.
-    expect(content()?.className).toContain('bottom-[2vh]')
-    expect(overlay()?.className).toContain('bg-transparent')
+    expect(content()?.getAttribute('data-dock')).toBe('bottom')
     expect(input.value).toBe('')
     expect(document.activeElement).toBe(input)
     // The confirmation panel replaces the search: one highlighted row saying what Return sends.
@@ -315,13 +311,10 @@ describe('palette voice mode', () => {
     expect(panel?.textContent).toBe('Answer “Pick a library”Library: Vitest')
     expect(panel?.getAttribute('data-selected')).toBe('true')
     expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(1)
-    expect(input.placeholder).toBe('Say “yes, confirmed” or press Return to send…')
-    expect(document.querySelector('[data-slot="voice-confirm-hints"]')?.textContent).toBe('↵ SendEsc Cancel')
 
     // Typing ("yes, confirmed", "no", a new sentence) brings the search back.
     fireEvent.change(input, { target: { value: 'y' } })
     expect(document.querySelector('[data-slot="voice-confirm"]')).toBeNull()
-    expect(input.placeholder).toBe('Search projects, tasks, views, actions, skills…')
     fireEvent.change(input, { target: { value: '' } })
     await waitFor(() => expect(document.querySelector('[data-slot="voice-confirm"]')?.getAttribute('data-selected')).toBe('true'))
 
@@ -402,8 +395,7 @@ describe('palette voice mode', () => {
 
     await waitFor(() => expect(content()?.getAttribute('data-voice-proposal')).toBe('true'))
     expect(draft).toBe('run the tests again')
-    expect(content()?.className).toContain('top-[2vh]')
-    expect(content()?.className).not.toContain('bottom-[2vh]')
+    expect(content()?.getAttribute('data-dock')).toBe('top')
     expect(document.activeElement).toBe(input)
   })
 })

@@ -88,6 +88,7 @@ function StatusDot({
       data-slot="status-dot"
       data-tone={tone}
       data-shape={shape}
+      data-pulse={pulse ? "true" : undefined}
       className={cn(statusDotVariants({ tone, shape, pulse, className }))}
       {...props}
     >

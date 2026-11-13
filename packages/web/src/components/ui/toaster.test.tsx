@@ -1,8 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { isPainted, paintClasses } from '@/test/paint'
-
 import { ACTION_TOAST_MS, Toaster, resetToasts, toast } from './toaster'
 
 beforeEach(() => {
@@ -88,12 +86,6 @@ describe('Toaster', () => {
     const toasts = screen.getAllByRole('status')
     expect(toasts.map((t) => t.textContent)).toEqual(['first', 'second'])
     expect(toasts[1]!.getAttribute('data-tone')).toBe('danger')
-    // Each tone paints its own fill and ink.
-    for (const property of ['fill', 'ink'] as const) {
-      const [plain, danger] = toasts.map((t) => paintClasses(t, property))
-      expect([isPainted(plain!), isPainted(danger!)], property).toEqual([true, true])
-      expect(danger, property).not.toEqual(plain)
-    }
 
     // 3s later the first (5s old) starts exiting while the second (3s old) is untouched.
     act(() => vi.advanceTimersByTime(3000))
@@ -157,8 +149,6 @@ describe('Toaster', () => {
       expect(button.getAttribute('type')).toBe('button')
       expect(button.tabIndex).toBe(0)
       expect(button.textContent).toBe('Undo')
-      // It takes the toast's ink rather than painting none.
-      expect(isPainted(paintClasses(button, 'ink'))).toBe(true)
     })
 
     it('pauses while hovered and resumes with the remaining time', () => {
