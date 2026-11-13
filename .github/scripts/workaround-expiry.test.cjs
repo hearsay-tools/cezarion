@@ -45,6 +45,24 @@ test('reader accepts standalone, inline and repeated markers; rejects malformed 
   assert.deepEqual(markersIn('x.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3']);
 });
 
+test('only markers that end a line count; prose that names a marker does not', () => {
+  const text = [
+    'Delete the `<!-- until: a/b#1 -->` marker.',
+    '`<!-- until: a/b#2 -->` in the same PR.',
+    'Rule text <!-- until: a/b#3 -->',
+    'Rule text <!-- until: a/b#4 --> <!-- until: a/b#5 --> \t',
+    '<!-- until: a/b#6 -->',
+    'Quoted `<!-- until: a/b#7 -->` then a rule <!-- until: a/b#8 -->',
+    'Rule <!-- until: a/b#9 --> and more prose',
+    '[link](url "`") <!-- until: a/b#10 --> `code`',
+    'Ends in a span `<!-- until: a/b#11 -->`',
+    '<`example`!-- until: a/b#12 -->',
+    'Escaped \\` <!-- until: a/b#13 --> `code`',
+  ].join('\n');
+  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]),
+    [[3, 'a/b#3'], [4, 'a/b#4'], [4, 'a/b#5'], [5, 'a/b#6'], [6, 'a/b#8']]);
+});
+
 test('reader skips backtick and tilde fences and reports the marker after each closing fence', () => {
   for (const character of ['`', '~']) {
     for (const length of [3, 4]) {

@@ -4,7 +4,13 @@ const path = require('node:path');
 
 const TITLE = 'Remove workaround rules whose replacement issue closed';
 
-// Read marker comments outside fenced code, preserving source line numbers.
+const MARKER = /<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g;
+// A rule's marker stands on its own line or ends the rule's line (docs/sdlc/friction.md
+// § Where a new agent rule goes). Prose that names a marker, in a code span or mid-sentence,
+// is followed by more text on its line, so only this trailing run of markers counts.
+const TRAILING_MARKERS = new RegExp(`(?:${MARKER.source}[ \\t]*)+$`);
+
+// Read the markers that end lines outside fenced code, preserving source line numbers.
 function markersIn(file, text) {
   const markers = [];
   let fence;
@@ -23,7 +29,7 @@ function markersIn(file, text) {
       if (token[0] === '<!--') inComment = true;
       else inComment = false;
     }
-    for (const match of line.matchAll(/<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g)) {
+    for (const match of (TRAILING_MARKERS.exec(line)?.[0] ?? '').matchAll(MARKER)) {
       markers.push({ file, line: index + 1, issue: match[1] });
     }
   }
