@@ -44,6 +44,9 @@ function stepLines(log, step) {
 const QUOTA_ERROR = /\bAPI rate limit exceeded\b|\bsecondary rate limit\b/i;
 // Only plain error causes qualify; a test whose diagnostic names the quota still reports.
 const isQuotaCause = cause => cause?.kind === 'error' && QUOTA_ERROR.test(cause.failureIdentity || '');
+// A person dispatches every Release run and reads its refusal there, for example the
+// 24-hour limit or an open release blocker in release-plan.cjs. It needs no issue.
+const isRefusal = (run, cause) => run.name === 'Release' && cause?.kind === 'error' && /\brefused\b/.test(cause.failureIdentity);
 function normalizeIdentity(text) {
   // Hash full diagnostic identity; display redaction is deliberately lossy and
   // must never collapse distinct test paths into one cause.
@@ -84,8 +87,11 @@ function causesForStep({run, job, step, log}) {
     return [{key:`${stage}:${normalizeIdentity(step.name)}:${normalized}`,title:normalized,index,kind:'error',failureIdentity:normalized}];
   });
   const errors = candidates.slice(0, 1);
+  if (isRefusal(run, errors[0])) return [];
   const found = tests.length ? tests.filter(item => item.hasDiagnostic || !tests.some(other => other.testKey === item.testKey && other.hasDiagnostic)) : errors;
-  if (!found.length) return [{signature:hash(`unknown:${run.id}:${run.run_attempt}:${job.id}:${step.number}`),title:`${stage} failure in ${sanitize(step.name)}`,stage,kind:'unknown',excerpt:sanitize('Logs unavailable or no recognizable failure diagnostic. Inspect the linked job and failed step.\n'+safeLines.slice(-30).join('\n'))}];
+  // Like a timeout, the step identifies a cause it cannot read, so each run of the same
+  // unrecognized failure adds an occurrence to one issue (hearsay-tools/squawk#1447).
+  if (!found.length) return [{signature:hash(`unknown:${stage}:${normalizeIdentity(step.name)}`),title:`${stage} failure in ${sanitize(step.name)}`,stage,kind:'unknown',excerpt:sanitize('Logs unavailable or no recognizable failure diagnostic. Inspect the linked job and failed step.\n'+safeLines.slice(-30).join('\n'))}];
   const unique = [...new Map(found.map(item => [item.key,item])).values()];
   const toCause = (item, selected) => ({signature:hash(item.key),title:sanitize(item.title).slice(0,180),stage,kind:item.kind,...(item.testIdentity ? {testIdentity:item.testIdentity,testFile:item.testFile,hasTestName:item.hasTestName,hasDiagnostic:item.hasDiagnostic} : {}),failureIdentity:item.failureIdentity||item.key,excerpt:sanitize(safeLines.slice(item.index,Math.min(item.index+30,selected.find(next=>next.index>item.index)?.index??Infinity)).join('\n'))});
   // The selection above is the v1 rule and decides every signature. When it

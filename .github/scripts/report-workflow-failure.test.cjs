@@ -32,11 +32,22 @@ test('partial issue creation repairs its missing comment on retry',async()=>{
  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,0);
  await reportFailure(h.options);assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
 });
-test('missing logs still report metadata, isolate causes and never print API error text',async()=>{
+test('missing logs still report metadata, one issue per step across runs, and never print API error text',async()=>{
  const h=harness();h.state.log=null;await reportFailure(h.options);
  assert.equal(h.state.issues.length,1);assert.match(h.state.comments[0].body,/unavailable/i);
  assert.doesNotMatch(h.messages.join('\n'),/secret/);
- h.state.run.id++;h.options.event.workflow_run.id++;await reportFailure(h.options);assert.equal(h.state.issues.length,2);
+ h.state.run.id++;h.options.event.workflow_run.id++;await reportFailure(h.options);
+ assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,2);
+});
+// A duplicate report closed in favour of an open issue that holds its signature
+// marker (docs/failure-reporting.md § Refining matches): hearsay-tools/squawk#3348.
+test('a recurrence goes to the open issue that took over a closed report\'s signature',async()=>{
+ const h=harness();await reportFailure(h.options);
+ const [report]=h.state.issues;report.state='closed';
+ const signature=report.body.match(/<!-- cez-failure-signature:v1:[a-f0-9]{64} -->/)[0];
+ h.state.issues.push({number:2,state:'open',title:'Flaky: delegation integration',body:`Tracks the flake.\n\n${signature}`,updated_at:h.state.run.created_at});
+ h.state.run.id++;h.options.event.workflow_run.id++;await reportFailure(h.options);
+ assert.equal(h.state.issues.length,2);assert.equal(h.state.comments.at(-1).issue_number,2);
 });
 test('ignore success, skipped, unrelated workflows and foreign repositories without API calls',async()=>{
  for(const patch of [{conclusion:'success'},{conclusion:'skipped'},{name:'CI'},{path:'.github/workflows/ci.yml'},{head_repository:{full_name:'attacker/repo'}},{head_branch:'feature/not-release'}]) {
@@ -185,13 +196,41 @@ test('routing failure retries without duplicating saved evidence or routing clos
  assert.equal(h.calls.filter(([route])=>route.endsWith('/labels')).length,count);
 });
 
+// A "Require every …" gate only mirrors the jobs it needs (hearsay-tools/squawk#3349,
+// hearsay-tools/squawk#3424, hearsay-tools/squawk#3484).
+function withGate(h) {
+ const failed=h.state.jobs.find(job=>job.conclusion==='failure');
+ const gate={...structuredClone(failed),id:failed.id+1,name:'Unit, build, E2E, and package',
+  steps:[{number:2,name:'Require every verification job',conclusion:'failure',started_at:failed.completed_at,completed_at:failed.completed_at}]};
+ h.state.jobs.push(gate);h.state.jobLogs={[failed.id]:h.state.log,[gate.id]:'test "$VITEST_RESULT" = success\n##[error]Process completed with exit code 1.'};
+ return {failed,gate};
+}
+test('a gate job reports only when no other job failed',async()=>{
+ const h=harness();mainCi(h);withGate(h);await reportFailure(h.options);
+ assert.deepEqual(h.state.issues.map(issue=>issue.title),['[Task]: Investigate delegation-integration.test.ts failure','[Task]: Repair main CI run 34473233122 attempt 1']);
+ assert.ok(!h.state.comments.some(comment=>/Require every verification job/.test(comment.body)));
+ const alone=harness();mainCi(alone);const {failed}=withGate(alone);alone.state.jobs=alone.state.jobs.filter(job=>job!==failed);
+ await reportFailure(alone.options);
+ assert.equal(alone.state.issues[0].title,'[Task]: Investigate verification failure');
+ assert.match(alone.state.comments[0].body,/Failed step: Require every verification job/);
+});
+test('a gate behind jobs that failed only on the GitHub API rate limit files nothing',async()=>{
+ const h=harness();mainCi(h);const {failed}=withGate(h);
+ h.state.jobLogs[failed.id]='##[error]API rate limit exceeded for installation.';
+ assert.equal((await reportFailure(h.options)).reported,0);assert.equal(h.state.issues.length,0);
+});
+test('a refusal of a dispatched Release files nothing',async()=>{
+ const h=harness();h.state.log='Error: The last stable release was published 2026-11-11T18:15:31.289Z. A second stable release within 24 hours is refused; use a rollback for a broken release.';
+ assert.equal((await reportFailure(h.options)).reported,0);
+ assert.ok(!h.calls.some(([route])=>route.startsWith('POST ')));
+});
 test('main CI that failed only on the GitHub API rate limit files nothing and routes no summary',async()=>{
  const h=harness();mainCi(h);
  h.state.log='##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
  const result=await reportFailure(h.options);
  assert.equal(result.reported,0);assert.equal(h.state.issues.length,0);
  assert.ok(!h.calls.some(([route])=>route.startsWith('POST ')));
- assert.match(h.messages.at(-1),/failed only for transient causes; nothing to report\.$/);
+ assert.match(h.messages.at(-1),/failed only for transient causes or refusals; nothing to report\.$/);
 });
 test('the reporter reads issues updated since the failed run was created',async()=>{
  const h=harness();await reportFailure(h.options);

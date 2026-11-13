@@ -93,6 +93,13 @@ function failedStepsFor(job) {
   if(!steps.length) steps.push({number:0,name:'Job failed before a step was recorded',started_at:job.started_at,completed_at:job.completed_at});
   return steps;
 }
+// A gate step ("Require every verification job") fails when a job it needs failed, and
+// that job carries the cause. A gate job reports only when no other job failed.
+const isGate=job=>failedStepsFor(job).every(step=>/^Require every\b/.test(step.name));
+function withoutGates(failed) {
+  const causes=failed.filter(job=>!isGate(job));
+  return causes.length ? causes : failed;
+}
 async function reportFailedJobs({github,base,fetchImpl,run,writer,failed,log}) {
   let reported=0;
   const reports=[];
@@ -131,9 +138,9 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
     throw new Error('Failed run has no failed jobs; inspect Actions metadata');
   }
   const writer=await createFailureWriter({github,owner,repo,log,since:run.created_at});
-  const {reported,reports}=await reportFailedJobs({github,base,fetchImpl,run,writer,failed,log});
+  const {reported,reports}=await reportFailedJobs({github,base,fetchImpl,run,writer,failed:withoutGates(failed),log});
   if(!reports.length) {
-    log(`Run ${run.id} attempt ${run.run_attempt} failed only for transient causes; nothing to report.`);
+    log(`Run ${run.id} attempt ${run.run_attempt} failed only for transient causes or refusals; nothing to report.`);
   } else if(run.name==='CI') {
     await routeMainCiSummary({github,owner,repo,run,issues:writer.issues,reports});
   }

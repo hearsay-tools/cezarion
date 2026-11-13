@@ -1,6 +1,7 @@
-# Mentions the owner once on a `main-ci-failure` summary that is still open 60 minutes after
-# it opened (docs/sdlc/main-ci-repair.md § Escalation; hearsay-tools/cezarion#3293). It runs
-# trusted default-branch code and executes no failed-run artifact.
+# Closes a `main-ci-failure` summary once a later main CI push run passed, and mentions the
+# owner once on a summary that is still open 60 minutes after it opened
+# (docs/sdlc/main-ci-repair.md § Closing and escalation; hearsay-tools/cezarion#3293). It runs trusted
+# default-branch code and executes no failed-run artifact.
 name: Escalate Main CI Failure
 
 on:
@@ -22,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read # the newest passing main CI run
       contents: read
       issues: write
     steps:
@@ -31,7 +33,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Mention the owner on stale summaries
+      - name: Close green summaries and mention the owner on stale ones
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           # A comment may have been written before an HTTP error reached us; the next run
@@ -40,5 +42,5 @@ jobs:
           script: |
             const { escalateMainCiFailures } = require('./.github/scripts/main-ci-escalation.cjs');
             const result = await escalateMainCiFailures({ github, ...context.repo, log: core.info });
-            core.summary.addRaw(`Open \`main-ci-failure\` summaries: ${result.open}; past 60 minutes: ${result.due}; newly mentioned: ${result.mentioned.length}.\n`);
+            core.summary.addRaw(`Closed after a passing main CI run: ${result.closed.length}; open \`main-ci-failure\` summaries: ${result.open}; past 60 minutes: ${result.due}; newly mentioned: ${result.mentioned.length}.\n`);
             await core.summary.write();

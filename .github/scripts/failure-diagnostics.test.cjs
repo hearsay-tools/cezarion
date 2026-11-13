@@ -34,11 +34,22 @@ test('different tests in one step remain distinct and repeated identical FAIL li
   assert.equal(causes.length,2);
   assert.notEqual(causes[0].signature, causes[1].signature);
 });
-test('missing or unrecognizable logs isolate uncertain failures by occurrence', () => {
+// Each run of one unrecognized failure once filed its own issue (hearsay-tools/squawk#1447).
+test('an unrecognized failure keeps one signature per stage and step across runs and jobs', () => {
   const a = release(); a.log = '';
   const one = causesForStep(a)[0];
   assert.match(one.excerpt, /unavailable|recognizable/i);
-  assert.notEqual(one.signature, causesForStep({...a,run:{...a.run,id:999}})[0].signature);
+  assert.equal(one.signature, causesForStep({...a,run:{...a.run,id:999,run_attempt:2},job:{...a.job,id:7,name:'Vitest shard 2/8'},log:'exit 1'})[0].signature);
+  assert.notEqual(one.signature, causesForStep({...a,step:{...a.step,name:'Run unit tests'}})[0].signature);
+});
+// hearsay-tools/squawk#3335 filed the 24-hour limit of release-plan.cjs as a setup failure.
+test('a refusal in the Release workflow is no cause; the same line elsewhere still is', () => {
+  const refusal = '2026-09-10T11:50:00Z Error: The last stable release was published 2026-11-11T18:15:31.289Z. A second stable release within 24 hours is refused; use a rollback for a broken release.';
+  const a = release(); a.log = fixture.log + '\n' + refusal;
+  a.step = {...a.step, name:'Plan the release', started_at:'2026-09-10T11:50:00Z', completed_at:'2026-09-10T11:50:01Z'};
+  assert.deepEqual(causesForStep(a), []);
+  assert.deepEqual(causesForStep({...a, log: a.log.replace('Error: The last', 'Error: Release refused:\n- The last')}), []);
+  assert.match(causesForStep({...a, run: {...a.run, name: 'Nightly'}})[0].failureIdentity, /^Error: The last stable release .* is refused;/);
 });
 test('publishing error differs from verification and ignores unrelated timestamped steps', () => {
   const a = release(); a.step = {...a.step, name:'Publish nightly',started_at:'2026-09-10T12:00:00Z',completed_at:'2026-09-10T12:01:00Z'};

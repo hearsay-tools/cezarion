@@ -16,8 +16,10 @@ const NOW = Date.parse('2026-11-12T12:00:00Z');
 const minutesAgo = (m) => new Date(NOW - m * 60000).toISOString();
 
 // A fake GitHub: open issues carry their comments; closed ones never come back from the list.
-function fake({ issues, admins = [{ login: 'wjarka', type: 'User', permissions: { admin: true } }] }) {
+// `green` is the newest passing CI push run on main.
+function fake({ issues, green, admins = [{ login: 'wjarka', type: 'User', permissions: { admin: true } }] }) {
   const posted = [];
+  const runReads = [];
   const github = {
     async paginate(route, args) {
       if (route.includes('/collaborators')) { assert.equal(args.permission, 'admin'); return admins; }
@@ -27,12 +29,20 @@ function fake({ issues, admins = [{ login: 'wjarka', type: 'User', permissions: 
       return issues.filter((i) => i.state !== 'closed');
     },
     async request(route, args) {
+      if (route.includes('/actions/workflows/')) {
+        runReads.push(args);
+        return { data: { workflow_runs: green ? [green] : [] } };
+      }
+      if (route.startsWith('PATCH ')) {
+        Object.assign(issues.find((i) => i.number === args.issue_number), { state: args.state, state_reason: args.state_reason });
+        return;
+      }
       assert.match(route, /^POST .*comments$/);
       posted.push(args);
       issues.find((i) => i.number === args.issue_number).comments = [...(issues.find((i) => i.number === args.issue_number).comments ?? []), { body: args.body }];
     },
   };
-  return { github, posted };
+  return { github, posted, runReads };
 }
 const run = (f) => escalateMainCiFailures({ github: f.github, owner: 'o', repo: 'r', now: NOW });
 
@@ -43,6 +53,28 @@ test('a summary open for 60 minutes gets one owner mention, and a later run adds
   assert.ok(f.posted[0].body.includes(MARKER));
   assert.deepEqual((await run(f)).mentioned, []);
   assert.equal(f.posted.length, 1);
+});
+
+// Summaries stayed open after main was green (hearsay-tools/squawk#1946,
+// hearsay-tools/squawk#3425, hearsay-tools/squawk#3466).
+const summary = (number, run, attempt = 1) => ({ number, created_at: minutesAgo(90), body: `<!-- cez-main-ci-attempt:v1:o/r:${run}:${attempt} -->\n\nRepair` });
+test('a summary closes once a later main CI run or attempt passed; its members are not touched', async () => {
+  const green = { id: 20, run_attempt: 2, head_sha: 'a'.repeat(40), html_url: 'https://github.com/o/r/actions/runs/20' };
+  const issues = [summary(1, 10), summary(2, 20), summary(3, 20, 2), summary(4, 30), { number: 5, created_at: minutesAgo(90), body: 'A legacy report' }];
+  const f = fake({ issues, green });
+  const result = await run(f);
+  assert.deepEqual(result.closed, [1, 2]);
+  assert.deepEqual(issues.map((i) => i.state ?? 'open'), ['closed', 'closed', 'open', 'open', 'open']);
+  assert.equal(issues[0].state_reason, 'completed');
+  assert.match(f.posted[0].body, /^Main CI passed after this attempt: \[run 20 attempt 2\]/);
+  assert.deepEqual(f.runReads.map((a) => [a.workflow_id, a.branch, a.event, a.status]), [['ci.yml', 'main', 'push', 'success']]);
+  assert.deepEqual(result.mentioned, [3, 4, 5]);
+});
+
+test('without an open summary the run list is not read', async () => {
+  const f = fake({ issues: [{ number: 6, created_at: minutesAgo(90), body: 'A legacy report' }] });
+  await run(f);
+  assert.deepEqual(f.runReads, []);
 });
 
 test('a closed summary gets no mention', async () => {
@@ -73,13 +105,13 @@ test('the Squeal ref warning appears only when the ref is missing', async () => 
   assert.equal((await squealRefWarning({ github: {}, owner: 'o', repo: 'r', sha: 'nope' })).state, 'invalid');
 });
 
-test('the escalation workflow is scheduled, default-branch only and holds only issue write', () => {
+test('the escalation workflow is scheduled, default-branch only and holds only issue write and Actions read', () => {
   const wf = workflow('main-ci-escalation.yml');
   assert.ok(wf.on.schedule.length > 0);
   assert.ok('workflow_dispatch' in wf.on);
   assert.deepEqual(wf.permissions, {});
   const job = wf.jobs.escalate;
-  assert.deepEqual(job.permissions, { contents: 'read', issues: 'write' });
+  assert.deepEqual(job.permissions, { actions: 'read', contents: 'read', issues: 'write' });
   assert.match(job.if, /default_branch/);
   assert.equal(wf.concurrency['cancel-in-progress'], false);
   assert.equal(job.steps.find((s) => s.uses?.startsWith('actions/checkout@')).with.ref, '${{ github.sha }}');
