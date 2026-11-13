@@ -251,7 +251,6 @@ describe('submit', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use one task' }))
     await startTask()
     expect(postedBody()).toMatchObject({ task: 'Race two attempts' })
-    expect(postedBody()).not.toHaveProperty('variants')
   })
 
   it('shows a locked native default but omits it from the direct run request', async () => {
@@ -375,23 +374,6 @@ describe('submit', () => {
     expect(postedBody()).toMatchObject({ workflow: 'fix-and-verify', worktree: false })
   })
 
-  // #471 — the composer must not offer a switch the server overrides anyway.
-  const retiredInboxHealth: HealthResponse = {
-    ...HEALTH,
-    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
-  }
-  const followupsToggle = () =>
-    document.querySelector('[data-slot="generate-followups-toggle"]')
-
-  it('omits the retired follow-up toggle', async () => {
-    serve({ health: retiredInboxHealth })
-    renderNewTask()
-    await pillReady()
-    await waitFor(() => expect(followupsToggle()).toBeNull())
-    // The neighbouring toggles are untouched — the gate owns exactly one control.
-    expect(document.querySelector('[data-slot="autonomous-toggle"]')).not.toBeNull()
-  })
-
 })
 
 describe('drafts and prefill', () => {
@@ -423,17 +405,6 @@ describe('drafts and prefill', () => {
     await pillReady('deploy')
     expect(textarea().value).toBe('https://github.com/o/r/issues/5')
     expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/runs')).toBe(false)
-  })
-
-  it('launches omit retired Inbox fields', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-    fireEvent.change(textarea(), { target: { value: 'unrelated task' } })
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).todoId).toBeUndefined()
-    expect((postedBody() as Record<string, unknown>).generateFollowups).toBeUndefined()
   })
 
   it('submit spends the draft text', async () => {

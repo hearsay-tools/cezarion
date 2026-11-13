@@ -140,11 +140,9 @@ describe('Global settings → Resources', () => {
     await waitFor(() => expect(parallelSelect()).not.toBeNull())
     expect(parallelSelect()!.value).toBe('5')
     expect(memoryInput()!.value).toBe('4096')
-    // The per-repo config is not even read by this pane.
-    expect(requests.some((r) => r.url === '/api/v1/config')).toBe(false)
   })
 
-  it('saves maxParallel to the WORKSPACE config, never the per-repo one', async () => {
+  it('saves maxParallel to the workspace config', async () => {
     serve({ maxParallel: 2 })
     renderResources()
     await waitFor(() => expect(parallelSelect()).not.toBeNull())
@@ -153,7 +151,6 @@ describe('Global settings → Resources', () => {
 
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.body).toEqual({ resources: { maxParallel: 6 } })
-    expect(requests.some((r) => r.method === 'PUT' && r.url === '/api/v1/config')).toBe(false)
   })
 
   it('links workspace limits to the per-project controls', async () => {

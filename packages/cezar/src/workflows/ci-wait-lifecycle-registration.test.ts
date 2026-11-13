@@ -102,7 +102,7 @@ describe('CI wait registration', { timeout: 30_000 }, () => {
     expect(first.deadline).toBe(second.deadline);
   });
 
-  // hearsay-tools/cezarion#1233 drops the human-ask refusals: a newer ask no longer refuses CI.
+  // hearsay-tools/cezarion#1233: a newer human ask leaves CI registration open.
   it('accepts CI during an executing approval and after a newer human ask', async () => {
     github(); const release = join(root, 'ci-answer');
     const wire = controlledWire({ humanAnswerGate: release });

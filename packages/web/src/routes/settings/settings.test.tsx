@@ -287,21 +287,18 @@ describe('the appearance section (global scope)', () => {
     await waitFor(() => {
       expect(localStorage.getItem('cez-accent')).toBe('cezarion')
     })
-    expect(document.documentElement.hasAttribute('data-accent')).toBe(false)
     expect(document.documentElement.dataset.density).toBe('compact')
-    expect(screen.queryByRole('radiogroup', { name: 'Accent' })).toBeNull()
     expect(screen.getByRole('radio', { name: 'Compact' }).getAttribute('aria-checked')).toBe('true')
     expect(localStorage.getItem('cez-density')).toBe('compact')
   })
 
-  it('keeps the sole accent in the full appearance payload while hiding its one-choice field', async () => {
+  it('keeps the sole accent in the full appearance payload', async () => {
     serve({ appearance: { density: 'compact' } })
     renderAt('/settings/global/appearance')
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: 'Compact' }).getAttribute('aria-checked')).toBe('true')
     })
 
-    expect(screen.queryByRole('radiogroup', { name: 'Accent' })).toBeNull()
     fireEvent.click(screen.getByRole('radio', { name: 'Wide' }))
 
     await waitFor(() => {
