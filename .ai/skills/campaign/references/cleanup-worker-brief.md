@@ -50,9 +50,9 @@ Before the PR, in this order:
    or the repo's own gate requires it. Run the Reader sweep's selected
    packaged checks too; browser specs run in CI.
 5. Start check-code-quality's Squeal one-shot path beside the push, as its
-   reference says. Require complete evidence for every changed, new or moved
-   function, test files included. Bundled metrics are statistics only.
-   CI's complexity gate counts a moved function as new when a same-named
+   reference says. Require complete evidence for every changed or new
+   function, test files included; the report lists a function moved with an
+   unchanged body under `omitted`, which needs none. CI's complexity gate counts a moved function as new when a same-named
    delegator stays behind; tell the coordinator about any function over 20.
 6. <kind section below>
 Read auto-merge before opening the PR. The campaign's owner-merge control
