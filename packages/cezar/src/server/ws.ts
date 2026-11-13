@@ -123,6 +123,10 @@ interface ClientState {
   /** The upgrade verdict's trust flag (see `WsUpgradeVerdict`). An untrusted
    *  connection may subscribe only to `loopbackReadable` topics. */
   trusted: boolean;
+  /** Topics whose subscribe snapshot is still pending, each with the publishes held for it. The
+   *  snapshot was read before them, so it must reach the client first: sent after a publish, it
+   *  would replace newer data, and a deduplicating publisher never sends that data again. */
+  held: Map<string, unknown[]>;
 }
 
 export interface SocketHubOptions {
@@ -152,20 +156,29 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
     if (client.topics.has(topic)) return; // idempotent — a re-sent frame must not double anything
     client.topics.add(topic);
     state.subscribers.add(ws);
+    const held: unknown[] = [];
+    client.held.set(topic, held);
     if (state.stop === null) {
       state.stop = state.publisher.start((data) => {
-        for (const subscriber of state.subscribers) send(subscriber, { type: 'event', topic, data });
+        for (const subscriber of state.subscribers) {
+          const pending = clients.get(subscriber)?.held.get(topic);
+          if (pending) pending.push(data);
+          else send(subscriber, { type: 'event', topic, data });
+        }
       });
     }
     // The immediate snapshot — async, so the socket or the subscription may be
     // gone by the time it resolves; both are re-checked. A failing snapshot is
-    // dropped: the publisher's next publish carries the same news.
+    // dropped: the publishes held meanwhile, and the next publish, carry the news.
+    const release = (snapshot: { data: unknown } | undefined): void => {
+      if (client.held.get(topic) !== held) return; // released, or subscribed again since
+      client.held.delete(topic);
+      if (snapshot) send(ws, { type: 'event', topic, data: snapshot.data });
+      for (const data of held) send(ws, { type: 'event', topic, data });
+    };
     void state.publisher
       .snapshot()
-      .then((data) => {
-        if (client.topics.has(topic)) send(ws, { type: 'event', topic, data });
-      })
-      .catch(() => undefined);
+      .then((data) => release({ data }), () => release(undefined));
   };
 
   const familyOf = (topic: string): TopicFamily | undefined =>
@@ -231,6 +244,7 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
 
   const unsubscribe = (ws: WebSocket, client: ClientState, topic: string): void => {
     client.pending.delete(topic); // a resolution still in flight attaches nothing now
+    client.held.delete(topic);
     if (!client.topics.delete(topic)) return;
     const state = topics.get(topic);
     if (!state) return;
@@ -281,7 +295,7 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage, trusted?: boolean) => {
     // `trusted` is emitted by `handleUpgrade` from the upgrade verdict; default false is
     // the safe read for any path that reaches here without one.
-    const client: ClientState = { alive: true, topics: new Set(), pending: new Map(), trusted: trusted === true };
+    const client: ClientState = { alive: true, topics: new Set(), pending: new Map(), trusted: trusted === true, held: new Map() };
     clients.set(ws, client);
     ws.on('pong', () => {
       client.alive = true;
