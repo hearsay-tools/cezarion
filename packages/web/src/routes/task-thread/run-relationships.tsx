@@ -5,6 +5,7 @@ import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { workerWaitLabel, workersWaitingLabel } from '@/lib/attention'
 import { completionWaitView, requestsToPeers, workerWaitView } from '@open-mercato/cezar-api-client/contract/waits'
+import { isLiveStatus } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, RunRelationships, WorkerCompletionWait, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
 
@@ -68,6 +69,13 @@ export function useWorkersVerdict(run: ApiRun): WorkersVerdict {
   })
   if (verdicts.includes('pending')) return 'pending'
   return verdicts.includes('issue') ? 'issue' : 'complete'
+}
+
+/** Whether a root has a queued, running or waiting worker, from the relationships answer the dock
+ *  already loads. False while it loads or fails, so Stop stays hidden then (hearsay-tools/squawk#3360). */
+export function useWorkersLive(run: ApiRun): boolean {
+  const query = useRunRelationships(run.id, { enabled: run.delegation?.role === 'root' })
+  return query.isSuccess && query.data.workers.some(worker => isLiveStatus(worker.status))
 }
 
 /**
