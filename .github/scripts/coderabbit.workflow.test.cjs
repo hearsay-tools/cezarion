@@ -48,11 +48,15 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   assert.equal(job.steps[1].with.retries, 0);
   assert.doesNotMatch(JSON.stringify(w), /secrets\.|refs\/pull\/|create-github-app-token/);
 });
-test('PR-context review signals have no permissions, secrets, checkout or trusted outputs', () => {
+test('PR-context review signals have no permissions, secrets, checkout or trusted outputs and debounce per PR', () => {
   const w = read('coderabbit-review-signal.yml');
   assert.deepEqual(w.permissions, {});
   assert.deepEqual(w.jobs.signal.permissions, {});
-  assert.deepEqual(w.jobs.signal.steps, [{ run: 'true' }]);
+  assert.deepEqual(w.jobs.signal.steps, [{ run: 'sleep 30' }]);
+  assert.ok(w.jobs.signal['timeout-minutes'] >= 1, 'the settle step fits the job timeout');
+  assert.deepEqual(w.jobs.signal.concurrency, {
+    group: 'coderabbit-review-signal-pr-${{ github.event.pull_request.number }}', 'cancel-in-progress': true });
+  assert.equal(w.concurrency, undefined, 'only the per-PR job debounces');
   assert.deepEqual(w.on.pull_request_review.types, ['submitted', 'edited', 'dismissed']);
   assert.deepEqual(w.on.pull_request_review_comment.types, ['created', 'edited', 'deleted']);
   assert.doesNotMatch(JSON.stringify(w), /secrets\.|checkout|outputs/);
