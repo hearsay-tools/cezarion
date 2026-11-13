@@ -57,20 +57,56 @@ export function bootEnv(env, home) {
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-// A version published seconds ago can be missing from a registry mirror for a while.
-async function registryInstall(prefix, spec) {
-  mkdirSync(prefix, { recursive: true });
-  for (let attempt = 1; ; attempt++) {
-    try {
-      execFileSync(npm, ['install', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec],
-        { stdio: 'inherit', shell: process.platform === 'win32' });
-      return;
-    } catch (error) {
-      if (attempt >= 20) throw error;
-      console.log(`release-smoke: ${spec} is not installable yet (attempt ${attempt}); retrying in 15 s.`);
-      await delay(15_000);
+// npm processes a new version before the registry serves it. On 2026-11-13 a nightly
+// appeared 6 min 12 s after `npm publish` returned (hearsay-tools/squawk#3483).
+export const PUBLISH_WAIT_MS = 15 * 60_000;
+// The registry CDN keeps each metadata document for up to 300 s, and `npm install` reads
+// the abbreviated document, not the full one `npm view` reads.
+export const INSTALL_WAIT_MS = 5 * 60_000;
+export const POLL_MS = 15_000;
+
+// `--prefer-online` revalidates npm's local metadata cache, so a document cached before
+// the version appeared cannot keep answering "no such version". `timeout` stops one stalled
+// call; it is never 0, which would mean no limit.
+function runNpm(args, { quiet = false, timeout } = {}) {
+  return execFileSync(npm, args, {
+    encoding: 'utf8', shell: process.platform === 'win32', timeout, stdio: quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+  });
+}
+
+function reason(error) {
+  const line = `${error.stderr ?? ''}`.split(/\r?\n/).find(text => /\S/.test(text) && !text.startsWith('npm error code '));
+  return (line ?? error.message.split('\n')[0]).trim();
+}
+
+// Each attempt may run for what is left of `waitMs`, and at least one poll interval, so a
+// stalled npm call cannot outlive the phase by more than that interval.
+async function untilDeadline(what, attempt, waitMs, { now, sleep, log }) {
+  const start = now();
+  const left = () => waitMs - (now() - start);
+  for (let n = 1; ; n++) {
+    try { return await attempt(Math.max(left(), POLL_MS)); } catch (error) {
+      const elapsed = Math.round((now() - start) / 1000);
+      if (left() <= 0) throw new Error(`${what} after ${elapsed} s (${n} attempts): ${reason(error)}`, { cause: error });
+      const pause = Math.min(POLL_MS, left());
+      log(`release-smoke: ${what} (attempt ${n}, ${elapsed} s elapsed): ${reason(error)}; retrying in ${Math.ceil(pause / 1000)} s.`);
+      await sleep(pause);
     }
   }
+}
+
+// Wait until the registry serves the exact version, then install it.
+export async function registryInstall(prefix, spec, { exec = runNpm, now = Date.now, sleep = delay, log = console.log } = {}) {
+  const clock = { now, sleep, log };
+  mkdirSync(prefix, { recursive: true });
+  const version = spec.slice(spec.lastIndexOf('@') + 1);
+  await untilDeadline(`${spec} is not on the registry`, async (timeout) => {
+    const shown = `${exec(['view', spec, 'version', '--prefer-online'], { quiet: true, timeout }) ?? ''}`.trim();
+    if (shown !== version) throw new Error(`npm view printed "${shown}"`);
+  }, PUBLISH_WAIT_MS, clock);
+  log(`release-smoke: the registry serves ${spec}.`);
+  await untilDeadline(`${spec} did not install`, (timeout) => exec(
+    ['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { timeout }), INSTALL_WAIT_MS, clock);
 }
 
 function binary(prefix, name) {
