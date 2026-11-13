@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mergeIstanbulReports } from './istanbul-merge.mjs';
-import { mergeIstanbulReports as reexported } from './coverage.mjs';
 
 const at = (line, startColumn = 0, endColumn = 10) => ({ start: { line, column: startColumn }, end: { line, column: endColumn } });
 
@@ -38,8 +37,4 @@ test('a location only the source has is appended with its counter', () => {
   const merged = mergeIstanbulReports(target, { '/repo/a.ts': entry('/repo/a.ts', { statements: [5, 7] }) });
   assert.deepEqual(merged['/repo/a.ts'].s, { 0: 6, 1: 7 });
   assert.deepEqual(merged['/repo/a.ts'].statementMap[1], at(2));
-});
-
-test('the quality tool keeps importing the function from coverage.mjs', () => {
-  assert.equal(reexported, mergeIstanbulReports);
 });

@@ -773,7 +773,7 @@ function complexityGateFixture(t) {
   git('config', 'user.name', 'Gate fixture');
   const scripts = path.join(dir, '.ai/skills/check-code-quality/scripts');
   fs.mkdirSync(scripts, { recursive: true });
-  for (const name of ['changed-functions', 'code-metrics', 'complexity-gate', 'metrics']) {
+  for (const name of ['changed-functions', 'code-metrics', 'complexity-gate']) {
     fs.copyFileSync(path.join(repoRoot, `.ai/skills/check-code-quality/scripts/${name}.mjs`), path.join(scripts, `${name}.mjs`));
   }
   fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(dir, 'node_modules'));
