@@ -78,7 +78,17 @@ function runNpm(args, { quiet = false, timeout } = {}) {
 // failure to .github/scripts/failure-diagnostics.cjs, which files the first such line.
 function reason(error) {
   const line = `${error.stderr ?? ''}`.split(/\r?\n/).find(text => /\S/.test(text) && !text.startsWith('npm error code '));
-  return (line ?? describe(error)).trim().replace(/^npm (?:error|ERR!) /, '');
+  return quoted(line ?? describe(error));
+}
+
+// Child output the smoke logs, in a form the CI failure filer does not take as the cause:
+// without npm's level prefix, and with `<Name>Error:` written as `<Name>Error -`.
+function quoted(text) {
+  return text.trim().replace(/^npm (?:error|ERR!|warn|notice) /, '').replace(/\b(\w*Error):/g, '$1 -');
+}
+
+function relay(output, log) {
+  for (const line of `${output ?? ''}`.split(/\r?\n/)) if (/\S/.test(line)) log(`release-smoke: npm: ${quoted(line)}`);
 }
 
 // A child process error from execFileSync reads `Command failed: <command>`, which the filer
@@ -122,8 +132,15 @@ export async function registryInstall(prefix, spec, { exec = runNpm, now = Date.
     if (shown !== version) throw new Error(`npm view printed "${shown}"`);
   }, PUBLISH_WAIT_MS, clock);
   log(`release-smoke: the registry serves ${spec}.`);
-  await untilDeadline(`${spec} did not install`, (timeout) => exec(
-    ['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { timeout }), INSTALL_WAIT_MS, clock);
+  // npm's own output goes through `relay`, so a failed attempt cannot become the filed cause.
+  await untilDeadline(`${spec} did not install`, (timeout) => {
+    try {
+      relay(exec(['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { quiet: true, timeout }), log);
+    } catch (error) {
+      relay(error.stderr, log);
+      throw error;
+    }
+  }, INSTALL_WAIT_MS, clock);
 }
 
 function binary(prefix, name) {

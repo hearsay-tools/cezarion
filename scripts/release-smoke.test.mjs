@@ -154,6 +154,28 @@ test('the CI failure filer reads the failure the smoke ends on, not a wait line 
 const filed = lines => causesForStep({ run: { id: 1, run_attempt: 1 }, job: { id: 2 }, step: { number: 5, name: 'Clean install, boot and cockpit' },
   log: [...lines, '##[error]Process completed with exit code 1.'].join('\n') }).map(cause => cause.title);
 
+test("npm's own output from a failed install attempt cannot become the filed cause of a later failure", async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const registry = fakeRegistry();
+  const options = registry.options();
+  let installs = 0;
+  // The 2026-11-13 nightly's npm output, then an EPERM line, then a successful second attempt.
+  const exec = (args, more) => {
+    if (args[0] !== 'install') return options.exec(args, more);
+    assert.equal(more.quiet, true, 'npm install output is captured, not inherited');
+    if (++installs > 1) return 'added 1 package in 1s\n';
+    throw Object.assign(new Error('Command failed: npm install'), { status: 1, signal: null, stderr:
+      'npm error code ETARGET\nnpm error notarget No matching version found for fake@1.2.1.\nnpm error Error: EPERM: operation not permitted\n' });
+  };
+  await registryInstall(prefix, 'fake@1.2.1', { ...options, exec });
+  assert.ok(registry.logs.some(line => line === 'release-smoke: npm: notarget No matching version found for fake@1.2.1.'));
+  assert.ok(registry.logs.some(line => line === 'release-smoke: npm: Error - EPERM: operation not permitted'));
+  assert.ok(registry.logs.includes('release-smoke: npm: added 1 package in 1s'));
+  const failure = failureLine(new Error('The booted server registered no project'));
+  assert.deepEqual(filed([...registry.logs, failure]), [sanitize(failure)]);
+});
+
 test('a child process failure ends on a line the filer reads, not on its `Command failed` wrapper', async t => {
   const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
   t.after(() => rmSync(prefix, { recursive: true, force: true }));
