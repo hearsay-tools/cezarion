@@ -186,10 +186,12 @@ log('start');
 const wait = async path => { while (path && !fs.existsSync(path)) await new Promise(resolve => setTimeout(resolve, 5)); };
 const args = process.argv.slice(2); const sessionIndex = args.indexOf('--session-id');
 emit({ type: 'system', subtype: 'init', session_id: sessionIndex >= 0 ? args[sessionIndex + 1] : 'controlled-session' });
-rl.on('line', line => { queue = queue.then(async () => {
+rl.on('line', line => {
 const message = JSON.parse(line); const content = message.message?.content ?? [];
 const text = typeof content === 'string' ? content : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+// Logged on arrival, before the queue: a line that waits behind a gated one is still listed as read.
 const humanAnswer = text.includes('human answer mock:hold'); log(humanAnswer ? 'human-answer' : 'line', text);
+queue = queue.then(async () => {
 if (options.replay && message.uuid) emit({ type: 'user', isReplay: true, uuid: message.uuid, message: message.message });
 if (first) { first = false; fs.writeFileSync(${JSON.stringify(initial)}, 'received'); await wait(options.firstResultGate); }
 if (humanAnswer && options.humanAnswerGate) { fs.appendFileSync(received, JSON.stringify({ text }) + '\n'); await wait(options.humanAnswerGate); }
