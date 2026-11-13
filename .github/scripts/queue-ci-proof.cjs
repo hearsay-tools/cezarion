@@ -30,8 +30,9 @@ const positive = value => Number.isSafeInteger(value) && value > 0;
 // READ_ATTEMPTS times in all and only inside the deadline. A real refusal fails
 // at once. A write never runs twice: its failure does not prove it did not land.
 const READ_ATTEMPTS = 3;
+// A GraphQL document is a read only when it starts with a query, after blanks and comments.
 const isRead = (route, args) => route.startsWith('GET ')
-  || (route === 'POST /graphql' && !/^\s*mutation\b/.test(args.query ?? ''));
+  || (route === 'POST /graphql' && /^(?:\s|#[^\r\n]*(?=[\r\n]|$))*(?:query\b|\{)/.test(args.query ?? ''));
 function retryDelay(error, attempt) {
   if (error?.status >= 500) return 1000 * attempt;
   if (![403, 429].includes(error?.status)) return null;

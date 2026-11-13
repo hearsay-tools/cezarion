@@ -129,7 +129,8 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   startDiagnostics(diagnostics, group);
   requireGroup(group);
   github = diagnosticGithub(github, diagnostics);
-  const read = reader(github, owner, repo, now() + 120000, now, sleep);
+  const deadline = now() + 120000;
+  const read = reader(github, owner, repo, deadline, now, sleep);
   const graphql = boundedGraphql(read);
   diagnostics.check = 'queue rules';
   requireQueueRules(await read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch: 'main', per_page: 100 }));
@@ -157,7 +158,8 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   diagnostics.check = 'native protected jobs';
   if (!successfulJobs(await readCiJobs(read, run.id), [VERIFY, REVIEW])) throw new Error('Native CI/review gates missing');
   diagnostics.check = 'CodeRabbit admission';
-  const admission = await readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin, now, sleep });
+  const admission = await readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha,
+    releaseAppBotLogin, now, sleep, deadline: Math.min(deadline, now() + 60000) });
   if (!admission.admitted) throw new Error(`Unresolved or unsuccessful CodeRabbit admission: ${admission.reason}`);
   diagnostics.check = 'final native CI/review';
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });

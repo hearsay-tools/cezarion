@@ -267,3 +267,18 @@ test('one admission reads each record once, apart from the race re-reads', async
   assert.equal(h.s.calls.length, 17);
   assert.equal(h.s.calls.filter(route => route.endsWith('/rules/branches/{branch}')).length, 1);
 });
+test('the CodeRabbit reads share the admission deadline, so no retry wait passes it', async () => {
+  const h = fixture(); let clock = 0; const sleeps = [];
+  const original = h.github.request; let failed = false;
+  const github = { request: async (route, args) => {
+    // The CodeRabbit check-run read starts 100 s into the 120 s admission budget.
+    if (route.endsWith('/check-runs') && !failed) {
+      failed = true; clock = 100000;
+      throw httpError(403, 'You have exceeded a secondary rate limit', { 'retry-after': '30' });
+    }
+    return original(route, args);
+  } };
+  await assert.rejects(() => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group, now: () => clock,
+    sleep: async ms => { sleeps.push(ms); } }), /secondary rate limit/);
+  assert.deepEqual(sleeps, []);
+});
