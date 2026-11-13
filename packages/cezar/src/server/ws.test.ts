@@ -61,6 +61,20 @@ function makeTopic(snapshot: unknown = { tick: 0 }) {
   return { state, publisher };
 }
 
+/** A topic whose snapshots resolve only when the test settles them, in call order. */
+function makeDeferredTopic() {
+  const state = { publish: undefined as ((data: unknown) => void) | undefined };
+  const releases: Array<{ resolve(value: unknown): void; reject(error: Error): void }> = [];
+  const publisher: TopicPublisher = {
+    snapshot: () => new Promise((resolve, reject) => { releases.push({ resolve, reject }); }),
+    start: (publish) => {
+      state.publish = publish;
+      return () => { state.publish = undefined; };
+    },
+  };
+  return { state, releases, publisher };
+}
+
 async function boot(
   publisher: TopicPublisher,
   verify: (req: IncomingMessage) => WsUpgradeVerdict = () => ({ trusted: true }),
@@ -137,6 +151,54 @@ describe('createSocketHub', () => {
     state.publish?.({ n: 42 });
     expect(await alpha.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 42 } });
     expect(await beta.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 42 } });
+    alpha.ws.close();
+    beta.ws.close();
+  });
+
+  it('sends a new subscriber its snapshot before a publish made while the snapshot was pending', async () => {
+    const { publisher, releases, state } = makeDeferredTopic();
+    const { url } = await boot(publisher);
+    const client = await connect(url);
+
+    client.send({ type: 'subscribe', topic: 'ticker' });
+    await vi.waitFor(() => expect(releases).toHaveLength(1), { timeout: HANG_GUARD_MS });
+    state.publish?.({ n: 1 });
+    releases[0]!.resolve({ n: 0 });
+    expect(await client.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 0 } });
+    expect(await client.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 1 } });
+    client.ws.close();
+  });
+
+  it('delivers a held publish when the subscribe snapshot fails', async () => {
+    const { publisher, releases, state } = makeDeferredTopic();
+    const { url } = await boot(publisher);
+    const client = await connect(url);
+
+    client.send({ type: 'subscribe', topic: 'ticker' });
+    await vi.waitFor(() => expect(releases).toHaveLength(1), { timeout: HANG_GUARD_MS });
+    state.publish?.({ n: 1 });
+    releases[0]!.reject(new Error('snapshot failed'));
+    expect(await client.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 1 } });
+    client.ws.close();
+  });
+
+  it('holds a publish only for the subscriber whose snapshot is pending', async () => {
+    const { publisher, releases, state } = makeDeferredTopic();
+    const { url } = await boot(publisher);
+    const alpha = await connect(url);
+    const beta = await connect(url);
+
+    alpha.send({ type: 'subscribe', topic: 'ticker' });
+    await vi.waitFor(() => expect(releases).toHaveLength(1), { timeout: HANG_GUARD_MS });
+    releases[0]!.resolve({ n: 0 });
+    expect(await alpha.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 0 } });
+    beta.send({ type: 'subscribe', topic: 'ticker' });
+    await vi.waitFor(() => expect(releases).toHaveLength(2), { timeout: HANG_GUARD_MS });
+    state.publish?.({ n: 1 });
+    expect(await alpha.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 1 } });
+    releases[1]!.resolve({ n: 0 });
+    expect(await beta.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 0 } });
+    expect(await beta.next()).toEqual({ type: 'event', topic: 'ticker', data: { n: 1 } });
     alpha.ws.close();
     beta.ws.close();
   });
