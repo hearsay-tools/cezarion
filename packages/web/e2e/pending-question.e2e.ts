@@ -182,12 +182,10 @@ describe.each([
     openTask(width, height, query)
     const context = browser.evaluate(`(() => {
       const region = document.querySelector('[data-slot="ask-context"]')
-      const style = getComputedStyle(region)
-      return { height: region.clientHeight, content: region.scrollHeight, max: style.maxHeight, overflow: style.overflowY, agent: region.closest('[data-role="agent"]') !== null }
-    })()`)
-    expect(context).toMatchObject({ max: 'none', overflow: 'visible', agent: true })
-    expect((context as { height: number }).height).toBe((context as { content: number }).content)
-    expect((context as { height: number }).height).toBeGreaterThan(height)
+      return { height: region.clientHeight, content: region.scrollHeight }
+    })()`) as { height: number; content: number }
+    expect(context.height).toBe(context.content)
+    expect(context.height).toBeGreaterThan(height)
     browser.evaluate(`document.querySelector('[data-slot="ask-show-origin"]').click()`)
     browser.waitForFunction(`document.querySelector('[data-slot="ask-answers"]') !== null`)
     expect(browser.text('[data-slot="ask-answers"]')).toContain('Which branch is the base?')

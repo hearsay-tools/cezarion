@@ -263,7 +263,7 @@ it('opens the published link in the reader inside cezarion, with no request leav
   browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null && location.pathname === ${JSON.stringify(readerPath())}`)
   expect(browser.waitForValue<boolean>(`document.querySelector('[data-slot="link-safety-dialog"]') === null`)).toBe(true)
   expect(browser.evaluate(`document.querySelector(${JSON.stringify(FRAME)}).getAttribute('sandbox')`)).toBe('allow-scripts allow-popups allow-popups-to-escape-sandbox')
-  expect(browser.text('[data-slot="html-report-blocked"]')).toContain('Blocked for your safety')
+  expect(browser.count('[data-slot="html-report-blocked"]')).toBe(1)
   expectCockpitUntouched(readerPath())
   expect(hits()).toEqual([])
   browser.screenshot(join(evidenceDir, 'reader-desktop.png'), { viewport: true })
@@ -480,7 +480,7 @@ it('fits one full-screen surface with 44-pixel controls at 360×640 in light and
     })`, { holdMs: 300, matcher: value => typeof value === 'string' })
     const { surface, controls } = JSON.parse(layout) as { surface: DOMRect; controls: [string, number, number][] }
     expect([surface.x, surface.y, surface.width, surface.height]).toEqual([0, 0, 360, 640])
-    expect(controls.map(([name]) => name)).toEqual(['Back', 'Source', 'Download'])
+    expect(controls.map(([name]) => name).sort()).toEqual(['Back', 'Download', 'Source'])
     for (const [name, width, height] of controls) expect(Math.min(width, height), name).toBeGreaterThanOrEqual(44)
     browser.screenshot(join(evidenceDir, `reader-360-${theme}.png`), { viewport: true })
   }

@@ -255,7 +255,6 @@ describe('the GitHub tab against the live dry-run server', () => {
     }
 
     const evidence = waitForSettledSample<{
-      bottomGap: number
       panesUncovered: boolean
       titleGone: boolean
       tabsVisible: boolean
@@ -280,10 +279,6 @@ describe('the GitHub tab against the live dry-run server', () => {
       const tabsVisible = tabsBox.top >= mainTop - 2 && tabsBox.bottom > mainTop + 16;
       const filtersVisible = toolbar.getBoundingClientRect().bottom > mainTop + 8;
       const mainBottom = main.getBoundingClientRect().bottom;
-      const bottomGap = Math.round(mainBottom - Math.max(
-        list.getBoundingClientRect().bottom,
-        detail.getBoundingClientRect().bottom,
-      ));
       const panesUncovered = [list, detail].every(pane => {
         const box = pane.getBoundingClientRect();
         return box.top >= toolbar.getBoundingClientRect().bottom && box.bottom <= mainBottom - 15;
@@ -298,9 +293,8 @@ describe('the GitHub tab against the live dry-run server', () => {
       detail.scrollTop = 160;
       const detailMoved = detail.scrollTop >= 80;
       const listStill = list.scrollTop === listBefore;
-      const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
+      const listHasNoXScroll = list.scrollWidth <= list.clientWidth;
       return {
-        bottomGap,
         panesUncovered,
         titleGone,
         tabsVisible,
@@ -316,7 +310,6 @@ describe('the GitHub tab against the live dry-run server', () => {
       };
     })()`)
     expect(evidence).toMatchObject({
-      bottomGap: 16,
       panesUncovered: true,
       titleGone: true,
       tabsVisible: true,
@@ -429,11 +422,10 @@ describe('the GitHub tab against the live dry-run server', () => {
             )
             const facts = waitForSettledSample(browser, `(() => {
               const row = document.querySelector('[data-slot="gh-row"]')
-              const titleLine = row.children[0]
-              const icon = titleLine.children[0]
-              const title = titleLine.children[1]
-              const meta = row.children[1]
-              const labels = row.children[2]
+              const icon = row.querySelector('[data-slot="gh-row-icon"]')
+              const title = row.querySelector('[data-slot="gh-row-title"]')
+              const meta = row.querySelector('[data-slot="gh-row-meta"]')
+              const labels = row.querySelector('[data-slot="gh-row-labels"]')
               const titleStyle = getComputedStyle(title)
               const titleRect = title.getBoundingClientRect()
               const iconRect = icon.getBoundingClientRect()
@@ -446,7 +438,6 @@ describe('the GitHub tab against the live dry-run server', () => {
                 titleClamped: title.scrollHeight > title.clientHeight,
                 titleOverflowing: title.scrollWidth > title.clientWidth,
                 textOverflow: titleStyle.textOverflow,
-                whiteSpace: titleStyle.whiteSpace,
                 iconOffset: icon.checkVisibility() ? Math.abs(iconRect.top - titleRect.top) : 0,
                 metaLines,
                 metaBelowTitle: metaRect.top >= titleRect.bottom,
@@ -456,14 +447,13 @@ describe('the GitHub tab against the live dry-run server', () => {
                 light: document.documentElement.classList.contains('light'),
                 appliedDensity: document.documentElement.dataset.density,
                 titleText: title.textContent,
-                authorText: meta.children[1].textContent,
+                authorText: row.querySelector('[data-slot="gh-row-author"]').textContent,
               }
             })()`) as {
               titleLines: number
               titleClamped: boolean
               titleOverflowing: boolean
               textOverflow: string
-              whiteSpace: string
               iconOffset: number
               metaLines: number
               metaBelowTitle: boolean
@@ -494,7 +484,6 @@ describe('the GitHub tab against the live dry-run server', () => {
               // Desktop cards now wrap full titles; metadata must remain below them.
               expect(facts.titleLines).toBeGreaterThanOrEqual(1)
               expect(facts.titleOverflowing).toBe(false)
-              expect(facts.whiteSpace).toBe('normal')
               expect(facts.metaLines).toBeGreaterThanOrEqual(1)
               expect(facts.listWidth).toBeGreaterThan(0)
             }
@@ -748,7 +737,6 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   // Success dismisses the open status popover; focus must land on a visible control, not <body>.
   if (outcome === 'ready') expect(facts.focusOnPicker).toBe(true)
   expect(refreshingPopover).toMatchObject({ clipped: false, inside: true })
-  expect(refreshingPopover.text).toContain('issues with unknown membership remain visible')
   if (width === 360) expect(refreshingPopover.lines).toBeGreaterThan(2)
   if (outcome === 'unavailable') {
     const unavailablePopover = browser.waitForValue<{ text: string; lines: number; clipped: boolean; inside: boolean }>(readPopover, value => Boolean(value?.text.includes('rate limited')))

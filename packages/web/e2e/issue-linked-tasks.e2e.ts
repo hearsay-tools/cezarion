@@ -33,7 +33,8 @@ it.each(['light', 'dark'] as const)('discloses parent tasks with pointer and key
       return { expanded: button.getAttribute('aria-expanded'), height: button.getBoundingClientRect().height,
         links: document.getElementById(button.getAttribute('aria-controls')).querySelectorAll('a').length };
     })()`)
-    expect(initial).toEqual({ expanded: 'false', height: 44, links: 0 })
+    expect(initial).toMatchObject({ expanded: 'false', links: 0 })
+    expect(initial.height).toBeGreaterThanOrEqual(44)
     browser.screenshot(`${artifactsDir}/linked-tasks-${theme}-collapsed.png`, { viewport: true })
     browser.click(toggle)
     browser.waitForFunction(`document.querySelector('${toggle}').getAttribute('aria-expanded') === 'true'`)

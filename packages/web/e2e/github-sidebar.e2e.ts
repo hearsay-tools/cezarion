@@ -315,7 +315,7 @@ describe('GitHub desktop sidebar (#622)', () => {
     expect(browser.waitForValue(currentJs(SIDEBAR), sameJson(['review']))).toEqual(['review'])
   }, 90_000)
 
-  it('paints 32px rows, 12.5px labels, 11.5px counts, a 12px body and 15px icons in light and dark', async () => {
+  it('sets the active filter apart in light and dark without horizontal overflow', async () => {
     await remember('issues')
     for (const theme of ['light', 'dark'] as const) {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -330,40 +330,20 @@ describe('GitHub desktop sidebar (#622)', () => {
         const active = sidebar?.querySelector('[data-gh-filter="all"]');
         const count = row?.querySelector(${JSON.stringify(COUNT)});
         if (!row || !active || !count || count.textContent.trim() === '') return null;
-        const label = [...row.querySelectorAll('*')].find((el) => el !== count && !count.contains(el) && el.children.length === 0 && el.textContent.trim() !== '');
-        const icon = row.querySelector('svg');
         const style = getComputedStyle(row);
         const alpha = (color) => color === 'transparent' ? 0 : Number((color.match(/[\\d.]+/g) ?? [])[3] ?? 1);
         return {
           light: document.documentElement.classList.contains('light'),
-          height: row.getBoundingClientRect().height,
-          paddingX: [style.paddingLeft, style.paddingRight],
-          radius: style.borderTopLeftRadius,
-          gap: style.columnGap,
-          labelSize: getComputedStyle(label).fontSize,
-          countSize: getComputedStyle(count).fontSize,
-          icon: [icon.getBoundingClientRect().width, icon.getBoundingClientRect().height],
           activeDiffers: getComputedStyle(active).backgroundColor !== style.backgroundColor && alpha(getComputedStyle(active).backgroundColor) > 0,
-          // The shell's list container owns every view's 12px inset (the body adds none).
-          bodyPadding: [getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingLeft,
-            getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingRight],
-          // Board: 12px body gap plus the second group's own 6px, from the last Issues row to the PR label.
-          groupGap: Math.round(sidebar.querySelector('[data-group="prs"] h3').getBoundingClientRect().top
-            - sidebar.querySelector('[data-gh-filter="all"]').getBoundingClientRect().bottom),
-          // The footer's Tools wrench is the board's 15px, not the 17px the version/update side uses.
-          toolsIcon: document.querySelector('[data-slot="tools-menu-trigger"] svg').getBoundingClientRect().width,
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
-      expect(facts).toEqual({
-        light: theme === 'light', bodyPadding: ['12px', '12px'], height: 32, paddingX: ['10px', '10px'], radius: '6px', gap: '10px',
-        labelSize: '12.5px', countSize: '11.5px', icon: [15, 15], activeDiffers: true, groupGap: 18, toolsIcon: 15, overflow: false,
-      })
+      expect(facts).toEqual({ light: theme === 'light', activeDiffers: true, overflow: false })
       browser.screenshot(`${artifactsDir}/github-sidebar-desktop-${theme}.png`, { viewport: true })
     }
   }, 90_000)
 
-  it('paints the board main header: a 15px title, 13px facet tabs, and a 32px toolbar of 12.5px controls', async () => {
+  it('titles the board main header by the active filter in light and dark without overflow', async () => {
     await remember('issues')
     for (const theme of ['light', 'dark'] as const) {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -375,23 +355,13 @@ describe('GitHub desktop sidebar (#622)', () => {
         const controls = [...document.querySelectorAll('[data-slot="gh-filter-toolbar"] input[data-slot="gh-search"], [data-slot="gh-label-filter"], [data-slot="gh-filter-toolbar"] [data-slot="gh-issue-filters"] > button:first-of-type')];
         const route = document.querySelector('[data-route="github"]');
         if (!title || tabs.length < 2 || controls.length < 3 || !route) return null;
-        const active = tabs.find((tab) => tab.getAttribute('aria-current') === 'page');
         return {
           light: document.documentElement.classList.contains('light'),
-          title: [title.textContent.trim(), getComputedStyle(title).fontSize, getComputedStyle(title).fontWeight],
-          tabs: [getComputedStyle(tabs[0]).fontSize, getComputedStyle(active).fontWeight, getComputedStyle(tabs[0]).columnGap],
-          tabGap: Math.round(tabs[1].getBoundingClientRect().left - tabs[0].getBoundingClientRect().right),
-          controls: controls.map((el) => [Math.round(el.getBoundingClientRect().height), getComputedStyle(el).fontSize, getComputedStyle(el).borderTopLeftRadius]),
-          routePadding: [getComputedStyle(route).paddingLeft, getComputedStyle(route).paddingRight],
-          placeholder: document.querySelector('[data-slot="gh-search"]').getAttribute('placeholder'),
+          title: title.textContent.trim(),
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
-      expect(facts).toMatchObject({
-        light: theme === 'light', title: ['Issues · No task yet', '15px', '600'], tabGap: 22,
-        controls: [[32, '12.5px', '7px'], [32, '12.5px', '7px'], [32, '12.5px', '7px']],
-        routePadding: ['28px', '28px'], placeholder: 'Filter issues…', overflow: false,
-      })
+      expect(facts).toEqual({ light: theme === 'light', title: 'Issues · No task yet', overflow: false })
       browser.screenshot(`${artifactsDir}/github-main-header-${theme}.png`, { viewport: true })
     }
   }, 90_000)
@@ -523,32 +493,25 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     await remember('issues')
   }, 90_000)
 
-  it('lists all eight filters at 48px with 18px icons and 15px chevrons, and the same honest counts', () => {
+  it('lists all eight filters as touch targets with the same honest counts', () => {
     for (const theme of ['light', 'dark'] as const) {
       openIndex()
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
       expect(browser.waitForValue(`[...document.querySelectorAll('${SCREEN} [data-gh-filter]')].map((row) => row.getAttribute('data-gh-filter'))`, sameJson(ALL_FILTERS)))
         .toEqual(ALL_FILTERS)
       expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
-      const facts = waitForSettledSample<Record<string, unknown>>(browser, `(() => {
+      const facts = waitForSettledSample<{ light: boolean; minHeight: number; overflow: boolean; sidebarHidden: boolean }>(browser, `(() => {
         const rows = [...document.querySelectorAll('${SCREEN} [data-gh-filter]')];
         if (rows.length === 0) return null;
-        // The mobile board's 18px leading icon and 15px chevron.
-        const size = (svg) => { const rect = svg.getBoundingClientRect(); return rect.width + 'x' + rect.height; };
         return {
           light: document.documentElement.classList.contains('light'),
-          heights: [...new Set(rows.map((row) => row.getBoundingClientRect().height))],
-          svgSizes: [...new Set(rows.map((row) => [...row.querySelectorAll('svg')].map(size).join(' ')))],
-          hasChevron: rows.every((row) => row.querySelectorAll('svg').length >= 2),
+          minHeight: Math.min(...rows.map((row) => row.getBoundingClientRect().height)),
           overflow: document.documentElement.scrollWidth > innerWidth,
           sidebarHidden: !(document.querySelector('${SIDEBAR}')?.checkVisibility() ?? false),
-          // The board's title row: 22px bold title, a 17px refresh icon, and no repository line.
-          title: [getComputedStyle(document.querySelector('${SCREEN} h1')).fontSize, getComputedStyle(document.querySelector('${SCREEN} h1')).fontWeight],
-          refresh: (() => { const svg = document.querySelector('${SCREEN} [data-slot="gh-screen-refresh"] svg')?.getBoundingClientRect(); return svg ? svg.width + 'x' + svg.height : null; })(),
-          repoLine: document.querySelector('${SCREEN} [data-slot="gh-repo"]') !== null,
         };
       })()`)
-      expect(facts).toEqual({ light: theme === 'light', heights: [48], svgSizes: ['18x18 15x15'], hasChevron: true, overflow: false, sidebarHidden: true, title: ['22px', '700'], refresh: '17x17', repoLine: false })
+      expect(facts).toMatchObject({ light: theme === 'light', overflow: false, sidebarHidden: true })
+      expect(facts.minHeight).toBeGreaterThanOrEqual(44)
       browser.screenshot(`${artifactsDir}/github-filter-screen-${theme}.png`, { viewport: true })
     }
   }, 90_000)

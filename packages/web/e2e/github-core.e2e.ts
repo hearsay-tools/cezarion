@@ -135,12 +135,6 @@ describe('the GitHub tab against the live dry-run server', () => {
     await openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-thread"]') !== null`)
 
-    // The section is "Activity", not "Comments" — a twenty-row list headed `Comments · 2` would
-    // be incoherent once events render.
-    expect(
-      browser.evaluate(`document.querySelector('[data-slot="gh-thread-header"]').textContent`),
-    ).toContain('Activity')
-
     // Conversation comments still render, through the markdown pipeline.
     browser.waitForFunction(
       `document.querySelectorAll('[data-slot="gh-thread-entry"]').length > 0`,

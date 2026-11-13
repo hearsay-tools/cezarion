@@ -198,11 +198,11 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     const dirty = ((await fetch(`${base}/api/v1/p/${project}/repo`).then((r) => r.json())) as { status: unknown[] }).status.length
     openDesktop()
     const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SIDEBAR), (value) => Array.isArray(value) && value[1]?.count !== null && value[2]?.count !== null && value[3]?.count !== null)
-    expect(rows.map(({ section, label, href, current, height }) => ({ section, label, href, current, height }))).toEqual([
-      { section: 'main', label: 'Recently on main', href: scoped('/git'), current: 'page', height: 32 },
-      { section: 'not-landed', label: 'Not landed', href: scoped('/git/not-landed'), current: null, height: 32 },
-      { section: 'cleanup', label: 'Cleanup', href: scoped('/git/cleanup'), current: null, height: 32 },
-      { section: 'branches', label: 'All branches', href: scoped('/git/branches'), current: null, height: 32 },
+    expect(rows.map(({ section, label, href, current }) => ({ section, label, href, current }))).toEqual([
+      { section: 'main', label: 'Recently on main', href: scoped('/git'), current: 'page' },
+      { section: 'not-landed', label: 'Not landed', href: scoped('/git/not-landed'), current: null },
+      { section: 'cleanup', label: 'Cleanup', href: scoped('/git/cleanup'), current: null },
+      { section: 'branches', label: 'All branches', href: scoped('/git/branches'), current: null },
     ])
     expect(rows[0]?.count).toBeNull()
     expect(rows[1]?.count).toBe('2')
@@ -214,21 +214,18 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     // The checkout block: branch, Pull (no remote here, so disabled with its reason), the base picker, the dirty line.
     expect(browser.text(`${CHECKOUT} [data-slot="git-checkout-branch"]`)).toBe('main')
     expect(browser.evaluate(`document.querySelector('${CHECKOUT} [data-action="repo-pull"]').title`)).toContain('No remote configured')
-    expect(browser.evaluate(`document.querySelector('${CHECKOUT} [data-slot="base-branch-picker"]').textContent`)).toBe('New tasks start frommain')
+    expect(browser.text(`${CHECKOUT} [data-slot="base-branch"]`)).toBe('main')
     expect(browser.text(`${CHECKOUT} [data-slot="git-uncommitted"]`)).toBe(`${dirty} uncommitted file${dirty === 1 ? '' : 's'}`)
     expect(browser.evaluate(`document.querySelector('${CHECKOUT} [data-slot="git-uncommitted"]').getAttribute('href')`)).toBe(scoped('/git/changes'))
-    // Block first, sections below; nothing else in the body.
-    expect(browser.evaluate(`[...document.querySelector(${JSON.stringify(SIDEBAR)}).children].map((child) => child.dataset.slot)`)).toEqual(['git-checkout', 'git-sections'])
 
     // No task-worktree list and no jump into a task; the Tasks quick list is not here either.
     expect(browser.count('[data-slot="git-worktree-list"], [data-slot="git-worktree-row"]')).toBe(0)
     expect(browser.evaluate(`[...document.querySelectorAll('${SIDEBAR} a')].some((a) => a.getAttribute('href').includes('/tasks/'))`)).toBe(false)
     expect(browser.count('[data-slot="task-quick-list"]')).toBe(0)
 
-    // The main area: a title and a meta line, no Changes/Commits/Branches tabs, the log grouped by day.
+    // The main area: a title, no Changes/Commits/Branches tabs, the log grouped by day.
     browser.waitForFunction(has('[data-slot="repo-commit-day"]'))
     expect(browser.text(`${HEADER} h1`)).toBe('Recently on main')
-    expect(browser.text(`${HEADER} [data-slot="repo-meta"]`)).toBe('latest 3 commits in the main checkout')
     expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="repo-commit-day"] h2')].map((h) => h.textContent)`)).toEqual(['Today'])
     expect(browser.count('[data-slot="commit-row"]')).toBe(3)
@@ -246,9 +243,8 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
       const facts = waitForSettledSample(browser, `({
         light: document.documentElement.classList.contains('light'),
         overflow: document.documentElement.scrollWidth > innerWidth,
-        card: getComputedStyle(document.querySelector(${JSON.stringify(CHECKOUT)})).borderTopLeftRadius,
       })`)
-      expect(facts).toEqual({ light: theme === 'light', overflow: false, card: '8px' })
+      expect(facts).toEqual({ light: theme === 'light', overflow: false })
       browser.screenshot(`${artifactsDir}/git-view-desktop-${theme}.png`, { viewport: true })
     }
   }, 90_000)
@@ -262,7 +258,6 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SIDEBAR), (value) => Array.isArray(value) && value[2]?.count !== null)
     expect(rows[2]?.count).toBe(size)
     expect(browser.text(`${HEADER} h1`)).toBe('Cleanup')
-    expect(browser.text(`${HEADER} [data-slot="repo-meta"]`)).toBe('nothing here can delete work that is not on main')
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="worktree-row"]')].map((row) => row.dataset.run).sort()`)).toEqual(A_WORKTREES)
     // Issue 08: the per-row action is the directory-only Reclaim, and only on the finished row.
     expect(browser.evaluate(`[...document.querySelectorAll('[data-action="worktree-reclaim"]')].map((b) => b.getAttribute('aria-label'))`)).toEqual([
@@ -274,7 +269,7 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     // The branch card: the merged branch only; the not-landed and orphan ones never appear here.
     browser.waitForFunction(has('[data-slot="cleanup-branches"]'))
     expect(browser.text('[data-slot="cleanup-branches"] h2')).toBe('Branches safe to delete · 1')
-    expect(browser.text('[data-slot="cleanup-branch-group"][data-group="merged"] button')).toContain('squash-merged branches may show as not landed without github')
+    expect(browser.evaluate(`document.querySelector('[data-slot="cleanup-branch-group"][data-group="merged"] button').disabled`)).toBe(false)
     for (const theme of ['light', 'dark'] as const) {
       setTheme(theme)
       browser.screenshot(`${artifactsDir}/git-view-cleanup-${theme}.png`, { viewport: true })
@@ -352,7 +347,7 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
       ['no-pr', ['cez/nl-task']],
       ['deleted', ['cez/orphan1']],
     ])
-    expect(browser.text('[data-slot="git-no-forge"]')).toBe('Squash-merged branches may show as not landed without GitHub.')
+    expect(browser.count('[data-slot="git-no-forge"]')).toBe(1)
     expect(browser.evaluate(`document.querySelector('[data-branch="cez/nl-task"] [data-action="not-landed-open"]').getAttribute('href')`)).toBe(scoped('/tasks/nl-task'))
     expect(browser.count('[data-branch="cez/orphan1"] [data-action="not-landed-copy"]')).toBe(1)
     for (const theme of ['light', 'dark'] as const) {

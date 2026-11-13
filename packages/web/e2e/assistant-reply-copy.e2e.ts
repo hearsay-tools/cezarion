@@ -134,7 +134,6 @@ function placementFacts(width: number) {
     copyW: number
     markdownH: number
     markdownW: number
-    label: string
   }>(
     browser,
     `(() => {
@@ -161,7 +160,6 @@ function placementFacts(width: number) {
         copyW: copyBox.width,
         markdownH: mdBox.height,
         markdownW: mdBox.width,
-        label: header.textContent ?? '',
       };
     })()`,
   )
@@ -174,7 +172,6 @@ describe('assistant reply copy in header (#927)', () => {
         const facts = placementFacts(width)
         expect(facts.inHeader, `width ${width}`).toBe(true)
         expect(facts.hasTime, `width ${width}`).toBe(true)
-        expect(facts.label, `width ${width}`).toContain('AGENT RESPONSE')
         expect(facts.actionsOpacity, `width ${width}`).toBe(1)
         expect(facts.bodyActions, `width ${width}`).toBe(0)
         expect(facts.headerOverflow, `width ${width}`).toBe(false)

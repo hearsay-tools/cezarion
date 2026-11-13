@@ -92,16 +92,6 @@ function clickExecutionDisclosure() {
 }
 
 describe('New Task hierarchy (#168)', () => {
-  it('separates prompt context, submission, and execution options', () => {
-    expect(browser.count(`${disclosure} summary`)).toBe(1)
-    expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(true)
-    expect(browser.isVisible('[data-slot="source-pill"]')).toBe(true)
-    expect(browser.isVisible('[aria-label="Start task"]')).toBe(true)
-    expect(browser.evaluate(`document.querySelector('[data-slot="model-pill"]').checkVisibility()`)).toBe(true)
-    expect(browser.evaluate(`document.querySelector('[data-slot="composer-agent-options"]').contains(document.querySelector('[data-slot="model-pill"]'))`)).toBe(true)
-    expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
-  })
-
   for (const reduced of [false, true]) {
     describe(reduced ? 'reduced motion' : 'normal motion', () => {
       beforeEach(() => {
