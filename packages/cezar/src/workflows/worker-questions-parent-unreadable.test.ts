@@ -11,7 +11,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   useWorkerQuestionsFixture();
 
 // The worker's own routing marker keeps the question the parent's when the parent's ledger cannot
-  // be read; recovery cannot route it there again, so Cezar answers it and no human does.
+  // be read; recovery cannot route it there again, so Squawk answers it and no human does.
   it('answers a routed question for the parent when the parent record cannot be read after a restart', async () => {
     const f = await askedPair();
     f.close();
@@ -21,7 +21,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     for (const run of disk) if (run.id === f.p.id) run.status = 'unknown-status';
     await restart(false, disk, events);
     expect(store.isUnreadable(f.p.id)).toBe(true);
-    // The mock asks again after the answer; each question it raises gets Cezar's answer.
+    // The mock asks again after the answer; each question it raises gets Squawk's answer.
     await until(() => squawkAnswered(f.w.id).length >= 1);
     expect(eventsOf(f.w.id, 'worker-question-undelivered')[0]).toMatchObject({ askSeq, reason: 'the parent record cannot be read' });
     expect(squawkAnswered(f.w.id)[0]).toMatchObject({ askSeq });
@@ -29,8 +29,8 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     noHumanCard(f.w.id);
   });
 
-// A reply the parent sent before its record became unreadable is retired before Cezar answers, so
-  // the worker takes one answer: neither bundled with Cezar's nor replayed after it.
+// A reply the parent sent before its record became unreadable is retired before Squawk answers, so
+  // the worker takes one answer: neither bundled with Squawk's nor replayed after it.
   it('retires an accepted parent reply before answering for a parent whose record cannot be read', async () => {
     const f = await askedPair();
     f.close();
@@ -51,7 +51,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     noHumanCard(f.w.id);
   });
 
-// A reply a live inbox claim holds cannot be retired; Cezar does not answer beside it.
+// A reply a live inbox claim holds cannot be retired; Squawk does not answer beside it.
   it('does not answer for an unreadable parent while a claimed parent reply stays queued', async () => {
     const f = await askedPair();
     try {
@@ -79,9 +79,9 @@ it('refuses human input on a routed question whose parent record cannot be read'
     } finally { vi.restoreAllMocks(); f.close(); }
   });
 
-// Cezar's answer queued for a routed question still answers it once the parent's ledger reads
+// Squawk's answer queued for a routed question still answers it once the parent's ledger reads
   // again (here it always reads): the parent-reply lookup must not hide it.
-  it("delivers Cezar's queued answer to a routed question whose parent reads", async () => {
+  it("delivers Squawk's queued answer to a routed question whose parent reads", async () => {
     const f = await askedPair();
     try {
       const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;

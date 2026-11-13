@@ -17,7 +17,7 @@ export interface ClaudeModelDiscoveryOptions {
  * One entry of the CLI's `list_models` answer. `value` is what `--model` accepts (an alias like
  * `sonnet`, a pinned id like `claude-fable-5`, or a context-window variant like `opus[1m]`);
  * `resolvedModel` is what that currently resolves to and is deliberately NOT surfaced — pinning
- * cezar to a resolved id would re-create the drift this issue is about. Unknown fields pass
+ * Squawk to a resolved id would re-create the drift this issue is about. Unknown fields pass
  * through so a CLI that grows the payload does not fail the whole discovery.
  */
 const modelSchema = z
@@ -56,7 +56,7 @@ export const KILL_GRACE_MS = 2_000;
 const REQUEST_ID = 'cez-list-models-1';
 
 /**
- * The `value` that stands for "whatever the CLI would pick on its own". cezar already spells that
+ * The `value` that stands for "whatever the CLI would pick on its own". Squawk already spells that
  * `auto` (no `--model` flag at all), so surfacing the CLI's own entry too would put two rows in
  * the picker meaning the same thing — and `default` is a picker token, not necessarily something
  * `--model` accepts.
@@ -163,7 +163,7 @@ async function readCatalog(child: ChildProcessWithoutNullStreams): Promise<Model
     if (response.request_id !== undefined && response.request_id !== REQUEST_ID) continue;
     if (response.subtype !== 'success') {
       // An older CLI answers `Unsupported control request subtype: list_models` here. That is an
-      // unavailable catalog, not a broken cezar — the reason is never surfaced verbatim.
+      // unavailable catalog, not a broken Squawk — the reason is never surfaced verbatim.
       throw new Error('Claude model discovery is unsupported by this CLI');
     }
     return toModelOptions(response.response);

@@ -2,7 +2,7 @@ import { parseConfigContent } from '../agent-config/model-settings/shared.ts';
 
 /**
  * The OpenCode runtime config a session already carries (`OPENCODE_CONFIG_CONTENT`), read from
- * its extra env first, then the process env; `{}` when none is supplied. cezar merges its own
+ * its extra env first, then the process env; `{}` when none is supplied. Squawk merges its own
  * entries into it, and OpenCode gives this config precedence over its config files. Throws
  * `error` when the supplied text is not a JSONC object, or when `field` is present and fails
  * `valid`.

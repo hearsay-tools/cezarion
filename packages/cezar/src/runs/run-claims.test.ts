@@ -34,7 +34,7 @@ const setClaimToken = (token: string | null) => {
   try { raw.prepare('UPDATE run_claims SET start_token = ?').run(token); } finally { raw.close(); }
 };
 
-/** Another cezar process: opens the project, starts a run and keeps running until killed. */
+/** Another Squawk process: opens the project, starts a run and keeps running until killed. */
 async function startOwner(): Promise<{ runId: string; pid: number }> {
   const script = join(dataDir, 'owner.mts');
   writeFileSync(script, `

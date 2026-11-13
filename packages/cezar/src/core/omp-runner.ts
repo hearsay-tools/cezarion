@@ -44,12 +44,13 @@ import {
 } from './omp-ui-mapper.js';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { productName } from '../home/display.ts';
 
 /**
  * OMP's built-in tool names at the pinned version (`src/tools/builtin-names.ts`, oh-my-pi
  * v18.4.11; the real binary lists the same 30 in its `--tools` rejection). `--tools` is an
  * allowlist validated against the registry, and an unknown name exits 2 before any frame, so
- * only these, cezar's mapped names and `mcp__*` ever reach it.
+ * only these, Squawk's mapped names and `mcp__*` ever reach it.
  */
 export const OMP_BUILTIN_TOOL_NAMES: readonly string[] = [
   'read', 'bash', 'edit', 'ast_grep', 'ast_edit', 'ask', 'debug', 'ida', 'eval', 'github',
@@ -67,7 +68,7 @@ const OMP_DEFAULT_TOOL_NAMES: readonly string[] = [
   'read', 'bash', 'edit', 'eval', 'glob', 'grep', 'task', 'wait', 'todo', 'web_search', 'write',
 ];
 
-/** cezar tool names with an OMP equivalent; OMP built-ins and `mcp__*` pass through as-is. */
+/** Squawk tool names with an OMP equivalent; OMP built-ins and `mcp__*` pass through as-is. */
 const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
   Read: 'read',
   Edit: 'edit',
@@ -88,7 +89,7 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
  * support). Held against the mock's recorded argv and RPC by the harness parity matrix.
  */
 export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
-  squawkTools: { honored: true, via: 'explicit CI --extension; the cezar tools admitted when --tools is set' },
+  squawkTools: { honored: true, via: `explicit CI --extension; the ${productName('Cezar')} tools admitted when --tools is set` },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
@@ -117,7 +118,7 @@ export interface OmpToolSelection {
 }
 
 /**
- * Maps a grant's cezar tool names onto OMP's `--tools` allowlist (spec § Tools). Fails closed: a
+ * Maps a grant's Squawk tool names onto OMP's `--tools` allowlist (spec § Tools). Fails closed: a
  * non-empty request that maps to nothing disables every built-in rather than widening to OMP's
  * defaults, and every narrowing (`bashAllowlist`, user exclusions) only ever removes names.
  */
@@ -125,7 +126,7 @@ export function ompTools(
   grant: ToolGrant,
   opts: {
     squawkTools?: boolean;
-    /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
+    /** Env the extension will read: `CEZ_PREVIEW=1` there decides which Squawk tools it registers. */
     env?: NodeJS.ProcessEnv | undefined;
     /** OMP names the user's settings disabled (Ruling 13), removed from the list; never added to it. */
     exclude?: readonly string[] | undefined;
@@ -164,7 +165,7 @@ const MCP_PREFIX = 'mcp__';
  * repeats its server's prefix stripped of it. `--tools` validation matches exact names, so the
  * Claude spelling would exit 2. A name without a second `__` is already OMP's spelling (OMP
  * folds every `__` in it) and passes verbatim. OMP shortens names past 64 characters with a
- * Bun hash cezar cannot reproduce; such a name stays unknown and the startup refusal drops it.
+ * Bun hash Squawk cannot reproduce; such a name stays unknown and the startup refusal drops it.
  */
 function ompMcpToolName(name: string): string {
   const rest = name.slice(MCP_PREFIX.length);

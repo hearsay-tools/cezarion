@@ -52,7 +52,7 @@ describe('pi agent input steering (#505)', () => {
     await waitUntil(() => events.some(e => e.type === 'turn-end'));
     expect(consumed).toEqual([['in-1']]);
     expect(events.filter(e => e.type === 'turn-end')).toEqual([{ type: 'turn-end' }]);
-    // Cezar's follow-up kind is never mapped to Pi's delayed followUp.
+    // Squawk's follow-up kind is never mapped to Pi's delayed followUp.
     expect(prompts().find(p => p.userText === 'mid-turn update')?.streamingBehavior).toBe('steer');
     session.end(); await session.result;
   });

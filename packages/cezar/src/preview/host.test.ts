@@ -724,7 +724,7 @@ describe('PreviewHost', () => {
     expect(devServers[0]!.stop).toHaveBeenCalledWith('idle');
     expect(devServers).toHaveLength(1);
     expect(store.stateEvents().at(-1)).toEqual({ type: 'preview.server-state', port: 5173, state: 'stopped', reason: 'idle' });
-    // The adopted server is not cezar's to stop: it is still served on the next open.
+    // The adopted server is not Squawk's to stop: it is still served on the next open.
     const back = fakeViewer();
     await host.open(ctx, back, { port: 3000 });
     expect(stages(back)).not.toContain('needs-approval');

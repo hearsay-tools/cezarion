@@ -82,7 +82,7 @@ async function mcpToolGate(tool) {
     mcpToolApprovalRequest(key.slice('mcp_servers.'.length), tool));
   return reply.result?.action === 'accept';
 }
-// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that Squawk tool over
 // the thread's MCP config (behind Codex's approval gate) before its turn ends. Returns '' or a
 // note for the text.
 const tools = () => import('./mock-ci-tool.mjs');
@@ -568,7 +568,7 @@ async function replyWithChildTurn(turnText, msg) {
 }
 
 // hearsay-tools/cezarion#1294: another server's tool approval by default; `-own` names
-// cezar's own server, `-form` is a real form (no approval), `-null-turn` has no turn id.
+// Squawk's own server, `-form` is a real form (no approval), `-null-turn` has no turn id.
 function replyWithMcpApproval(turnText, msg, mcpApproval) {
   pendingApprovalTurn = 'turn_mock_1';
   const variant = mcpApproval[1];
@@ -599,7 +599,7 @@ async function replyWithApproval(turnText, msg) {
 
 function emitApprovalRequest(turnText) {
   const unsupported = turnText.includes('mock:approval-unsupported');
-  // hearsay-tools/cezarion#1266 P6: no itemId, so cezar answers it with a JSON-RPC error.
+  // hearsay-tools/cezarion#1266 P6: no itemId, so Squawk answers it with a JSON-RPC error.
   const malformed = turnText.includes('mock:approval-malformed');
   emit({ id: unsupported ? 'approval-unsupported-1' : 'approval-1',
     method: unsupported ? 'item/unsupported/requestApproval' : 'item/commandExecution/requestApproval',

@@ -207,7 +207,7 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     expect(entryOf(a, entry.id)).toMatchObject({ phase: WAIT_PHASE.open });
   });
 
-  it('a resolution with the wake budget spent is not admitted: the wait is cancelled and Cezar\'s budget question opens', async () => {
+  it('a resolution with the wake budget spent is not admitted: the wait is cancelled and Squawk\'s budget question opens', async () => {
     const { say } = conversations();
     const { a, b, entry } = await parkedOnPeer();
     store.updateRun(a, { automaticWakes: MAX_AUTO_CONTINUES });

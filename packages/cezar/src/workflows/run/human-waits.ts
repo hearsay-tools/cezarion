@@ -88,7 +88,7 @@ export class HumanWaits {
    * Show a human wait outside its turn end (hearsay-tools/cezarion#1234): at a boundary, at the
    * budget, or from the failure, close and recovery paths, where no turn end will. A card raises
    * `ask.requested` and goes to a worker's parent; a wait without one raises the human gate. A
-   * question already pending is the one it waits on. A wait already shown is left alone. Cezar's
+   * question already pending is the one it waits on. A wait already shown is left alone. Squawk's
    * own wait is shown as its note instead (`showSquawkHumanWait`).
    */
   surfaceHumanWait(runId: string, state: ActiveRun | undefined, wait = this.unsurfacedHumanWait(runId)): void {
@@ -110,7 +110,7 @@ export class HumanWaits {
   }
 
   /**
-   * Cezar's own human wait (`no-wait`, `budget`) is shown as a note, recorded as its `askSeq`, and
+   * Squawk's own human wait (`no-wait`, `budget`) is shown as a note, recorded as its `askSeq`, and
    * raises no human gate (hearsay-tools/cezarion#1234). The agent asked nothing: the run waits for
    * the user as the plain park did before these waits, so worker messages still wake it and its
    * wait registrations, `cezar_done` and the user's Finish are not refused. The user's message
@@ -128,7 +128,7 @@ export class HumanWaits {
     catch (error) { console.warn(`${logPrefix()} human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
-  /** Cezar waited on the user only because the agent had nothing to wait on: the agent's own wait
+  /** Squawk waited on the user only because the agent had nothing to wait on: the agent's own wait
    *  or question replaces that wait (hearsay-tools/cezarion#1234). It also ends with the session
    *  that opened it, so a close, an idle close or a failure settles as the plain park did. */
   withdrawSquawkHumanWaits(runId: string): void {
@@ -137,7 +137,7 @@ export class HumanWaits {
     this.host.waitEngine.cancel(runId, ids, { onCommitFailure: 'skip', log: `${logPrefix()} human wait checkpoint failed` });
   }
 
-  /** Whether a closing session leaves the run waits to park on. Cezar's own human waits end with the
+  /** Whether a closing session leaves the run waits to park on. Squawk's own human waits end with the
    *  session, even when the store refused their cancellation (`withdrawSquawkHumanWaits`). */
   holdsAgentWaits(runId: string): boolean {
     return (this.context.store.getRun(runId)?.waits ?? []).some(wait => !isSquawkHumanWait(wait));

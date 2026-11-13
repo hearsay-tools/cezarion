@@ -1,10 +1,10 @@
-/** Every Cursor CLI process cezar starts passes this hidden commander option, so starting
+/** Every Cursor CLI process Squawk starts passes this hidden commander option, so starting
  * one never self-updates the installed CLI (hearsay-tools/cezarion#1257). 2026.10.01-e373342
  * and 2026.10.16-e3cb207 define it with `hideHelp`; `--help` cannot show whether a build has it. */
 export const CURSOR_DISABLE_AUTO_UPDATE = '--disable-auto-update';
 
 /** Binaries that exited with commander's unknown-option error for the flag. Process-lifetime:
- * the CLI can only change under a binary when something other than cezar updates it. */
+ * the CLI can only change under a binary when something other than Squawk updates it. */
 const rejecting = new Set<string>();
 
 export function usesCursorAutoUpdateFlag(bin: string): boolean {

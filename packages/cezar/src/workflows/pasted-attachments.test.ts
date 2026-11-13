@@ -96,7 +96,7 @@ describe('attachment media types, extensions and blocks (#950)', () => {
     expect(attachmentExtension('text/plain')).toBe('txt');
     expect(attachmentExtension('text/markdown')).toBe('md');
     expect(attachmentExtension('text/x-markdown')).toBe('md');
-    // The pre-existing catch-all for an image type cezar does not name, kept so an SVG paste
+    // The pre-existing catch-all for an image type Squawk does not name, kept so an SVG paste
     // still lands exactly where it always did.
     expect(attachmentExtension('image/svg+xml')).toBe('img');
   });

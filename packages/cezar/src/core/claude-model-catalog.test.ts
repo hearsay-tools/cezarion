@@ -118,7 +118,7 @@ describe('discoverClaudeModels', () => {
     ]);
   });
 
-  it('drops the CLI\'s own "default" row, which cezar already spells `auto`', async () => {
+  it('drops the CLI\'s own "default" row, which Squawk already spells `auto`', async () => {
     const { promise } = run((f) =>
       f.write(answer([
         { value: 'default', displayName: 'Default (recommended)' },

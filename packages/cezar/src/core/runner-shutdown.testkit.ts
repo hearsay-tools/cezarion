@@ -272,9 +272,9 @@ function processGroups(backend: RunnerId, it: typeof registerTest = registerTest
 
 function exitReaping(backend: RunnerId, it: typeof registerTest = registerTest): void {
 
-    // hearsay-tools/cezarion#1286: cezar signals nothing when the agent exits on EOF, so the stdio MCP
+    // hearsay-tools/cezarion#1286: Squawk signals nothing when the agent exits on EOF, so the stdio MCP
     // servers and background jobs it left in its group are ended by the reap after its exit.
-    // OpenCode's runner and Cursor print end by a cezar signal on end (S27/S28's path), so their
+    // OpenCode's runner and Cursor print end by a Squawk signal on end (S27/S28's path), so their
     // cells do not reach the reap; S31 does.
     it.skipIf(process.platform === 'win32')(`${backend} ${ownExit.id} ${ownExit.name}`, async () => {
       const signalsOnEnd = backend === 'opencode' || backend === 'cursor';
@@ -297,7 +297,7 @@ function exitReaping(backend: RunnerId, it: typeof registerTest = registerTest):
     }, 50_000);
 
     // hearsay-tools/cezarion#1286: a leader killed from outside (a crash, the OOM killer) gets no
-    // signal from cezar, so only what cezar does after its exit ends what it left in its group.
+    // signal from Squawk, so only what Squawk does after its exit ends what it left in its group.
     it.skipIf(process.platform === 'win32')(`${backend} ${outsideKill.id} ${outsideKill.name}`, async () => {
       await withChild(backend, async (_session, child, _events, settled, cwd) => {
         const { group, session: setsid } = await leftovers(cwd);

@@ -2,6 +2,7 @@ import { WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, STEP_NUDGE_SUFFIX, type TurnEndDecision, type TurnEndFacts } from './turn-end.ts';
+import { productName } from '../home/display.ts';
 
 /** A quiet final turn end whose owed input was already tried: nothing taken, nothing owed. */
 const quiet: TurnEndFacts = {
@@ -34,7 +35,7 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     ['readiness outranks an open wait', { nudgePending: true, agentWaits: true }, { kind: 'defer' }],
     ['an open agent wait parks', { agentWaits: true }, { kind: 'park' }],
     ['a question parks', { question: true }, { kind: 'park' }],
-    ['Cezar\'s own human wait parks', { squawkHumanWait: true }, { kind: 'park' }],
+    [`${productName('Cezar')}'s own human wait parks`, { squawkHumanWait: true }, { kind: 'park' }],
     // hearsay-tools/cezarion#1620: an earlier workflow step completes only on a done.
     ['an earlier step\'s done completes it', { done: true, stepScope: true }, { kind: 'done' }],
     ['an earlier step parks on its wait', { agentWaits: true, stepScope: true }, { kind: 'park' }],
@@ -56,7 +57,7 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     ['a refused done beside input in flight and queued input takes the input', { ...live, inputInFlight: true, inputQueued: true, inputTaken: undefined }, { kind: 'take-input', refused: true }],
     ['a refused done beside queued input that is taken runs it', { ...live, inputQueued: true, inputTaken: true }, { kind: 'input', refused: true }],
     ['a refused done is never a done', { ...live, inputQueued: true }, { ...noWaitNudge, refused: true }],
-    ['a refused done withdraws Cezar\'s human wait and nudges', { ...live, squawkHumanWait: true }, completionNudge],
+    [`a refused done withdraws ${productName('Cezar')}'s human wait and nudges`, { ...live, squawkHumanWait: true }, completionNudge],
     ['a refused done gets the completion nudge', live, completionNudge],
     ['a refused done by settled workers gets the completion nudge', settled, completionNudge],
     ['owed input is not tried before the refusal decides', { ...live, inputTaken: undefined }, completionNudge],

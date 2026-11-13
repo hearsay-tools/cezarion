@@ -22,7 +22,7 @@ export interface ActiveRun {
   readonly children: ChildrenGroup;
 }
 
-/** Run Cezar's own write into the session: a parent turn the runner starts during it is Cezar's
+/** Run Squawk's own write into the session: a parent turn the runner starts during it is Squawk's
  *  (hearsay-tools/cezarion#2431). Claude emits `turn.started` inside the write itself. */
 export function writeInput<T>(state: ActiveRun, write: () => T): T {
   return state.inputState.writeInput(write);

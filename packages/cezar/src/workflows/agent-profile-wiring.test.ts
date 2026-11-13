@@ -223,7 +223,7 @@ describe('RunManager agent-profile resolution', () => {
       });
 
       it('lets a host-exported value reach the default account, and a named account replace it', async () => {
-        // `agent-env.ts` passes PI_* to pi and OMP_*/PI_* to omp, so a value the cezar process
+        // `agent-env.ts` passes PI_* to pi and OMP_*/PI_* to omp, so a value the Squawk process
         // carries reaches every default session; a named account's `extraEnv` is applied after it.
         await addAccount('work', provider, folder());
         const source = { PATH: '/usr/bin', [variable]: hostValue } as NodeJS.ProcessEnv;

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { explicitToolGrant, UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { productName } from '../home/display.ts';
 
 // Pass-through: every test spawns the real child; a test that needs the child's own streams
 // (to fail one) reads it from here.
@@ -69,7 +70,7 @@ describe('ompTools', () => {
     expect(ompTools(explicitToolGrant(['mcp__github__create_issue', 'mcp__github_create_issue']), {}).tools).toEqual(['mcp__github_create_issue']);
   });
 
-  it('maps cezar names, keeps OMP built-ins and mcp__ names, drops the rest', () => {
+  it('maps Squawk names, keeps OMP built-ins and mcp__ names, drops the rest', () => {
     expect(ompTools(explicitToolGrant(['Subagent', 'TodoWrite', 'WebFetch', 'lsp', 'mcp__srv_tool', 'NotebookEdit']), {})).toEqual({
       flag: 'tools',
       tools: ['task', 'todo', 'lsp', 'mcp__srv_tool'],
@@ -115,7 +116,7 @@ describe('ompTools', () => {
     expect(ompTools(UNSET_TOOL_GRANT, { exclude: ['todo'] })).toEqual({ flag: null, tools: [], dropped: [] });
   });
 
-  it('exclude narrows before the cezar tools are appended, so it never turns --no-tools into a CI-only list', () => {
+  it('exclude narrows before the Squawk tools are appended, so it never turns --no-tools into a CI-only list', () => {
     expect(ompTools(explicitToolGrant(['TodoWrite']), { squawkTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
     expect(ompTools(explicitToolGrant(['Read', 'TodoWrite']), { squawkTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
   });
@@ -138,13 +139,13 @@ describe('ompTools', () => {
     expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
-  it('bashAllowlist drops bash; squawkTools appends the cezar tools', () => {
+  it('bashAllowlist drops bash; squawkTools appends the Squawk tools', () => {
     expect(ompTools(explicitToolGrant(['Read', 'Bash'], ['npm test']), {}).tools).toEqual(['read']);
     expect(ompTools(explicitToolGrant(['Read', 'Bash'], []), {}).tools).toEqual(['read', 'bash']);
     expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
   });
 
-  it('fails closed when every granted tool is narrowed away, and adds no cezar tool to --no-tools', () => {
+  it('fails closed when every granted tool is narrowed away, and adds no Squawk tool to --no-tools', () => {
     expect(ompTools(explicitToolGrant(['Bash'], ['npm test']), { squawkTools: true })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
   });
 
@@ -829,7 +830,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     });
     expect(lines('commands.ndjson').at(-1)).toEqual({ type: 'abort' });
     expect(events.filter(event => event.type === 'error')).toEqual([]);
-    expect(events).toContainEqual({ type: 'note', message: expect.stringMatching(/terminated by cezar \(code 143\)/) });
+    expect(events).toContainEqual({ type: 'note', message: expect.stringMatching(new RegExp(String.raw`terminated by ${productName('Cezar')} \(code 143\)`)) });
     expect(events.at(-1)).toEqual({ type: 'done' });
   });
 
@@ -1292,7 +1293,7 @@ await import(${JSON.stringify(MOCK)});
     expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('ANTHROPIC_API_KEY, OPENAI_API_KEY') });
   });
 
-  it('a child killed by a signal cezar did not send fails the run', async () => {
+  it('a child killed by a signal Squawk did not send fails the run', async () => {
     await expect(new OmpRunner({ bin: MOCK }).run(spec('mock:self-kill'))).rejects.toThrow(/omp CLI was killed by signal SIGKILL/);
   });
 
@@ -1304,21 +1305,21 @@ await import(${JSON.stringify(MOCK)});
     );
     await session.result;
     expect(turnEnds(events)).toBe(1);
-    expect(events.some(event => event.type === 'note' && /terminated by cezar \(SIGKILL\)/.test(event.message))).toBe(true);
+    expect(events.some(event => event.type === 'note' && new RegExp(String.raw`terminated by ${productName('Cezar')} \(SIGKILL\)`).test(event.message))).toBe(true);
     // Two short grace periods plus the auto-end delay: nowhere near the mock's own 12 s backstop.
     expect(Date.now() - started).toBeLessThan(8_000);
   });
 
   // The killed-by-signal branch also checks !terminatedBySquawk; the teardown branch before it
-  // already takes every signal exit cezar caused (hearsay-tools/cezarion#2002 pin).
-  it('a SIGKILL cezar sent is a teardown note, never an error', async () => {
+  // already takes every signal exit Squawk caused (hearsay-tools/cezarion#2002 pin).
+  it('a SIGKILL Squawk sent is a teardown note, never an error', async () => {
     const events: AgentEvent[] = [];
     const session = new OmpRunner({ bin: MOCK, killGraceMs: 100 }).startSession(
       spec('mock:linger'), event => events.push(event), { autoEndAfterFirstTurn: true },
     );
     await expect(session.result).resolves.toBeDefined();
-    expect(events.filter(event => event.type === 'note' && event.message.includes('terminated by cezar'))).toEqual([
-      { type: 'note', message: 'omp CLI did not exit on its own after close; terminated by cezar (SIGKILL)' },
+    expect(events.filter(event => event.type === 'note' && event.message.includes(`terminated by ${productName('Cezar')}`))).toEqual([
+      { type: 'note', message: `omp CLI did not exit on its own after close; terminated by ${productName('Cezar')} (SIGKILL)` },
     ]);
     expect(events.filter(event => event.type === 'error')).toEqual([]);
     expect(events.at(-1)).toEqual({ type: 'done' });

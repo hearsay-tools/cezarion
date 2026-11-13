@@ -1,7 +1,7 @@
 // Each native mock's provider failures, one error class each, in that runner's own wire text
 // (hearsay-tools/squawk#3337). `provider` is a request the provider rejects as invalid (HTTP 400):
 // no retry can succeed, so the run fails. The other kinds are failures the same request can survive
-// later (`core/provider-error.ts`), so Cezar holds the run and retries it with back-off. A rate
+// later (`core/provider-error.ts`), so Squawk holds the run and retries it with back-off. A rate
 // limit names no reset time: one that does is a usage limit (`core/usage-limit.ts`).
 //
 // Claude Code puts the API status and body in an `is_error` result.

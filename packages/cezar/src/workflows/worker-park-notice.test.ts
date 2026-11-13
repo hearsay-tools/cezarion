@@ -10,6 +10,7 @@ import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { thenSay, toolCall } from './waits-parity.testkit.ts';
 import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, semaphore, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { productName } from '../home/display.ts';
 
 /** hearsay-tools/cezarion#1327: the single-runner paths of the park notice. The RUNNER_IDS cells
  *  U3n, U3r and U3d (`waits-parity-mixed-cells.testkit.ts`) pin it on every native wire. */
@@ -21,7 +22,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     return delegation?.role === 'root' ? delegation.conversation?.messages ?? [] : [];
   };
   const notices = (parentId: string, workerId: string) => conversationOf(parentId).filter(message =>
-    message.senderRunId === workerId && message.kind === 'progress' && message.text.startsWith('Cezar notice: '));
+    message.senderRunId === workerId && message.kind === 'progress' && message.text.startsWith(`${productName('Cezar')} notice: `));
   const parked = (id: string) => store.getRun(id)?.status === 'waiting';
   const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
   /** A root parent, parked, that may message its workers, with a delegation service for both. */
@@ -46,7 +47,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     // The crash: the worker parks, and its notice is never committed.
     const commit = store.commitConversation.bind(store);
     const lostNotice = vi.spyOn(store, 'commitConversation').mockImplementation((...args) => {
-      if (args[2]?.input.text.startsWith('Cezar notice: ')) return;
+      if (args[2]?.input.text.startsWith(`${productName('Cezar')} notice: `)) return;
       return commit(...args);
     });
     manager.enqueueOwnedRun(w.id);
@@ -127,7 +128,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const { p, service, callerOf } = await family();
     const commit = store.commitConversation.bind(store);
     const notify = vi.spyOn(store, 'commitConversation').mockImplementation((...args) => {
-      if (args[2]?.input.text.startsWith('Cezar notice: ')) return;
+      if (args[2]?.input.text.startsWith(`${productName('Cezar')} notice: `)) return;
       return commit(...args);
     });
     const w = await parkedWorker(p.id, 'Parked behind a peer.');

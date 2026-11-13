@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -179,7 +180,7 @@ describe('worktree setup copy', () => {
 
   it('tells the agent setup is done', () => {
     expect(worktreeSetupAgentNote(done)).toBe(
-      'Cezar prepared this worktree before your session started: `npm ci`, `cp a b` (41s). Dependencies are installed; do not repeat this setup.',
+      `${productName('Cezar')} prepared this worktree before your session started: \`npm ci\`, \`cp a b\` (41s). Dependencies are installed; do not repeat this setup.`,
     );
   });
 
@@ -191,7 +192,7 @@ describe('worktree setup copy', () => {
 
   it('tells the agent setup failed, with the skipped commands and the output', () => {
     expect(worktreeSetupAgentNote(exited)).toBe(
-      "Cezar's worktree setup did not complete before your session started: `npm ci` exited 1 after 12s. " +
+      `${productName('Cezar')}'s worktree setup did not complete before your session started: \`npm ci\` exited 1 after 12s. ` +
         'The remaining commands did not run: `cp a b`.\n\nIts last output:\n\n```text\nnpm ERR! boom\n```\n\n' +
         'Dependencies or generated files may be missing. Fix the cause or run the setup yourself before tests or builds.',
     );
@@ -205,7 +206,7 @@ describe('worktree setup copy', () => {
 
   it('tells the agent an invalid setting skipped setup', () => {
     expect(worktreeSetupAgentNote(invalid)).toBe(
-      "Cezar's worktree setup did not run: worktreeSetup in .ai/cezar/config.json is invalid (commands: Expected array, received string). " +
+      `${productName('Cezar')}'s worktree setup did not run: worktreeSetup in .ai/cezar/config.json is invalid (commands: Expected array, received string). ` +
         'Dependencies or generated files may be missing. Fix the cause or run the setup yourself before tests or builds.',
     );
   });

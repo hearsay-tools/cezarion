@@ -163,7 +163,7 @@ export class RunSkills {
    * registry, the roots and the team list alike: a team skill switched off for the project is
    * never installed, not even for a skill that runs it, and a switch-off made after the run
    * started holds for the next step, a live `/name` and Continue. Copies a pass installed before
-   * the switch stay in the worktree until the task ends: cezar removes nothing mid-task.
+   * the switch stay in the worktree until the task ends: Squawk removes nothing mid-task.
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that

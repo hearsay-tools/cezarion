@@ -32,7 +32,7 @@ export class ModelIdentityError extends Error {
  * No provider allowlist lives here on purpose (#548). `resolveModelIdentity`
  * lets an unknown provider in an explicit `provider/model` string pass through,
  * so future models and new backends are never silently rejected — an exported
- * roster of "providers cezar names today" would gate nothing, and an unused
+ * roster of "providers Squawk names today" would gate nothing, and an unused
  * public export reads as a contract someone must keep current. The per-backend
  * knowledge that IS load-bearing lives in `BACKEND_MODEL_MAP` below.
  */

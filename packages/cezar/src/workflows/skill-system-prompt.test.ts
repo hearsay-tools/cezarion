@@ -41,7 +41,7 @@ describe('skillSystemPrompt — installed-path hint for worktree agents', () => 
     ].join('\n'));
   });
 
-  it('points a team skill at the files dir cezar materialized for it (#1024)', () => {
+  it('points a team skill at the files dir Squawk materialized for it (#1024)', () => {
     const filesDir = '/home/u/.cache/cez/skill-files/org__skills/abc123/om-code-review';
     const out = skillSystemPrompt({ ...base, source: 'team', path: 'org/skills@main:om-code-review/SKILL.md' }, filesDir);
     // A repo-root run has no separate worktree, and the copy may sit in the cache or

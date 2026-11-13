@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { fallbackProjectWriteError } from './project-paths.ts';
 import { productEnvEntries } from './core/product-env.ts';
 import {
@@ -195,15 +196,15 @@ function fenced(text: string): string {
 export function worktreeSetupAgentNote(outcome: WorktreeSetupOutcome): string | undefined {
   switch (outcome.status) {
     case 'done':
-      return `Cezar prepared this worktree before your session started: ${outcome.commands.map(quoted).join(', ')} (${formatSetupDuration(outcome.durationMs)}). Dependencies are installed; do not repeat this setup.`;
+      return `${productName('Cezar')} prepared this worktree before your session started: ${outcome.commands.map(quoted).join(', ')} (${formatSetupDuration(outcome.durationMs)}). Dependencies are installed; do not repeat this setup.`;
     case 'failed': {
       const skipped = outcome.skipped.length
         ? ` The remaining commands did not run: ${outcome.skipped.map(quoted).join(', ')}.`
         : '';
-      return `Cezar's worktree setup did not complete before your session started: ${failurePhrase(outcome)}.${skipped}\n\nIts last output:\n\n${fenced(outcome.failed.output.slice(-AGENT_OUTPUT_CHARS))}\n\n${MISSING_HINT}`;
+      return `${productName('Cezar')}'s worktree setup did not complete before your session started: ${failurePhrase(outcome)}.${skipped}\n\nIts last output:\n\n${fenced(outcome.failed.output.slice(-AGENT_OUTPUT_CHARS))}\n\n${MISSING_HINT}`;
     }
     case 'invalid':
-      return `Cezar's worktree setup did not run: ${CONFIG_LABEL} is invalid (${outcome.issue}). ${MISSING_HINT}`;
+      return `${productName('Cezar')}'s worktree setup did not run: ${CONFIG_LABEL} is invalid (${outcome.issue}). ${MISSING_HINT}`;
     case 'stopped':
       return undefined;
   }

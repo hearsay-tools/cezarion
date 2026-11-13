@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 import { createHash } from 'node:crypto';
@@ -12,7 +13,7 @@ export const PARK_NOTICE_EXCERPT_MAX = 1000;
 
 /**
  * A parent waiting on a worker wakes only on its outcome or the wait's deadline, so a worker that
- * parks before finishing leaves its parent asleep (hearsay-tools/cezarion#1327). Cezar then tells
+ * parks before finishing leaves its parent asleep (hearsay-tools/cezarion#1327). Squawk then tells
  * the parent itself, as a progress message from the worker: it wakes the parent and closes no
  * wait. The ID derives from the worker and the parent's wait, so one wait gets at most one notice
  * from each worker, and posting it again after a restart finds the same message.
@@ -49,7 +50,7 @@ export function parkingTurn(events: readonly RunEvent[]): { startedAt?: string; 
   return text === undefined ? {} : { text };
 }
 
-/** The worker's own words, without Cezar's control lines, cut to `PARK_NOTICE_EXCERPT_MAX`. */
+/** The worker's own words, without Squawk's control lines, cut to `PARK_NOTICE_EXCERPT_MAX`. */
 export function parkNoticeExcerpt(text: string): string | undefined {
   const prose = text.split('\n').filter(line => !line.trim().startsWith('CEZ:')).join('\n').trim();
   if (!prose) return undefined;
@@ -62,7 +63,7 @@ export function formatParkNoticeText(input: { workerRunId: string; waitId: strin
   const open = input.waits.filter(wait => wait.phase === 'open' && !WAIT_KINDS[wait.kind].userAnswers && !isSquawkHumanWait(wait));
   const excerpt = input.lastText === undefined ? undefined : parkNoticeExcerpt(input.lastText);
   return [
-    `Cezar notice: your worker ${input.workerRunId} parked before finishing. Your wait ${input.waitId} stays open; this message closes no wait.`,
+    `${productName('Cezar')} notice: your worker ${input.workerRunId} parked before finishing. Your wait ${input.waitId} stays open; this message closes no wait.`,
     open.length ? `It waits on: ${open.map(describeWait).join('; ')}.` : 'It has no open wait: it waits for a message from you.',
     ...(excerpt === undefined ? [] : ['Its last message:', excerpt]),
     commandText(`Check it with cez worker inspect ${input.workerRunId}, or instruct it with cez message request ${input.workerRunId} '<instruction>' --id <new-message-UUID>.`),

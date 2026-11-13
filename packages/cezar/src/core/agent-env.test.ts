@@ -5,7 +5,7 @@ import { RUNNER_IDS } from './agent-runner.ts';
 /**
  * #427: the spawned backend must NOT inherit the full host environment. It
  * gets a curated allowlist — safe shell/toolchain vars + the backend's own
- * auth + gh + cezar's `CEZ_*` — and nothing else.
+ * auth + gh + Squawk's `CEZ_*` — and nothing else.
  */
 describe('buildChildEnv — delegation session isolation', () => {
   for (const backend of ['claude', 'claude-cli', 'codex', 'opencode', 'pi', 'omp'] as const) {
@@ -393,7 +393,7 @@ describe('agent-profile config dirs reach the child', () => {
       }).CLAUDE_CONFIG_DIR,
     ).toBe('/home/u/.claude-klaudiusz');
     // The `CLAUDE_` prefix means a host-level override also rides in, which is what makes it the
-    // DEFAULT profile's dir rather than something cezar has to re-export.
+    // DEFAULT profile's dir rather than something Squawk has to re-export.
     expect(
       buildChildEnv({
         backend: 'claude',

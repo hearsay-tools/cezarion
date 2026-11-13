@@ -691,7 +691,7 @@ describe('RunManager waiting recovery', () => {
     expect(fixture.store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
 
-  it('replaces an open Cezar human wait at recovery with the unanswered ask it was not replaced by', async () => {
+  it('replaces an open Squawk human wait at recovery with the unanswered ask it was not replaced by', async () => {
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');

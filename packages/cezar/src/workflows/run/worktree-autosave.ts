@@ -4,6 +4,7 @@ import { autosaveCommit, type AutosaveOutcome, type AutosaveReason } from '../..
 import { recordHandoffAutosave, recordHandoffPeriodicAutosave } from '../../handoff.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunModuleContext } from './types.ts';
+import { productName } from '../../home/display.ts';
 
 interface WorktreeAutosaveHost {
   holdForMaintenance(runIds: readonly string[]): (() => void) | null;
@@ -13,7 +14,7 @@ interface WorktreeAutosaveHost {
   trackTurn(runId: string, task: Promise<void>): void;
 }
 
-/** Periodic "cezar autosave" commit in the task worktree (spec 006). */
+/** Periodic "Squawk autosave" commit in the task worktree (spec 006). */
 export const AUTOSAVE_INTERVAL_MS = 90_000;
 
 /** The periodic timer is independent of idle and reply bounds. */
@@ -51,11 +52,11 @@ function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, ta
   const where = outcome.branch ?? 'detached HEAD';
   if (outcome.result === 'committed') {
     const what = outcome.sha ? `${outcome.sha} on ${where}` : `on ${where} (sha unavailable)`;
-    return `${reason}: cezar autosave committed ${what}; ` +
+    return `${reason}: ${productName('Cezar')} autosave committed ${what}; ` +
       `to fold it into your own commits while it is HEAD, run \`git reset --soft ${outcome.sha ?? 'HEAD'}~1\``;
   }
   return `${reason}: ${outcome.changedPaths} changed path(s) left uncommitted on ${where}; ` +
-    `cezar does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
+    `${productName('Cezar')} does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
 }
 
 export class WorktreeAutosave {

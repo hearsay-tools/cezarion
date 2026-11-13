@@ -6,7 +6,7 @@ import { parseRunRecords } from './store.ts';
 import { stateOf } from '../workflows/run-states.ts';
 
 /**
- * What a cezar from before hearsay-tools/cezarion#2431 does with a stored `subagent` wait. Its
+ * What a Squawk from before hearsay-tools/cezarion#2431 does with a stored `subagent` wait. Its
  * wait union has no `subagent` arm, so this file loads the store and the contract with that union
  * in place of today's.
  */
@@ -19,7 +19,7 @@ vi.mock('@open-mercato/cezar-contract/waits', async importOriginal => {
 
 const stored = (waits: unknown[]) => JSON.parse(JSON.stringify(makeRunRecord({ id: 'downgraded', status: RUN_STATUS.waiting, waits: waits as never })));
 
-describe('an older cezar reading a stored subagent wait', () => {
+describe('an older Squawk reading a stored subagent wait', () => {
   it('does not know the subagent kind', () => {
     expect(waitSchema.safeParse(makeSubagentWait()).success).toBe(false);
   });

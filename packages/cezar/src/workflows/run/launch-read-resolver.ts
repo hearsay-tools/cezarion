@@ -676,7 +676,7 @@ function ciWorkflowResumeStepIndex(run: RunRecord): number {
 
 /**
  * The saved session id a Continue can resume, or undefined when it opens a fresh session. A
- * `launch` runner opened its session under the saved id. A `native` runner replaces Cezar's launch
+ * `launch` runner opened its session under the saved id. A `native` runner replaces Squawk's launch
  * UUID only with its `session` event (hearsay-tools/cezarion#583, hearsay-tools/cezarion#2991), so
  * its saved id resumes when a recorded `session` event names it, or when the event history does
  * not show the launch of the step that first holds the id. Older or salvaged run data can keep a

@@ -3,7 +3,7 @@ import { exemptionReasonProblem } from './exemption-reason.testkit.ts';
 
 describe('exemptionReasonProblem', () => {
   it.each([
-    "Pi's RPC wire carries no tool approval request for cezar to answer.",
+    "Pi's RPC wire carries no tool approval request for Squawk to answer.",
     'Codex app-server sends an approval request only inside the turn it names, so none can arrive after that turn completed.',
     'The wire holds the turn open until every child returns, so no turn end parks on running children.',
   ])('accepts a wire limitation: %s', (reason) => {

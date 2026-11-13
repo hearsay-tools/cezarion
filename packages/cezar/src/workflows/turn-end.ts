@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 /**
  * Shared turn-end decision for initial sessions, Continue and late input ACKs. Owed input
  * defers; done and waits take precedence. Every agent step completes only on a done
@@ -33,16 +34,16 @@ export type TurnEndFacts = {
   nativeAsk: boolean;
   /** Any question: this turn's ask or human gate, a pending ask, an open human wait. */
   question: boolean;
-  /** The agent's own waits: every wait but Cezar's human waits. */
+  /** The agent's own waits: every wait but Squawk's human waits. */
   agentWaits: boolean;
-  /** Cezar's own human wait is open (`no-wait`, `budget`, `completion`). */
+  /** Squawk's own human wait is open (`no-wait`, `budget`, `completion`). */
   squawkHumanWait: boolean;
   /** The session's done completes a workflow step that is not the last, not the task
    *  (hearsay-tools/cezarion#1620). Only the nudge wording reads it. */
   stepScope: boolean;
-  /** The turn that just ended answered Cezar's no-wait nudge. */
+  /** The turn that just ended answered Squawk's no-wait nudge. */
   noWaitNudgedLastTurn: boolean;
-  /** The turn that just ended answered Cezar's completion nudge. */
+  /** The turn that just ended answered Squawk's completion nudge. */
   completionNudgedLastTurn: boolean;
   autonomous: boolean;
   /** `automaticWakes` reached `MAX_AUTO_CONTINUES`. */
@@ -61,7 +62,7 @@ export type TurnEndDecision =
   | { kind: 'park'; refused?: true }
   | { kind: 'completion-wait' }
   /** `text` is absent for the completion cause: the refusal message is the nudge. A refused
-   *  submission waits for input readiness (autonomous), opens Cezar's no-wait human wait, or parks
+   *  submission waits for input readiness (autonomous), opens Squawk's no-wait human wait, or parks
    *  for the user (completion). */
   | { kind: 'nudge'; cause: NudgeCause; text?: string; ifRefused: 'readiness' | 'human-wait' | 'park-for-user'; refused?: true }
   | { kind: 'human-wait'; via: 'no-wait' | 'budget' | 'completion'; refused?: true };
@@ -81,7 +82,7 @@ export function stepScopedNudge(text: string, stepScope: boolean): string {
 }
 
 export const STEP_NUDGE_SUFFIX =
-  'In this workflow step, the done signal completes this step\'s own work, and Cezar then starts the next step.';
+  `In this workflow step, the done signal completes this step's own work, and ${productName('Cezar')} then starts the next step.`;
 
 export function decideTurnEnd(facts: TurnEndFacts): TurnEndDecision {
   if (!facts.sessionOpen) return { kind: 'closed' };
@@ -92,7 +93,7 @@ export function decideTurnEnd(facts: TurnEndFacts): TurnEndDecision {
     // The agent's open waits and owed input come first: the refusal is a note, and the turn end
     // goes on as one without a done.
     if (facts.agentWaits || facts.inputInFlight || facts.inputQueued) return { ...decideWithoutDone({ ...facts, done: false }) as Extract<TurnEndDecision, { refused?: true }>, refused: true };
-    // One nudge per cycle: the turn that answered it ended on a refused done again. Cezar waits on
+    // One nudge per cycle: the turn that answered it ended on a refused done again. Squawk waits on
     // the live workers, else on the user; an autonomous run is nudged again instead.
     if (facts.completionNudgedLastTurn && !facts.autonomous) {
       return facts.doneRefused.liveWorkers ? { kind: 'completion-wait' } : { kind: 'human-wait', via: 'completion' };

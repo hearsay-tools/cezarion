@@ -508,7 +508,7 @@ describe('RunStore history compression', () => {
     expect(readHistoryText(dir, worker.id)).toContain('old');
   });
 
-  it('orphans a non-prefix .br when re-archiving a run an older cezar continued', async () => {
+  it('orphans a non-prefix .br when re-archiving a run an older Squawk continued', async () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'placeholder' });

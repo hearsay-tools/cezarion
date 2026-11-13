@@ -22,6 +22,7 @@ import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages, toolCall, gate, thenSay } from './waits-parity.testkit.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { type WaitParityPart, type WaitCells, type WaitPartScope, waitPartModule, familyTest, type WaitParityFamily, type WaitFold, type WaitFoldScope, waitFoldModule, foldCells } from './waits-parity-catalog.testkit.ts';
+import { productName } from '../home/display.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
@@ -63,7 +64,7 @@ export function nativeWire(runner: RunnerId) {
 
 export const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.find(wait => wait.kind === kind);
 /** The agent's waits. A delivered turn that ends with none takes the no-wait nudge, and the mock's
- *  plain reply leaves Cezar's own no-wait wait open (hearsay-tools/cezarion#1234). */
+ *  plain reply leaves Squawk's own no-wait wait open (hearsay-tools/cezarion#1234). */
 export const agentWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter(wait => wait.source !== 'cezar');
 export const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 export const listed = (id: string, waitId: string) => store.getRun(id)?.waits?.find(wait => wait.id === waitId && wait.phase === WAIT_PHASE.open);
@@ -164,9 +165,9 @@ export const conversationOf = (id: string): ConversationMessage[] => {
   const delegation = store.getRun(id)?.delegation;
   return delegation?.role === 'root' ? delegation.conversation?.messages ?? [] : [];
 };
-/** Cezar's park notices from a worker to its parent (hearsay-tools/cezarion#1327): progress the worker never sent itself. */
+/** Squawk's park notices from a worker to its parent (hearsay-tools/cezarion#1327): progress the worker never sent itself. */
 export const parkNotices = (parentId: string, workerId: string) => conversationOf(parentId).filter(message =>
-  message.senderRunId === workerId && message.kind === 'progress' && message.text.startsWith('Cezar notice: '));
+  message.senderRunId === workerId && message.kind === 'progress' && message.text.startsWith(`${productName('Cezar')} notice: `));
 /** A root parent on `runner`'s native wire, parked after its opening turn. */
 export async function parentOn(runner: RunnerId) {
   nativeWire(runner);
@@ -289,7 +290,7 @@ export async function ignoreRefusal(runner: RunnerId, id: string, reply: DoneRep
 export const nudgeNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
 export const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && event.message === COMPLETION_NO_REPLY_NOTE);
 
-/** A harness that acknowledges Cezar's completion refusal on its own native wire and never
+/** A harness that acknowledges Squawk's completion refusal on its own native wire and never
  *  answers it (hearsay-tools/cezarion#1301): the mocks' `mock:ack-only` reply accepts the prompt,
  *  reports it read where the wire can, and starts no turn, as an OpenCode heartbeat keeps a session
  *  alive without one. Call it before the session starts: a mock reads its environment when spawned.

@@ -54,7 +54,7 @@ export class TurnNudges {
     public noWaitNudgeReplyMs: number) {}
   /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
-   *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
+   *  reads the refusal and says nothing parks on Squawk's human wait instead of holding the slot. */
   awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void {
     transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'nudge-delivered', session });
     const refusal = completionGateReads.completionRefusal(this.context, this.completionGateHost, runId);
@@ -69,7 +69,7 @@ export class TurnNudges {
    * restart; hearsay-tools/cezarion#1301): the refusal is queued as one lifecycle input, charged as
    * the live nudge is, and the scheduler continuation reopens the session to deliver it
    * (`queueWaitWake`); its delivery marks that turn as the nudge's. Open waits come first: they wake
-   * the run, and the refusal is a note. A spent budget opens Cezar's `budget` human wait, and an
+   * the run, and the refusal is a note. A spent budget opens Squawk's `budget` human wait, and an
    * input the full inbox refuses leaves the run waiting for the user. Always true.
    */
   queueCompletionRefusal(runId: string, refusal: CompletionRefusal): boolean {
@@ -203,7 +203,7 @@ export class TurnNudges {
 
   /** A reply to the nudge clears its bound. One that arrives after the bound parked the run resumes
    *  it, as the final-message nudge's did (#544); its turn end then decides, and a run still on
-   *  Cezar's no-wait wait parks on it again. */
+   *  Squawk's no-wait wait parks on it again. */
   noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void {
     if (!this.isNoWaitNudgeReply(state, event)) return;
     transitionTurnBoundary(state, { kind: 'reply-content', phase: 'received', session: state.liveSession.session });
@@ -215,7 +215,7 @@ export class TurnNudges {
   }
 
   /** A no-wait nudge the harness acknowledged but never answered (an OpenCode heartbeat keeps the
-   *  session alive without a turn): at the bound Cezar opens the no-wait human wait and the run
+   *  session alive without a turn): at the bound Squawk opens the no-wait human wait and the run
    *  waits for the user. A reply that arrives after it runs, and the run stays on that question. */
   armNoWaitNudgeReplyTimer(runId: string, state: ActiveRun): void {
     clearNoWaitNudgeReplyTimer(state);

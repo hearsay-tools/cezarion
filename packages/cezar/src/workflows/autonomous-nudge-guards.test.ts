@@ -257,7 +257,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.boundary.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
-  // hearsay-tools/cezarion#1234: an unanswered nudge opens Cezar's no-wait human wait, so the run
+  // hearsay-tools/cezarion#1234: an unanswered nudge opens Squawk's no-wait human wait, so the run
   // waits on the user and a late reply stays on that question.
 
   // hearsay-tools/cezarion#1301: an unanswered completion refusal nudge says so, not "no-wait".

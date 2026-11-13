@@ -243,7 +243,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         setController(w.id, { pid: foreign.proc.pid!, ...(token ? { startToken: token } : {}) });
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(other.continueRun(w.id, { text: 'try again' })).toEqual({ ok: false, error: `the worker is still controlled by a live cezar (pid ${foreign.proc.pid})` });
+        expect(other.continueRun(w.id, { text: 'try again' })).toEqual({ ok: false, error: `the worker is still controlled by a live ${productName('Cezar')} (pid ${foreign.proc.pid})` });
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']),
           error: `Worker termination is not proven: the worker is still controlled by a live ${productName("cezar")} (pid ${foreign.proc.pid}); retry cleanup later` });
         expect(existsSync(workspace(w).path)).toBe(true);
@@ -284,7 +284,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       mkdirSync(scratch, { recursive: true });
       writeFileSync(join(scratch, 'notes'), 'answer still needed');
       // The question waits for the parent's answer (hearsay-tools/cezarion#2410): a parent that may
-      // not message its workers would have Cezar answer it, and resume the worker, instead.
+      // not message its workers would have Squawk answer it, and resume the worker, instead.
       reopened.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'steer'], receipts: [] } }]);
       reopened.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
         header: 'Choice', question: 'Which option?', options: [{ label: 'A' }, { label: 'B' }],

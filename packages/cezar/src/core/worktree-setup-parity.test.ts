@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { parityRunners } from './parity-classes.testkit.ts';
 import { WORKTREE_SETUP_CRITERIA } from './harness-parity.testkit.ts';
 import { driveRun } from './workflow-parity.testkit.ts';
+import { productName } from '../home/display.ts';
 
 /**
  * R58 (hearsay-tools/cezarion#917, spec `.ai/specs/2026-10-07-worktree-setup.md`): a task
@@ -35,7 +36,7 @@ describe('harness parity — worktree setup note (#917)', () => {
       });
       const traffic = readOrEmpty(argsFile) + readOrEmpty(stdinFile);
       expect(obs.record?.worktreeSetup?.status).toBe('done');
-      expect(traffic).toContain('Cezar prepared this worktree before your session started');
+      expect(traffic).toContain(`${productName('Cezar')} prepared this worktree before your session started`);
       expect(traffic).toContain('r58-setup');
     }, 60_000);
   }

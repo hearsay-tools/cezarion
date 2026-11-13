@@ -1,5 +1,5 @@
 // Shared responses only; each caller encodes its own native runner wire (#426).
-// `lifecycle([name, args])` makes the caller's cezar tool call and returns a note for the text.
+// `lifecycle([name, args])` makes the caller's Squawk tool call and returns a note for the text.
 import { DONE, ask } from './mock-ci-tool.mjs';
 let cap = false;
 export async function autonomousReply(prompt, lifecycle) {

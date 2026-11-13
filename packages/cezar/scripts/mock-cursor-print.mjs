@@ -77,7 +77,7 @@ const readTool = (content = 'A project') => {
 };
 
 const finish = (text) => { assistant(text); result(text); };
-// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that Squawk tool over
 // the --plugin-dir MCP config before its turn ends. Returns '' or a note for the text.
 const tools = () => import('./mock-ci-tool.mjs');
 const lifecycle = async (call) => (await tools()).lifecycleCall('cursor', args, ...call);

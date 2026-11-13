@@ -298,9 +298,9 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   // Pi can resume autonomously when an async subagent completes — the mapper
   // synthesizes a parent `turn.started` for that work (#61). Nested child
   // items without a parent turn must not unpark monitoring or worker waits (#121).
-  // A list worker park (hearsay-tools/cezarion#1235), Cezar's completion wait included
+  // A list worker park (hearsay-tools/cezarion#1235), Squawk's completion wait included
   // (hearsay-tools/cezarion#1301), resumes the same way. A parent turn the runner starts itself, not
-  // inside Cezar's own write, closes the subagent wait and every timer (hearsay-tools/cezarion#2431).
+  // inside Squawk's own write, closes the subagent wait and every timer (hearsay-tools/cezarion#2431).
   if (host.line.isParked(runId) && (host.line.inPool(runId) || host.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
     if (!state.inputState.writingInput) host.supersedeOnRunnerResume(runId);
     host.resumeParkedRun(runId, state);

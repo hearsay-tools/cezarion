@@ -116,7 +116,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'complete', remaining: [] });
   });
 
-  it('a checkpoint an older cezar abandoned still parses, keeps its flag and refuses resume (hearsay-tools/cezarion#889)', async () => {
+  it('a checkpoint an older Squawk abandoned still parses, keeps its flag and refuses resume (hearsay-tools/cezarion#889)', async () => {
     const w = await worker();
     const generation = store.commitWorkerExecutionStart(w.id);
     setRunStatus(store, w.id, RUN_STATUS.cancelled); expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);

@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,7 +19,7 @@ import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture }
 import { SUBAGENT_CRITERIA, SUBAGENT_EXEMPTIONS, type SubagentCriterion } from './waits-subagents-rows.testkit.ts';
 
 /**
- * Cezar's wait on native subagents (hearsay-tools/cezarion#2431) on each runner's own native mock
+ * Squawk's wait on native subagents (hearsay-tools/cezarion#2431) on each runner's own native mock
  * wire: the runner maps a backgrounded child, and the engine parks, wakes and supersedes on what it
  * maps. A runner whose wire cannot carry a row has a named exemption with its reason; the guard
  * below pins each one to the runner having no scenario for it, so the day a mock carries it the
@@ -137,7 +138,7 @@ export function subagentCells(runners: readonly RunnerId[]): void {
         await restart();
         await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered);
         expect(settledOf(id, wait.id)).toMatchObject({ result: { reason: 'interrupted' } });
-        expect(wakeInputs(id, wait.id).map(input => input.text)).toEqual([expect.stringContaining('Cezar restarted, and the 1 native subagent still running')]);
+        expect(wakeInputs(id, wait.id).map(input => input.text)).toEqual([expect.stringContaining(`${productName('Cezar')} restarted, and the 1 native subagent still running`)]);
         expect(wakes(id)).toBe(0);
       });
     });

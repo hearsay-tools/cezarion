@@ -35,6 +35,7 @@ import { squawkToolNames } from '../ci-wait/tool-catalog.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { productName } from '../home/display.ts';
 
 export interface PiRunnerOptions {
   /** Override the binary name/path; defaults to `pi` on PATH (`CEZ_PI_BIN`). */
@@ -59,7 +60,7 @@ export interface PiRunnerOptions {
  * keeps the `--tools` allowlist; naming any other tool (an `mcp__` tool, for
  * one) narrows it, so that grant stays limited to the named tools. A list that
  * maps to nothing fails closed: `--tools` with
- * only the cezar tools, or `--no-tools`. pi has no command-prefix equivalent
+ * only the Squawk tools, or `--no-tools`. pi has no command-prefix equivalent
  * for a `bashAllowlist`, so a list with one narrows to `--tools` and drops
  * `bash` (fail closed) rather than widening. Held against the recorded
  * argv and RPC prompt by the harness parity matrix.
@@ -70,7 +71,7 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'RPC prompt message' },
   images: { honored: true, via: 'RPC prompt images' },
   cwd: { honored: true, via: 'spawn cwd' },
-  toolGrant: { honored: true, via: 'mapped through piTools: the default list sends --no-builtin-tools and names its built-ins to the default-tools extension; a narrowed list, or one naming a tool outside the pi default set, sends --tools; a list that maps to nothing sends --tools with the cezar tools only, or --no-tools; a bashAllowlist has no prefix equivalent, so it narrows the list to --tools without bash (fail closed); unset sends no tool flags' },
+  toolGrant: { honored: true, via: `mapped through piTools: the default list sends --no-builtin-tools and names its built-ins to the default-tools extension; a narrowed list, or one naming a tool outside the pi default set, sends --tools; a list that maps to nothing sends --tools with the ${productName('Cezar')} tools only, or --no-tools; a bashAllowlist has no prefix equivalent, so it narrows the list to --tools without bash (fail closed); unset sends no tool flags` },
   restrictCrossSessionMessaging: { honored: false, reason: 'pi 1.4.0 has no built-in cross-session tool, and an extension\'s name cannot be discovered as messaging; the subagent extension stays (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: false, reason: 'pi has no extra-root flag' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
@@ -261,7 +262,7 @@ export class PiRunner implements AgentRunner {
 
     write({ id: 'cezar-state', type: 'get_state' });
     // #551: Pi defaults steeringMode to one-at-a-time (one steer per completed
-    // assistant turn). This session is cezar's, and sendAgentMessage requires every
+    // assistant turn). This session is Squawk's, and sendAgentMessage requires every
     // accepted steer at the next model call. get_state cannot tell that default
     // from an explicit user setting, so we always set all rather than guess.
     write({ type: 'set_steering_mode', mode: 'all' });
@@ -497,7 +498,7 @@ function piGrantArgs(spec: AgentRunSpec, grant: ToolGrant): string[] {
   }
 }
 
-// The built-ins cezar's default list maps onto (DEFAULT_ALLOWED_TOOLS through piTools), and the
+// The built-ins Squawk's default list maps onto (DEFAULT_ALLOWED_TOOLS through piTools), and the
 // names a default list may hold besides them (HARNESS_EXTRA_TOOLS.pi).
 const PI_DEFAULT_BUILTINS = ['read', 'edit', 'write', 'grep', 'find', 'bash'];
 const PI_DEFAULT_EXTRAS = ['subagent', 'subagent_supervisor', 'subagent_wait'];
@@ -517,7 +518,7 @@ function piToolArgs(spec: AgentRunSpec, allowedTools: readonly string[], bashAll
   const isDefault = PI_DEFAULT_BUILTINS.every((tool) => tools.includes(tool))
     && tools.every((tool) => PI_DEFAULT_BUILTINS.includes(tool) || PI_DEFAULT_EXTRAS.includes(tool));
   if (!narrowedBash && isDefault) {
-    // The cezar tools need no name: pi activates an extension's tools on registration.
+    // The Squawk tools need no name: pi activates an extension's tools on registration.
     return ['--no-builtin-tools', '--extension', piDefaultToolsExtensionPath(), '--cezar-builtin-tools', tools.join(',')];
   }
   if (spec.squawkTools) tools.push(...squawkToolNames(spec.env ?? {}));

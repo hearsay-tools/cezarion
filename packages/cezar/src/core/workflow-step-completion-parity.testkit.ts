@@ -58,7 +58,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
       const parked = (run: RunRecord | undefined) => run?.status === 'waiting' &&
         (run.waits ?? []).some(wait => wait.kind === 'human' && wait.source === 'cezar');
       const finished = (run: RunRecord | undefined) => ['done', 'review', 'failed'].includes(run?.status ?? '');
-      // The text Cezar submits to the session: an earlier step's nudge names the step.
+      // The text Squawk submits to the session: an earlier step's nudge names the step.
       const submitted: string[] = [];
       let repoRoot = '';
       let idleClock: ReturnType<typeof observationClock>;
@@ -106,7 +106,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
           expect(nudged(AUTONOMOUS_NUDGE)).toBe(true);
           return;
         }
-        // A quiet earlier turn end takes the final step's path: one nudge, then Cezar's human wait.
+        // A quiet earlier turn end takes the final step's path: one nudge, then Squawk's human wait.
         expect(parked(run())).toBe(true);
         expect(notes(NO_WAIT_NUDGE_NOTE)).toHaveLength(1);
         expect(notes(NO_WAIT_NOTE)).toHaveLength(1);

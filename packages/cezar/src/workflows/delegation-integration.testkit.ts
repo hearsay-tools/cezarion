@@ -198,7 +198,7 @@ if (group === 'reviewed-integration') {
 
     reply(p.id, 1, { text: 'Attempted completion before observing workers', done: true });
     // hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2397: cezar_done answers the blocked done
-    // with the refusal itself, and Cezar opens no wait for it.
+    // with the refusal itself, and Squawk opens no wait for it.
     const refusal = await done(p.id, 1);
     expect(refusal).toMatchObject({ ok: false, code: 'workers_outstanding' });
     expect(refusal.message).toContain('Workers are still live:');

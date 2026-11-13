@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { productName } from '../home/display.ts';
 
 // Delay only delivery of a real native exit, without changing its status or wire.
 const lateExit = vi.hoisted(() => ({ enabled: false }));
@@ -1053,7 +1054,7 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
     ]);
   });
 
-  it('admits the cezar tools through the CI extension on the default path, not through a list', () => {
+  it('admits the Squawk tools through the CI extension on the default path, not through a list', () => {
     const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault }, squawkTools: ci });
     expect(extensions(args)).toEqual([
       expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
@@ -1101,7 +1102,7 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
     expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Bash'], bashAllowlist: ['git status'] } })).toEqual(['--mode', 'rpc', ...squawkExtensionArgs, '--no-tools']);
   });
 
-  it('admits only the cezar tools when an empty list carries squawkTools', () => {
+  it('admits only the Squawk tools when an empty list carries squawkTools', () => {
     const args = buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: [] }, squawkTools: ci });
     expect(toolFlags(args)).toEqual(['--tools']);
     expect(args[args.indexOf('--tools') + 1]).toBe(squawkToolNames({}).join(','));
@@ -1189,7 +1190,7 @@ describe('Pi signal teardown (#73)', () => {
     );
     await expect(session.result).resolves.toBeDefined();
     expect(events.filter((e) => e.type === 'error')).toEqual([]);
-    expect(events).toContainEqual({ type: 'note', message: expect.stringMatching(/terminated by cezar.*143/) });
+    expect(events).toContainEqual({ type: 'note', message: expect.stringMatching(new RegExp(String.raw`terminated by ${productName('Cezar')}.*143`)) });
     expect(JSON.stringify(events)).not.toContain('no selector found');
     expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
     expect(ui.filter((e) => e.type === 'session.ended')).toHaveLength(1);
@@ -1204,14 +1205,14 @@ describe('Pi signal teardown (#73)', () => {
         event => events.push(event),
       );
       await expect(session.result).rejects.toThrow('pi CLI exited with code 143');
-      expect(events.some(event => event.type === 'note' && event.message.includes('terminated by cezar'))).toBe(false);
+      expect(events.some(event => event.type === 'note' && event.message.includes(`terminated by ${productName('Cezar')}`))).toBe(false);
       expect(events.some(event => event.type === 'done')).toBe(false);
     } finally {
       lateExit.enabled = false;
     }
   });
 
-  it('still rejects exit 143 when Cezar did not send the signal', async () => {
+  it('still rejects exit 143 when Squawk did not send the signal', async () => {
     await expect(new PiRunner({ bin }).startSession(
       { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'self-exit', cwd: tmpdir(), timeoutMs: 5000 },
     ).result).rejects.toThrow('pi CLI exited with code 143');

@@ -10,7 +10,7 @@ import { allowedToolsForStep } from '../workflows/types.ts';
 /**
  * The Tool-list kinds case table (.ai/specs/TEMPLATE.md § Case tables) as cells on every runner's native
  * mock wire (hearsay-tools/cezarion#1810). Each case is one input kind the table requires, as the
- * `ToolGrant` cezar resolves for it. Claude, pi and omp pin the tool flags their mock records;
+ * `ToolGrant` Squawk resolves for it. Claude, pi and omp pin the tool flags their mock records;
  * the runners that cannot restrict tools must record exactly what the unset case records.
  */
 export type ToolGrantCaseId =

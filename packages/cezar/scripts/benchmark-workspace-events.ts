@@ -11,7 +11,7 @@ import { Home } from '../src/home/home.ts';
  * --connections (1 stream per phase) --parent-kb (256, padding in the parent's task) --child-kb (16)
  * --warmup (40 updates per unreported warmup phase) --out (write the JSON there as well as to stdout).
  *
- * The script runs unchanged on a cezar without the summary mode: that server ignores `?runs=summary`
+ * The script runs unchanged on a Squawk without the summary mode: that server ignores `?runs=summary`
  * and sends full records, so its "summary" phases measure the full stream again.
  *
  * Method:
@@ -109,7 +109,7 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
   const { WorkspaceEventBus, createApp } = await import('../src/server/server.ts');
   const { apiRequest } = await import('../src/server/loopback-request.testkit.ts');
   const { toRunSummary } = await import('@open-mercato/cezar-contract/runs');
-  // Present only on a cezar with the summary mode; a full stream never needs it.
+  // Present only on a Squawk with the summary mode; a full stream never needs it.
   let summarySchema: { safeParse(value: unknown): { success: boolean } } | undefined;
   try {
     summarySchema = (await import('@open-mercato/cezar-contract/workspace-events') as { workspaceRunSummaryEventSchema?: typeof summarySchema }).workspaceRunSummaryEventSchema;

@@ -76,7 +76,7 @@ export async function discoverCursorModels(options: CursorModelDiscoveryOptions)
 
 /**
  * Read native parameter keys/defaults without creating a session or starting inference. This is
- * cezar's one remaining use of `agent acp`, for discovery only: Cursor sessions run on print
+ * Squawk's one remaining use of `agent acp`, for discovery only: Cursor sessions run on print
  * (hearsay-tools/cezarion#1267), and print model admission needs the canonical IDs and parameters
  * that only this read-only catalog returns; `--list-models` lists legacy aliases.
  */

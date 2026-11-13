@@ -41,7 +41,7 @@ jobs:
             $output = npm test -- packages/cezar/src/delegation/windows-workspace-security.test.ts -t 'Restricted process execution policy' 2>&1 | Out-String
             $failed = $LASTEXITCODE -ne 0
             Write-Output $output
-            if (!$failed -or $output -notmatch 'running\s+scripts is disabled') {
+            if (!$failed -or $output -notmatch 'running\s+scripts\s+is\s+disabled') {
               throw 'Expected the pre-fix execution policy refusal'
             }
           } finally {
@@ -62,7 +62,7 @@ jobs:
           $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
           $failed = $LASTEXITCODE -ne 0
           Write-Output $output
-          if (!$failed -or $output -notmatch 'cannot verify test environment lease identity') {
+          if (!$failed -or $output -notmatch 'cannot\s+verify\s+test\s+environment\s+lease\s+identity') {
             throw 'Expected the pre-fix Windows identity failure'
           }
           # GitHub's pwsh wrapper otherwise propagates the expected red exit.
@@ -76,7 +76,7 @@ jobs:
           $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
           $failed = $LASTEXITCODE -ne 0
           Write-Output $output
-          if (!$failed -or $output -notmatch 'mutator must belong to the lifetime job') {
+          if (!$failed -or $output -notmatch 'mutator\s+must\s+belong\s+to\s+the\s+lifetime\s+job') {
             throw 'Expected the pre-broker mutator containment failure'
           }
           $global:LASTEXITCODE = 0
@@ -89,7 +89,7 @@ jobs:
           $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
           $failed = $LASTEXITCODE -ne 0
           Write-Output $output
-          if (!$failed -or $output -notmatch 'cached server must survive every enclosing job') {
+          if (!$failed -or $output -notmatch 'cached\s+server\s+must\s+survive\s+every\s+enclosing\s+job') {
             throw 'Expected the nested cached-server lifetime failure'
           }
           $global:LASTEXITCODE = 0
@@ -102,7 +102,7 @@ jobs:
           $output = node --test .github/scripts/test-env-windows.test.mjs 2>&1 | Out-String
           $failed = $LASTEXITCODE -ne 0
           Write-Output $output
-          if (!$failed -or $output -notmatch 'cached app must inherit bootstrap environment') {
+          if (!$failed -or $output -notmatch 'cached\s+app\s+must\s+inherit\s+bootstrap\s+environment') {
             throw 'Expected the lost bootstrap environment failure'
           }
           $global:LASTEXITCODE = 0

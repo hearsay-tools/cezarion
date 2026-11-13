@@ -251,7 +251,7 @@ describe('downloadChromium (#781)', () => {
   });
 
   it('two overlapping downloads stage apart, and the second keeps the copy the first published', async () => {
-    // Two cezar processes (different repos) share ~/.cache/cez/chromium.
+    // Two Squawk processes (different repos) share ~/.cache/cez/chromium.
     let downloads = 0;
     const fetchImpl = (async (input: string | URL | Request) => {
       if (String(input).endsWith('.json')) return jsonResponse(manifest);

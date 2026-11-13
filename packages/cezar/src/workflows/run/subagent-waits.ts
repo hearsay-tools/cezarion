@@ -16,7 +16,7 @@ import { openWaits } from '../waits.ts';
 import type { RunModuleContext } from './types.ts';
 
 /**
- * Cezar's wait on the native subagents a turn left running (hearsay-tools/cezarion#2431). The
+ * Squawk's wait on the native subagents a turn left running (hearsay-tools/cezarion#2431). The
  * runner marks such a child's root task item `background: true` and ends it with one
  * `item.completed`; this module counts the live ones per session, opens the `subagent` wait at a
  * turn end instead of a monitoring timer, keeps its children and its deadline current while the
@@ -57,7 +57,7 @@ interface SubagentWaitsHost {
 }
 
 /**
- * Whether the runner's wire reports a backgrounded native subagent's start and end, so Cezar waits
+ * Whether the runner's wire reports a backgrounded native subagent's start and end, so Squawk waits
  * on it (hearsay-tools/cezarion#2431): its declared `nativeSubagents` is `reported`. A runner whose
  * wire sends no child signal, or whose parent turn never ends while its children run, keeps the
  * monitoring timer. `waits-subagents-parity-cells.testkit.ts` derives its exemptions from the same
@@ -209,7 +209,7 @@ export class SubagentWaits {
   /**
    * The runner started a parent turn itself while the run was parked (hearsay-tools/cezarion#2431,
    * owner decision 4): the subagent wait, open or owed, and every open timer close, so no wake
-   * input starts a second turn. PR, process, worker and peer waits stay. A wake Cezar admitted
+   * input starts a second turn. PR, process, worker and peer waits stay. A wake Squawk admitted
    * starts its own turn, which is not the runner's.
    */
   supersedeOnRunnerResume(runId: string): void {

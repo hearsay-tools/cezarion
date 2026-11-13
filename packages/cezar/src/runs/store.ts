@@ -101,7 +101,7 @@ export type StepStatus =
 
 /**
  * A runner id as it may appear in a PERSISTED record, normalized to the three
- * ids the rest of cezar speaks (#547).
+ * ids the rest of Squawk speaks (#547).
  *
  * `claude-cli` is the legacy spelling of `claude` — still a member of
  * `AgentBackend` and still accepted by `createRunner`, and accepted in `runs.json`. The enum
@@ -318,7 +318,7 @@ function loadNormalizedFields(run: RunRecord): string {
 
 /** Test seam (#779): `beforeTransaction` runs once `runs.json` is read and parsed, before the
  *  import asks for the write lock; `beforeCommit` runs inside the import transaction, after every
- *  row is written and before the last check that no older cezar wrote `runs.json` meanwhile. */
+ *  row is written and before the last check that no older Squawk wrote `runs.json` meanwhile. */
 let legacyImportHook: { beforeTransaction?: () => void; beforeCommit?: () => void } | undefined;
 
 export function __setLegacyImportHookForTests(hook?: { beforeTransaction?: () => void; beforeCommit?: () => void }): void {
@@ -361,7 +361,7 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
 
 /**
  * Finished rows whose stored summary an open-time normalization would still change: a referenced
- * PR an older cezar's created-PR declaration erased, or issue attribution displaced by a
+ * PR an older Squawk's created-PR declaration erased, or issue attribution displaced by a
  * follow-up declaration (see `reconcileLoadedRun`). Not live, so not
  * in the `live` column; open decodes these few and keeps the ones it actually repaired.
  */
@@ -371,7 +371,7 @@ const LEGACY_REFERENCE_HEAL_SQL =
 
 /**
  * Rows whose record names the automation that launched it while the stored summary does not
- * (hearsay-tools/cezarion#1332): summaries a cezar wrote before `RunSummary.automationId`
+ * (hearsay-tools/cezarion#1332): summaries a Squawk wrote before `RunSummary.automationId`
  * existed. Open rewrites each one's summary once, so the sidebar's Automations tab classifies a
  * finished task nobody has opened since the upgrade. `instr` keeps the JSON parse off every
  * other row.
@@ -419,12 +419,12 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup' | 'maintenance';
  *   claimed it): taking it means adopting it first (`RunStore.adoptFamily` settles it, then the
  *   manager recovers the family);
  * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
- * - `quarantined`: a write found it changed under this store; refused until cezar restarts;
+ * - `quarantined`: a write found it changed under this store; refused until Squawk restarts;
  * - `fallback`: a family member is read from the fallback directory: refused as `foreign` until a control adopts it.
  */
 export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined' | 'fallback';
 
-/** The one answer every control gives for a run another cezar process owns (`409 { error }`). */
+/** The one answer every control gives for a run another Squawk process owns (`409 { error }`). */
 export const RUN_IN_USE_ELSEWHERE = `run is in use by another ${productName('cezar')} process`;
 /** The answer for a run this process stopped writing after a conflicting write. */
 export const RUN_QUARANTINED = `run changed under this ${productName('cezar')} process — restart ${productName('cezar')} to reload it`;
@@ -1842,7 +1842,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** A pending destroy's automatic retry state, or its removal (hearsay-tools/cezarion#879). Kept on
-   * the record beside the strict delegation, so an older cezar strips it rather than quarantining the
+   * the record beside the strict delegation, so an older Squawk strips it rather than quarantining the
    * worker. Destroy progress: nothing the family reconcile reads changes. */
   commitDestroyRetry(id: string, retry: WorkerDestroyRetry | undefined): void {
     const run = this.peek(id);
@@ -2437,7 +2437,7 @@ export class RunStore extends EventEmitter {
    *  Deleting the field rather than adding a "manually unread" flag is the whole point:
    *  absent `seenAt` is ALREADY what every reader treats as unread (`isUnread` in the
    *  cockpit's read-state.ts, and `markAllRead`'s clause-for-clause copy of it below), so
-   *  clearing needs no new state and writes a shape any older cezar already parses.
+   *  clearing needs no new state and writes a shape any older Squawk already parses.
    *
    *  Deliberately unconditional: clearing a receipt is always a legal write, so this
    *  succeeds for an already-unread run (idempotent) and for statuses that can never wear

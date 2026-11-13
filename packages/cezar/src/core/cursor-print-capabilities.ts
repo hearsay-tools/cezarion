@@ -18,7 +18,7 @@ export type CursorPrintCapabilityResult =
   | { supported: true; models?: readonly ModelOption[]; model?: string; resolvedModel?: string }
   | { supported: false; reason: string };
 
-/** `YYYYMMDD` of a Cursor build version, or undefined for a format cezar does not know. */
+/** `YYYYMMDD` of a Cursor build version, or undefined for a format Squawk does not know. */
 function buildDate(version: string): number | undefined {
   const match = BUILD_VERSION.exec(version);
   return match ? Number(`${match[1]}${match[2]}${match[3]}`) : undefined;

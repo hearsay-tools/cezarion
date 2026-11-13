@@ -158,7 +158,7 @@ describe.each(Object.entries(sources))('repository scoping of cold disk records 
   });
 });
 
-// The desktop version picker names each cezar checkout by the task that owns it.
+// The desktop version picker names each Squawk checkout by the task that owns it.
 describe.each(Object.entries(sources))('the run that owns a checkout (%s)', (_, source) => {
   it('finds the run by its worktree first, else the newest owner of the branch', () => {
     source.put([

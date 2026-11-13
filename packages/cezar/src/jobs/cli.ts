@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { parseArgs } from 'node:util';
 import { commandText } from '../home/command.ts';
 import { JobError, SUPERVISE, jobDirectory, jobStatus, startJob, superviseJob, tellStarter } from './job.ts';
@@ -15,7 +16,7 @@ status  Print JSON: "state" is "running" or "exited", with "pid", "log",
         "exitFile", and "exitCode" when the exit file holds one.
 
 --dir <dir>  Where the job's files live. Default: $TMPDIR, the task's temp
-             directory, which Cezar removes when the task ends. For a job that
+             directory, which ${productName('Cezar')} removes when the task ends. For a job that
              must outlive the task, name a git-ignored directory in the worktree.
 -h, --help   Show this help.
 

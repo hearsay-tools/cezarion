@@ -119,7 +119,7 @@ describe('parseOmpModels', () => {
         effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
       },
       {
-        // `minimal` is OMP's own level, not a cezar EffortLevel: it is dropped, never remapped.
+        // `minimal` is OMP's own level, not a Squawk EffortLevel: it is dropped, never remapped.
         id: 'anthropic/claude-haiku-4-5',
         label: 'Claude Haiku 4.5',
         description: 'anthropic',
@@ -147,7 +147,7 @@ describe('parseOmpModels', () => {
     expect(parseOmpModels(JSON.stringify({ models: entries })).map((m) => m.id)).toEqual(['a/one', 'a/two']);
   });
 
-  it('omits effortLevels when the thinking list holds nothing cezar can pin', () => {
+  it('omits effortLevels when the thinking list holds nothing Squawk can pin', () => {
     const [model] = parseOmpModels(JSON.stringify({ models: [{ provider: 'a', id: 'x', thinking: ['minimal'] }] }));
     expect(model).toEqual({ id: 'a/x', label: 'x', description: 'a' });
   });

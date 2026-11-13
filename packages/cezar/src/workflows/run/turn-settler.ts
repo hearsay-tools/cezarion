@@ -98,7 +98,7 @@ export class TurnSettler {
     const nudgedLastTurn = state.boundary.noWaitNudged === state.liveSession.session;
     transitionTurnBoundary(state, { kind: 'turn-end', phase: 'reset-nudges', session: state.liveSession.session });
     this.prepareTurnAsk(runId, state, humanWait, read);
-    // Native subagents still running: Cezar waits on them, instead of a timer (hearsay-tools/cezarion#2431).
+    // Native subagents still running: Squawk waits on them, instead of a timer (hearsay-tools/cezarion#2431).
     this.host.subagentWaits.atTurnEnd(runId, state, { sessionOpen, done: read.done, asks: !!ask || humanGate });
     transitionTurnBoundary(state, { kind: 'turn-end', phase: 'save-ack', session: state.liveSession.session, boundary: sessionOpen && state.liveSession.session
       ? { session: state.liveSession.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined });
@@ -229,7 +229,7 @@ export class TurnSettler {
 
   /** `ScheduleWakeup` and live workers open their timer before the rule reads the waits, as the
    *  `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence, and
-   *  Cezar's subagent wait replaces the alias: its children wake the run (hearsay-tools/cezarion#2431). */
+   *  Squawk's subagent wait replaces the alias: its children wake the run (hearsay-tools/cezarion#2431). */
   private openTurnTimerAlias(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn): void {
     if (openSubagentWaitOf(this.context.store.getRun(runId))) return;
     if (turn.monitoring && session?.open && state.boundary.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
@@ -275,7 +275,7 @@ export class TurnSettler {
     const session = state.liveSession.session;
     const decisionRefused = 'refused' in decision && !!decision.refused;
     if (decisionRefused) noteRefusal();
-    // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
+    // A refusal that settles the turn end replaces Squawk's own human wait, as the agent's own wait would.
     const settlesRefusal = !!refused && !decisionRefused && !(decision.kind === 'defer' && decision.keepDone);
     if (settlesRefusal) this.host.humanWaits.withdrawSquawkHumanWaits(runId);
     return transitionTurnBoundary(runId, state, { kind: 'turn-end', phase: 'carry', session,
@@ -317,14 +317,14 @@ export class TurnSettler {
     return this.parkedOutcome(runId);
   }
 
-  /** One nudge per cycle: Cezar waits on the live workers for the agent, then parks as `park` does. */
+  /** One nudge per cycle: Squawk waits on the live workers for the agent, then parks as `park` does. */
   private carryOutCompletionWait(carry: BoundaryCarry): TurnEndOutcome {
     carry.noteRefusal();
     this.host.waitRegistry.registerCompletionWait(carry.runId, carry.refused!.liveWorkerIds, carry.refused!.requestIds);
     return this.carryOutPark(carry);
   }
 
-  /** The completion cause's human wait: the refusal is its note, and Cezar's own wait shows it. */
+  /** The completion cause's human wait: the refusal is its note, and Squawk's own wait shows it. */
   private carryOutCompletionHumanWait({ runId, state, stepId, refused, noteRefusal }: BoundaryCarry): TurnEndOutcome {
     noteRefusal();
     const wait = this.host.humanWaits.openHumanAlias(runId, state, 'completion');
@@ -365,7 +365,7 @@ export class TurnSettler {
   }
 
   /** The no-wait cause's nudge. One the wire refuses waits for input readiness when it is
-   *  autonomous, else opens Cezar's no-wait human wait. */
+   *  autonomous, else opens Squawk's no-wait human wait. */
   private carryOutNoWaitNudge({ runId, state, session, stepId }: BoundaryCarry, text: string): TurnEndOutcome {
     const sent = openCompletionRequests(this.context.store, runId).sent;
     if (sent.length) text += ` ${sentRequestInstructions(sent)}`;
@@ -376,7 +376,7 @@ export class TurnSettler {
     return this.parkedOutcome(runId);
   }
 
-  /** Cezar's own human wait at a turn end (hearsay-tools/cezarion#1234): the cause as a note, the
+  /** Squawk's own human wait at a turn end (hearsay-tools/cezarion#1234): the cause as a note, the
    *  wait shown as Needs you, and the run parked for the user. A worker's `no-wait` fallback at its
    *  turn end (`turnEnd`) asks its parent instead (`askParentForWorker`, hearsay-tools/cezarion#1301);
    *  any other worker fallback stays a plain park. */

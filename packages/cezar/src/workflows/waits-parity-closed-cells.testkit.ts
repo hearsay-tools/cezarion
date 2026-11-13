@@ -46,7 +46,7 @@ async function refusalDeliveryBound(runner: RunnerId, id: string, cell: string, 
 const refusedDoneReply = () => `${toolCall('cezar_done', {})} ${thenSay('Still done.')}`;
 /** Where a refused reply's turn end leaves the run: parked on the timer a turn end opens while
  *  workers run (`monitoring-line`), or, once that turn spent the run's wake budget or its nudge, on
- *  Cezar's human wait. Never on the completion wait: the tool refused the done. */
+ *  Squawk's human wait. Never on the completion wait: the tool refused the done. */
 const parkedOnWorkersTimer = (id: string) => workerWaits(id).length === 0 && (parkedOn(id, viaOf(id, WAIT_VIA['monitoring-line'])) || gated(id));
 
 export function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
@@ -357,7 +357,7 @@ export function closedCells(runners: RunnerId[], it: typeof registerTest = regis
         row.continuationMessage?.agentInputId === replyId, 'the answered question and its reply');
     });
 
-    // hearsay-tools/cezarion#1301: an automatic message to a worker supersedes Cezar's pending fallback
+    // hearsay-tools/cezarion#1301: an automatic message to a worker supersedes Squawk's pending fallback
     // question, as the plain park it replaced let it through: it reaches the wire, the routed request
     // gets an outcome, and the parent's done is no longer blocked by the question.
     it(`${runner} U25 an automatic message supersedes a worker's fallback question`, async () => {

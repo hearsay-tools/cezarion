@@ -13,7 +13,7 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
   DEFAULT_RUN_TIMEOUT_MS: 150,
 }));
 
-// T1, T2, T3, T5 and T6 test which deadline Cezar passes (`step.timeoutMs ?? 0`,
+// T1, T2, T3, T5 and T6 test which deadline Squawk passes (`step.timeoutMs ?? 0`,
 // workflows/run/step-session.ts) and what a timed-out step does, and run on the shared runner set.
 // T7 is their seam row: each runner applies a set `spec.timeoutMs` in place of its own default.
 // T4 and T7 run on every runner (core/parity-classes.testkit.ts).
@@ -32,7 +32,7 @@ describe('workflow wall-clock policy — #470', () => {
     for (const criterion of WORKFLOW_TIMEOUT_CRITERIA) {
       it(`${backend} ${criterion.id} ${criterion.name}`, async () => {
         if (criterion.id === 'T7') {
-          // The runner owns how it applies the deadline Cezar passes: zero means none, a longer limit
+          // The runner owns how it applies the deadline Squawk passes: zero means none, a longer limit
           // outlives its own default (compressed to 150 ms above; every hold lasts 500 ms), and a
           // shorter one ends the turn with a timed-out error.
           for (const timeoutMs of [0, 15_000]) {

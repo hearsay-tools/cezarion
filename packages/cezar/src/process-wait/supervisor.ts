@@ -5,7 +5,7 @@ import { readExitCode, type ExitFileRoots } from './exit-file.ts';
 /**
  * Watches a background command for a process wait (hearsay-tools/cezarion#1446). Shaped like
  * `CiWatcherSupervisor`: `watch` settles once with the first outcome, and an aborted watch never
- * settles. Node has no pidfd and the command is not Cezar's child, so it polls: the exit file
+ * settles. Node has no pidfd and the command is not Squawk's child, so it polls: the exit file
  * first (a finished command's code wins even if its PID was since reused), then the process
  * incarnation, then the deadline.
  */

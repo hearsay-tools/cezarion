@@ -214,7 +214,7 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   // `isUsageLimitHold`: a stale one on a finished summary is what the record must correct.
   if ((summary as { activity?: unknown }).activity !== undefined) return true;
   if (summary.autoResumeAt !== undefined) return true;
-  // A referenced PR that an older cezar's created-PR declaration erased is restored.
+  // A referenced PR that an older Squawk's created-PR declaration erased is restored.
   if (summary.referencedPullRequestUrl === undefined && summary.markerRefs?.pr !== undefined) return true;
   // Issue markers may have overwritten the originating issue in older records.
   if (summary.markerRefs?.issue !== undefined) return true;

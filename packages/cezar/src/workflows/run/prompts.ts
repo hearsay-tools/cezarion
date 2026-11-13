@@ -2,6 +2,7 @@ import { dirname } from 'node:path';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { Skill } from '../../skills.ts';
+import { productName } from '../../home/display.ts';
 
 /**
  * The effective "extra" system prompt for a run (spec §protocol v2, R2 2.3):
@@ -49,7 +50,7 @@ export function withResumeContext(prompt: string, message: RunRecord['continuati
   const context = message?.resumeContext;
   if (!context?.failure && !context?.restarted) return prompt;
   const parts: string[] = [];
-  if (context.restarted) parts.push('The cezar process restarted while you were working on this task. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context.');
+  if (context.restarted) parts.push(`The ${productName('Cezar')} process restarted while you were working on this task. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context.`);
   if (context.failure) {
     const { stepId, error } = context.failure;
     // Error messages can contain newlines; keep the diagnostic on one line without changing

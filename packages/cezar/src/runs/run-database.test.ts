@@ -560,7 +560,7 @@ describe('RunDatabase', () => {
     // would drop as unreadable.
     // Schema 6 (hearsay-tools/cezarion#1235): records carry worker waits, which a schema-5 build
     // would drop as unreadable.
-    // Schema 7 (hearsay-tools/cezarion#1301): Cezar's completion wait is a deadline-less list entry,
+    // Schema 7 (hearsay-tools/cezarion#1301): Squawk's completion wait is a deadline-less list entry,
     // which a schema-6 build would drop as unreadable.
     // Schema 8 (hearsay-tools/cezarion#1236): a usage-limited run is waiting with autoResumeAt,
     // which a schema-7 build would strip of its appointment and show as Needs you.

@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { describe, expect, it } from 'vitest';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
 import { previewHint, previewResult, validateRegistration } from './registration.ts';
@@ -74,7 +75,7 @@ describe('previewResult (#781)', () => {
   it('carries the command and port into the registered message and hint', () => {
     const result = previewResult('registered', { ...request, label: 'vite' });
     expect(result).toMatchObject({ ok: true, code: 'registered', message: 'Registered `:5173` (vite) for this task.' });
-    expect(result.hint).toContain('Cezar runs `npm run dev -- --port 5173 --strictPort` in the worktree');
+    expect(result.hint).toContain(`${productName('Cezar')} runs \`npm run dev -- --port 5173 --strictPort\` in the worktree`);
     expect(result.hint).toContain('Do not wait for the user to open it.');
     expect(previewResult('replaced', request)).toMatchObject({ ok: true, message: 'Replaced the registration for `:5173`.', hint: result.hint });
   });

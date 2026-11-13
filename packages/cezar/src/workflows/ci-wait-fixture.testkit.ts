@@ -77,7 +77,7 @@ export function githubByPr(lookupGate?: Promise<void>) {
   return { settle: (n: number) => watches.get(n)!.settle(success()), aborted: (n: number) => watches.get(n)?.signal.aborted };
 }
 
-/** A root parked on Cezar's no-wait human wait: its turn took the no-wait nudge and answered it in
+/** A root parked on Squawk's no-wait human wait: its turn took the no-wait nudge and answered it in
  *  plain text, one automatic wake (hearsay-tools/cezarion#1234). The agent's first wait replaces it. */
 export async function waitingParent() {
   const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');

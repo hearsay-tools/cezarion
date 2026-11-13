@@ -287,7 +287,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-deep-tmp-home-'));
     // Deep enough that the repo-local per-run path crosses the socket cap —
-    // the shape Cezar's own nested task worktrees produce.
+    // the shape Squawk's own nested task worktrees produce.
     repoRoot = join(realpathSync(tmpdir()), `cez-deep-tmp-${'r'.repeat(80)}`, 'repo');
     dataDir = join(repoRoot, '.ai/cezar');
     useTestHome(home ? Home.sandbox(home) : undefined);

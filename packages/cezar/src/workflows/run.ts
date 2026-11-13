@@ -127,7 +127,7 @@ export class RunManager {
   }
   /** The runner factory this manager was built with, for the planner beside it. */
   get createRunner(): RunnerFactory { return this.#context.createRunner; }
-  /** #781: cezar's own listening port, which no dev server may register. */
+  /** #781: Squawk's own listening port, which no dev server may register. */
   readonly #squawkPort: (() => number | undefined) | undefined;
   #ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
 
@@ -342,7 +342,7 @@ export class RunManager {
   setDelegationProvisioner(provisioner: DelegationProvisioner): () => void { return launchContext.setDelegationProvisioner(this.#modules.launchSettingsHost, provisioner); }
 
   /**
-   * The trusted callbacks behind one session's cezar tools (hearsay-tools/cezarion#1233). Both
+   * The trusted callbacks behind one session's Squawk tools (hearsay-tools/cezarion#1233). Both
    * answers list the waits still open; a coded refusal answers with its fixed message, never the
    * thrower's text, and anything else is left to the tool server's `unavailable`.
    */
@@ -394,7 +394,7 @@ export class RunManager {
 
   /**
    * Startup recovery (#367) — re-adopt runs that were live when the previous
-   * cezar process exited (requires the store opened with `keepLive`):
+   * Squawk process exited (requires the store opened with `keepLive`):
    *  - `queued`  → back into the queue (FIFO by createdAt), from the persisted
    *    workflowDef (or the catalog by name for older records);
    *  - `waiting` → preserve the durable attention state, while reaping the

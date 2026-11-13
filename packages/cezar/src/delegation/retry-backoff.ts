@@ -2,7 +2,7 @@
  * One retry schedule for the cleanup loops that have no other wake source (hearsay-tools/cezarion#879):
  * worker destroy, terminal scratch and orphaned-generation reprobes. Each stays at its fast cadence
  * for `fastCount` attempts, so a holder that exits soon is noticed soon, then doubles up to `capMs`
- * and stays there. None ever stops: cezar has no exit callback for a process it did not spawn.
+ * and stays there. None ever stops: Squawk has no exit callback for a process it did not spawn.
  */
 export type Backoff = { fastMs: number; fastCount: number; capMs: number };
 

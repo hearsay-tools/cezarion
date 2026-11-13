@@ -2,7 +2,7 @@ import { benchmarkHome, prepareBenchmarkEnv } from './benchmark-home.ts';
 import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Stuck-destroy benchmark (hearsay-tools/cezarion#879): what permanently stuck worker destroys
- * cost an otherwise idle cezar. Run it unchanged before and after a change to the cleanup loops.
+ * cost an otherwise idle Squawk. Run it unchanged before and after a change to the cleanup loops.
  *
  *   npm run bench:stuck-destroys -w @wjarka/cezarion                       # 20 workers, 10 minutes
  *   node --import tsx packages/cezar/scripts/benchmark-stuck-destroys.ts --workers 0 --minutes 10

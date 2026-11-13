@@ -21,7 +21,7 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
 
   it('completes after git gc rewrote the branch reflog between provisioning and destroy (hearsay-tools/cezarion#904)', async () => {
     const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
-    // Still recorded, though no longer compared: an older cezar requires it to parse the receipt.
+    // Still recorded, though no longer compared: an older Squawk requires it to parse the receipt.
     expect(JSON.parse(await readFile(receiptPath(root, workspace), 'utf8')).branchIdentity.file).toMatchObject({ ino: expect.any(Number) });
     await gcRewritesReflog(root, workspace);
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });

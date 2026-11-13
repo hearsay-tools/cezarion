@@ -69,9 +69,9 @@ export async function idleClose(clock: ReturnType<typeof observeIdleClose>, id: 
 
 /** The refusal nudges a blocked done received (hearsay-tools/cezarion#1301), as their notes. */
 export const completionNudges = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
-/** The agent inputs Cezar submitted on the session, by text. */
+/** The agent inputs Squawk submitted on the session, by text. */
 export const sentTexts = (sent: string[], text: string) => sent.filter(entry => entry.includes(text));
-/** Record every text a session is sent through Cezar's agent-input seam. */
+/** Record every text a session is sent through Squawk's agent-input seam. */
 export function recordAgentInput(id: string): string[] {
   const sent: string[] = [];
   const session = sessionOf(id);

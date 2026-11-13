@@ -15,6 +15,7 @@ import { RunStore } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-claude.testkit.ts';
 import type { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { productName } from '../home/display.ts';
 
 /**
  * Worktree setup through the real engine (#917, spec `.ai/specs/2026-10-07-worktree-setup.md`):
@@ -120,7 +121,7 @@ describe('worktree setup on task start (#917)', () => {
     expect(record.worktreeSetup?.status).toBe('done');
     expect(typeof record.worktreeSetup?.durationMs).toBe('number');
     const [opening] = openingMessages(f);
-    expect(opening).toContain('Cezar prepared this worktree before your session started:');
+    expect(opening).toContain(`${productName('Cezar')} prepared this worktree before your session started:`);
     expect(opening).toContain('`pwd > "$CEZ_PROJECT_ROOT/.setup-cwd"`');
     // The note is the setup's record; the handoff gets no line (hearsay-tools/cezarion#1809).
     expect(readFileSync(handoffPath(f.dataDir, id), 'utf8')).not.toContain('worktree setup');
@@ -145,7 +146,7 @@ describe('worktree setup on task start (#917)', () => {
     const id = await runToEnd(f, 'do the thing');
     expect(messages(f, id).some((m) => m.startsWith('worktree setup skipped — worktreeSetup in .ai/cezar/config.json is invalid (commands:'))).toBe(true);
     expect(f.store.readEvents(id).filter((e) => e.type === 'check-output' && (e as { stepId?: unknown }).stepId === undefined)).toHaveLength(0);
-    expect(openingMessages(f)[0]).toContain("Cezar's worktree setup did not run");
+    expect(openingMessages(f)[0]).toContain(`${productName('Cezar')}'s worktree setup did not run`);
     expect(f.store.getRun(id)?.worktreeSetup?.status).toBe('failed');
   }, 60_000);
 
@@ -188,7 +189,7 @@ describe('worktree setup on task start (#917)', () => {
     const record = f.manager.startRun(WORKFLOW, { task: 'do the thing' });
     await waitFor(() => f.store.getRun(record.id)?.worktreeSetup?.status === 'running' && countLines() === 1, 'setup to start');
     // The crash: snapshot what was on disk while setup ran, stop this process's work, then
-    // restore the snapshot under a fresh store and manager, as a restarted cezar finds it.
+    // restore the snapshot under a fresh store and manager, as a restarted Squawk finds it.
     f.store.flush();
     const snapshot = readPersistedRuns(f.dataDir);
     f.manager.cancel(record.id);
@@ -258,7 +259,7 @@ describe('worktree setup on Continue (#917)', () => {
     expect(countLines(f)).toBe(2);
     expect(existsSync(worktreePath)).toBe(true);
     expect(openingMessages(f)[0]).toContain('go on');
-    expect(openingMessages(f)[0]).toContain('Cezar prepared this worktree before your session started:');
+    expect(openingMessages(f)[0]).toContain(`${productName('Cezar')} prepared this worktree before your session started:`);
     expect(f.store.getRun(id)?.worktreeSetup?.status).toBe('done');
   }, 90_000);
 
@@ -269,7 +270,7 @@ describe('worktree setup on Continue (#917)', () => {
     expect(f.manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
     await waitFor(() => openingMessages(f).length > 0, 'the continuation to open');
     expect(countLines(f)).toBe(1);
-    expect(openingMessages(f)[0]).not.toContain('Cezar prepared');
+    expect(openingMessages(f)[0]).not.toContain(`${productName('Cezar')} prepared`);
   }, 90_000);
 });
 

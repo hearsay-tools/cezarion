@@ -1,9 +1,9 @@
-import { productName } from '../home/display.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, fstatSync, fsyncSync, linkSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { anotherCockpitOwner } from '../server/cockpit-ownership.ts';
+import { productName } from '../home/display.ts';
 
 /**
  * Read and back up exact legacy-index bytes. Refuse import for a foreign live cockpit or changed
@@ -123,7 +123,7 @@ export function backUpLegacyIndex(dataDir: string, snapshot: LegacyIndexSnapshot
   throw new Error(`cannot back up ${LEGACY_INDEX_FILE}: both backup names are taken by other contents`);
 }
 
-/** An older cezar still writes `runs.json`, so it was not imported. */
+/** An older Squawk still writes `runs.json`, so it was not imported. */
 export class LegacyWriterError extends Error {
   /** `cockpit`: a live cockpit other than this process holds `cockpit.lock`. `changed`: the file
    *  changed between the read and the import. */
@@ -146,7 +146,7 @@ export function assertNoLegacyCockpit(dataDir: string): void {
 }
 
 /**
- * Throw `LegacyWriterError` when an older cezar may still be writing `runs.json`: another live
+ * Throw `LegacyWriterError` when an older Squawk may still be writing `runs.json`: another live
  * cockpit owns `dataDir` (`assertNoLegacyCockpit`), or the file is no longer what `snapshot` read
  * (undefined: there was none). Inside the import transaction, right before it commits, this is
  * the authority; asked earlier it only saves the work of an import that could not commit.

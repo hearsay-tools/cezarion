@@ -199,7 +199,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     const [budget, ...more] = humanOpen(run.id);
     expect(more).toEqual([]);
     expect(budget).toMatchObject({ via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open });
-    // Cezar's own wait is shown as its note and raises no human gate (hearsay-tools/cezarion#1234).
+    // Squawk's own wait is shown as its note and raises no human gate (hearsay-tools/cezarion#1234).
     expect(store.readEvents(run.id).find(event => event.seq === budget!.askSeq))
       .toMatchObject({ type: 'note', message: `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you` });
     expect(gates(run.id)).toEqual([]);
@@ -209,7 +209,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
 
 // hearsay-tools/cezarion#1234, hearsay-tools/cezarion#2397: every session is taught the tools,
 // and a monitoring wake speaks them.
-describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, () => {
+describe('the lifecycle prompt teaches the Squawk tools', { timeout: 45_000 }, () => {
   useWorkerWaitFixture({ nudgeReply: 'card' });
   afterEach(() => vi.restoreAllMocks());
 

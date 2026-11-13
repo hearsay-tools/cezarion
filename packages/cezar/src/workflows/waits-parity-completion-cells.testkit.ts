@@ -14,7 +14,7 @@ import { toolCall } from './waits-parity.testkit.ts';
 // A wait parity file imports this module first, so it loads no other part's cells (hearsay-tools/cezarion#3242).
 export const { describeWaitParity } = waitPartDescribers('completion', completionCells);
 
-/** A delegating parent parked on Cezar's completion wait (`ignoreRefusal`) on worker `w`, which
+/** A delegating parent parked on Squawk's completion wait (`ignoreRefusal`) on worker `w`, which
  *  sends it messages with its own credential, as `cez worker send` does. `w` is created after the
  *  done its reply turn sends was accepted, then starts and plain-parks: an idle worker that only
  *  talks. Its park sends the parent one park notice (hearsay-tools/cezarion#1327), which wakes it
@@ -39,11 +39,11 @@ async function completionParkOnMessenger(runner: RunnerId) {
 
 export function completionCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
-    it(`${runner} U21 an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes`, async () => {
+    it(`${runner} U21 an ignored refusal with live workers parks on a Squawk worker wait that settlement wakes`, async () => {
       const reply = repliesDoneAgain();
       const p = await workerParent(runner);
       const { second: w, entry } = await ignoreRefusal(runner, p.id, reply, () => workerWaits(p.id)[0]?.phase === 'open');
-      // Only Cezar's completion wait is open: no implicit live-worker re-check timer beside it.
+      // Only Squawk's completion wait is open: no implicit live-worker re-check timer beside it.
       expect(store.getRun(p.id)?.waits).toEqual([entry]);
       expect(entry).toMatchObject({ kind: WAIT_KIND.worker, source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, mode: 'all', workerIds: [w.id], phase: WAIT_PHASE.open });
       expect(entry).not.toHaveProperty('deadline');

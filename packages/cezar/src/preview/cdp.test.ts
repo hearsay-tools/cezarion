@@ -125,7 +125,7 @@ describe('connectCdp (#781)', () => {
 });
 
 describe('cdpOverPipe (hearsay-tools/cezarion#784)', () => {
-  /** A fake browser end: what cezar writes arrives on `commands`; `reply` writes NUL-ended frames back. */
+  /** A fake browser end: what Squawk writes arrives on `commands`; `reply` writes NUL-ended frames back. */
   function fakePipe() {
     const toBrowser = new PassThrough();
     const fromBrowser = new PassThrough();

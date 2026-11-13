@@ -38,7 +38,7 @@ interface WorkerQuestionsHost {
   updatePendingHumanAsk(id: string, value: boolean): void;
 }
 type HumanAnswerBudget = { spent: number };
-/** Who answers a worker's pending question: its parent, or Cezar when a live parent cannot take it
+/** Who answers a worker's pending question: its parent, or Squawk when a live parent cannot take it
  *  (hearsay-tools/cezarion#2410). Never a human. */
 export type QuestionAnswerSource = 'parent' | 'cezar';
 /** Why a worker's question closed unanswered (hearsay-tools/cezarion#2410). */
@@ -56,7 +56,7 @@ export class WorkerQuestions {
 
   /** A worker's pending question goes to its owning parent as a conversation request (#505). The
    * worker still parks on its ask; only the parent's reply answers it. A question with no live
-   * parent, or a worker that stopped, closes; one a live parent cannot take gets Cezar's answer
+   * parent, or a worker that stopped, closes; one a live parent cannot take gets Squawk's answer
    * with the reason (hearsay-tools/cezarion#2410). Routing is idempotent: the message ID derives
    * from the ask seq. */
   routeWorkerQuestion(workerId: string): void {
@@ -68,7 +68,7 @@ export class WorkerQuestions {
     // outcome closes a question that never reached the parent, and the close retires that answer.
     if (!['queued', 'running', 'waiting'].includes(worker.status) || worker.stopping) { this.closeQuestion(workerId, ask.seq, 'worker-stopped'); return; }
     if (this.undeliveredAnswer(workerId, ask.seq)) { this.recordUndelivered(workerId, ask.seq, undefined); return; }
-    // A routed question whose parent can no longer be read cannot be answered there: Cezar answers it.
+    // A routed question whose parent can no longer be read cannot be answered there: Squawk answers it.
     if (ask.routedMessageId !== undefined) { this.answerForUnreadableParent(workerId, worker.delegation.parentRunId, ask.seq); return; }
     const request = askRequestOf(ask);
     if (!request) { this.answerUndelivered(workerId, ask.seq, 'the question is not a valid request'); return; }
@@ -97,9 +97,9 @@ export class WorkerQuestions {
     this.host.deliverConversationInput(parentId);
   }
 
-  /** A routed question whose parent record can no longer be read gets Cezar's answer. A reply the
+  /** A routed question whose parent record can no longer be read gets Squawk's answer. A reply the
    *  parent sent before goes first, so the worker takes one answer. A reply a live inbox claim still
-   *  holds stays, and Cezar does not answer beside it: the next pass after it is taken does. A failed
+   *  holds stays, and Squawk does not answer beside it: the next pass after it is taken does. A failed
    *  write leaves this for the next pass too. */
   private answerForUnreadableParent(workerId: string, parentId: string, askSeq: number): void {
     if (!this.context.store.isUnreadable(parentId)) return;
@@ -109,23 +109,23 @@ export class WorkerQuestions {
     this.answerUndelivered(workerId, askSeq, 'the parent record cannot be read');
   }
 
-  /** The ID of Cezar's answer to a worker question that could not reach its parent: one per ask, so
+  /** The ID of Squawk's answer to a worker question that could not reach its parent: one per ask, so
    *  a restart that routes again finds it instead of answering twice. */
   undeliveredAnswerId(workerId: string, askSeq: number): string {
     return uuidFrom(`undelivered-question:${workerId}:${askSeq}`);
   }
 
-  /** Cezar's answer to this ask, when one was queued (hearsay-tools/cezarion#2410). */
+  /** Squawk's answer to this ask, when one was queued (hearsay-tools/cezarion#2410). */
   private undeliveredAnswer(workerId: string, askSeq: number): AgentInput | undefined {
     const id = this.undeliveredAnswerId(workerId, askSeq);
     return this.context.store.getRun(workerId)?.agentInputs?.find(input => input.id === id && input.purpose === 'undelivered-question');
   }
 
   /**
-   * A live parent cannot take the worker's question (hearsay-tools/cezarion#2410): Cezar answers it
+   * A live parent cannot take the worker's question (hearsay-tools/cezarion#2410): Squawk answers it
    * with the reason through the answer seam a parent's reply uses, so the worker decides what to do
    * next and no human card holds it. The answer is queued with its automatic-wake charge, so a
-   * worker that asks again cannot loop past the budget. Cezar's own "Worker idle" question, a spent
+   * worker that asks again cannot loop past the budget. Squawk's own "Worker idle" question, a spent
    * budget or a queue that refuses the answer closes the question instead, and the worker parks.
    */
   answerUndelivered(workerId: string, askSeq: number, reason: string): void {
@@ -154,7 +154,7 @@ export class WorkerQuestions {
   }
 
   /** The answers queued for the worker's pending question that it has not taken: the parent's
-   *  replies to the routed question, and Cezar's answer when it was not delivered. */
+   *  replies to the routed question, and Squawk's answer when it was not delivered. */
   private queuedAnswerIds(workerId: string): string[] {
     const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
     const routedId = ask?.routedMessageId;
@@ -172,7 +172,7 @@ export class WorkerQuestions {
     this.context.store.appendEvent(workerId, { type: 'worker-question-undelivered', askSeq, reason: reason ?? 'the parent could not take it' });
   }
 
-  /** The worker's pending question closes unanswered (hearsay-tools/cezarion#2410), and Cezar's own
+  /** The worker's pending question closes unanswered (hearsay-tools/cezarion#2410), and Squawk's own
    *  human wait for it goes. Idempotent: a question that already closed is left alone. */
   closeQuestion(workerId: string, askSeq: number, reason: QuestionCloseReason, detail?: string): void {
     if (this.context.store.transcriptFacts(workerId).pendingAsk?.seq !== askSeq) return;
@@ -188,10 +188,10 @@ export class WorkerQuestions {
 
   /**
    * A worker parked before finishing while its parent waits on it tells the parent why
-   * (hearsay-tools/cezarion#1327): Cezar posts a progress message from the worker, which wakes the
+   * (hearsay-tools/cezarion#1327): Squawk posts a progress message from the worker, which wakes the
    * parent and closes no wait. A parked question needs none, since the question itself goes to the
    * parent. At most one notice per parent wait (`parkNoticeId`), and none when the turn that
-   * parked already messaged the parent, Cezar's own notice included. The message and the parent's
+   * parked already messaged the parent, Squawk's own notice included. The message and the parent's
    * input commit together; a crash before that commit leaves the recovery sweep to post it.
    */
   noticeParkedWorker(workerId: string): void {
@@ -273,7 +273,7 @@ export class WorkerQuestions {
       const input = this.context.store.getRun(runId)?.agentInputs?.find(entry => !entry.deliveredAt && answersQuestion(routed.message, entry));
       if (input) return { askSeq: routed.askSeq, input, source: 'parent' };
     }
-    // Cezar's answer stands whether or not the parent's ledger can be read again.
+    // Squawk's answer stands whether or not the parent's ledger can be read again.
     const ask = this.context.store.getRun(runId)?.delegation?.role === 'worker' ? this.context.store.transcriptFacts(runId).pendingAsk : undefined;
     const input = ask && !ask.fallback ? this.undeliveredAnswer(runId, ask.seq) : undefined;
     return ask && input && !input.deliveredAt ? { askSeq: ask.seq, input, source: 'cezar' } : undefined;
@@ -287,7 +287,7 @@ export class WorkerQuestions {
     return ask && input.purpose === 'undelivered-question' && input.id === this.undeliveredAnswerId(runId, ask.seq) ? 'cezar' : undefined;
   }
 
-  /** The worker's pending question belongs to its parent or to Cezar: no human answers it. The
+  /** The worker's pending question belongs to its parent or to Squawk: no human answers it. The
    *  worker's own routing marker decides, so a parent ledger that cannot be read hides nothing. */
   answeredElsewhere(runId: string): boolean {
     const ask = this.context.store.getRun(runId)?.delegation?.role === 'worker' ? this.context.store.transcriptFacts(runId).pendingAsk : undefined;
@@ -364,7 +364,7 @@ export class WorkerQuestions {
 
   /**
    * A worker that ended a second turn with no wait or done after its no-wait nudge
-   * (hearsay-tools/cezarion#1301): Cezar's `no-wait` human wait carries one open question, raised
+   * (hearsay-tools/cezarion#1301): Squawk's `no-wait` human wait carries one open question, raised
    * as `ask.requested` so `routeWorkerQuestion` takes it to the parent as a request. The parent's
    * reply resumes the worker through the answer seam, charged to the worker's budget; a parent that
    * cannot take it closes it (hearsay-tools/cezarion#2410), and the worker parks. A full wait list
@@ -389,7 +389,7 @@ export class WorkerQuestions {
     return questions?.length === 1 && questions[0]!.header === WORKER_FALLBACK_HEADER && questions[0]!.question === WORKER_FALLBACK_QUESTION(runId);
   }
 
-  /** The worker's pending question is Cezar's fallback question. */
+  /** The worker's pending question is Squawk's fallback question. */
   pendingWorkerFallback(runId: string): boolean {
     const ask = this.context.store.transcriptFacts(runId).pendingAsk;
     return this.context.store.getRun(runId)?.delegation?.role === 'worker' && !!ask && this.isWorkerFallbackAsk(runId, ask.seq);
@@ -404,11 +404,11 @@ export class WorkerQuestions {
   }
 
   /**
-   * Cezar's fallback question is Cezar's, not the worker's (hearsay-tools/cezarion#1301): what the
+   * Squawk's fallback question is Squawk's, not the worker's (hearsay-tools/cezarion#1301): what the
    * plain park it replaced let through still goes through. A parent's input, a Continue or a closed
    * session supersedes it: its routed request gets an outcome, so it no longer holds the parent's
    * done, the parent's unread copy is retired, and only then does the question close unanswered
-   * (`human-ask-closed`, `superseded`) and Cezar's wait go. Each step is idempotent and the close
+   * (`human-ask-closed`, `superseded`) and Squawk's wait go. Each step is idempotent and the close
    * comes last, so a failed write leaves the question pending and the next supersession, or
    * recovery, finishes it. A question the worker asked itself is never superseded. True when it
    * closed.

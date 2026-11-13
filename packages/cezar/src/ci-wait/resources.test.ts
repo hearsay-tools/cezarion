@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { logPrefix } from '../home/display.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CiToolController, ToolsUnavailableError } from './controller.ts';
@@ -42,7 +43,7 @@ describe('the shared tool controller', () => {
     vi.stubEnv('TMPDIR', '/nonexistent-cez-2397');
     try {
       await expect(CiToolController.start()).rejects.toThrow(
-        /^Cezar tools could not start: ENOENT: no such file or directory, mkdtemp '\/nonexistent-cez-2397\/cez-ci-\w+'\. .*Free space in \/nonexistent-cez-2397 /);
+        new RegExp(String.raw`^${productName('Cezar')} tools could not start: ENOENT: no such file or directory, mkdtemp '\/nonexistent-cez-2397\/cez-ci-\w+'\. .*Free space in \/nonexistent-cez-2397 `));
     } finally {
       vi.unstubAllEnvs();
     }
@@ -50,9 +51,9 @@ describe('the shared tool controller', () => {
 
   it('names the cause and the fix', () => {
     expect(new ToolsUnavailableError("EACCES: permission denied, mkdtemp '/tmp/cez-ci-XXXXXX'", '/tmp').message).toBe(
-      "Cezar tools could not start: EACCES: permission denied, mkdtemp '/tmp/cez-ci-XXXXXX'. Every agent session needs a private socket directory in /tmp. Free space in /tmp or fix its permissions, then Continue the task.");
+      `${productName('Cezar')} tools could not start: EACCES: permission denied, mkdtemp '/tmp/cez-ci-XXXXXX'. Every agent session needs a private socket directory in /tmp. Free space in /tmp or fix its permissions, then Continue the task.`);
     expect(new ToolsUnavailableError('the server stopped', undefined).message).toBe(
-      'Cezar tools could not start: the server stopped. Every agent session needs a private named pipe. Fix the cause, then Continue the task.');
+      `${productName('Cezar')} tools could not start: the server stopped. Every agent session needs a private named pipe. Fix the cause, then Continue the task.`);
   });
 });
 

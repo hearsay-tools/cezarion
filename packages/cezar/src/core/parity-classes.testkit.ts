@@ -7,7 +7,7 @@ import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
  *
  * - `every-runner`: the cells branch on a runner's own code, or read a narrow fact (native ask,
  *   native subagents, the native timer tool, cumulative cost). Every runner in `RUNNER_IDS`.
- * - `shared`: the cells test Cezar's logic above the seam, which sees a runner only through its
+ * - `shared`: the cells test Squawk's logic above the seam, which sees a runner only through its
  *   turn-path facts. The derived `SHARED_RUNNERS` show every value of those facts once. A row of
  *   a shared family still runs on every runner when the family lists it in `everyRunner`, when
  *   `PARITY_EXEMPTIONS` exempts any runner from it, or when its cell title carries no row id
@@ -21,7 +21,7 @@ import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
  */
 
 /**
- * The turn-path facts (hearsay-tools/cezarion#2991): the declared facts that decide how Cezar's
+ * The turn-path facts (hearsay-tools/cezarion#2991): the declared facts that decide how Squawk's
  * shared logic above the seam sees a turn and its input. A shared parity row runs on the runners
  * that together show every value of each of these facts; `cez/runner-fact-combination` keeps
  * shared code from combining two of them, so one runner per value is enough.
@@ -99,7 +99,7 @@ export const PARITY_FAMILIES = {
     .map(group => [`harness:${group}`, everyRunner(HARNESS_SEAM)])),
   'harness:answer': everyRunner('R26 resumes a different native ask kind on each runner (askResumeCases)'),
   'harness:owner': everyRunner(`R50 parks on the ask scenario: ${NATIVE_ASK_SCENARIO}`),
-  // Harness run tier: RunManager cells whose outcome is Cezar's.
+  // Harness run tier: RunManager cells whose outcome is Squawk's.
   'harness:run': shared('RunManager cells over the native wire', {
     R1: SMOKE, R2: 'a provider request rejection is the runner\'s own', R3: `R3 ${NATIVE_ASK_SCENARIO}`,
   }),
@@ -117,7 +117,7 @@ export const PARITY_FAMILIES = {
   ...Object.fromEntries(['continue', 'restart', 'adopt', 'stop', 'cleanup', 'multi-continue', 'superseded', 'disposal', 'scratch']
     .map(group => [`harness:${group}`, shared('RunManager and store ownership, settlement and scratch rules')])),
   // Waits.
-  waits: shared('the wait list, its wakes and its refusals are Cezar\'s; steer or boundary and the acknowledgement are turn-path facts', {
+  waits: shared('the wait list, its wakes and its refusals are Squawk\'s; steer or boundary and the acknowledgement are turn-path facts', {
     U1: `${SMOKE}: registration through each runner's own tool transport`,
     U7k: NATIVE_ASK_SCENARIO,
     U8l: 'asserts an opencode-only session state',
@@ -129,17 +129,17 @@ export const PARITY_FAMILIES = {
   'ci-wait-conflict': shared('conflict resolution in the wait registry'),
   'ci-wait-rerun': shared('reruns in the CI supervisor'),
   'ci-wait-retry': shared('source retry in the CI supervisor'),
-  'ci-wait-failure': shared('the failed CI attempt, its history and the resumed workflow are Cezar\'s; S44 holds each runner\'s part of the gated provider error, and R14 (harness:owned-workflows, every runner) each runner\'s own account and home'),
+  'ci-wait-failure': shared('the failed CI attempt, its history and the resumed workflow are Squawk\'s; S44 holds each runner\'s part of the gated provider error, and R14 (harness:owned-workflows, every runner) each runner\'s own account and home'),
   'pr-merge-wait': shared('PR merge waits in the wait registry'),
   'worker-reboot': shared('reboot settlement reads the worker process ledger; S43 holds each runner to reporting its native processes, and runner-shutdown to stopping them'),
   'worker-restart': shared('restart settlement reads the worker process ledger; S43 holds each runner to reporting its native processes, and runner-shutdown to stopping them'),
   'session-context': shared('launch context is built in run/launch-context.ts; resume prompt and input delivery are turn-path facts'),
-  'resume-diagnostics': shared('resume diagnostics are built by Cezar; the in-thread prefix is systemPromptOnResume', {
+  'resume-diagnostics': shared('resume diagnostics are built by Squawk; the in-thread prefix is systemPromptOnResume', {
     R85: PROVIDER_ERROR_START, R88: PROVIDER_ERROR_START, R89: PROVIDER_ERROR_START,
   }),
   // Workflow families.
-  'workflow-autonomous': shared('the autonomous policy is Cezar\'s'),
-  'workflow-ask': shared('cezar_ask is Cezar\'s tool', {
+  'workflow-autonomous': shared('the autonomous policy is Squawk\'s'),
+  'workflow-ask': shared('cezar_ask is Squawk\'s tool', {
     Q8: 'its authored timeout reaches each runner\'s own step deadline',
   }),
   'workflow-final-message': shared('the final-message rules are decided in turn-end.ts', {
@@ -148,11 +148,11 @@ export const PARITY_FAMILIES = {
   'workflow-followup': everyRunner('the follow-up hold (H rows) is each runner class\'s own'),
   'workflow-no-progress': everyRunner('each runner reports its own model progress'),
   'workflow-step-completion': shared('step completion is decided in run.ts'),
-  'workflow-timeout': shared('which deadline a step passes is decided in run/step-session.ts, and a timed-out step is Cezar\'s; T7 holds each runner to applying the deadline', {
+  'workflow-timeout': shared('which deadline a step passes is decided in run/step-session.ts, and a timed-out step is Squawk\'s; T7 holds each runner to applying the deadline', {
     T4: 'each runner\'s own default deadline, on its seam',
     T7: 'the seam row: each runner applies a set spec.timeoutMs in place of its default',
   }),
-  'skill-resume': shared('inbox generation is Cezar\'s', {
+  'skill-resume': shared('inbox generation is Squawk\'s', {
     R53: 'the resumed skill prompt on each runner\'s wire', R54: 'the resumed skill prompt on each runner\'s wire',
     R55: 'the resumed skill prompt on each runner\'s wire', R56: 'the resumed skill prompt on each runner\'s wire',
     R57: 'the recorded session on each runner\'s wire', R59: 'reuses each runner\'s recorded session',
@@ -200,12 +200,12 @@ export const PARITY_FILES: ReadonlyArray<readonly [RegExp, readonly ParityFamily
   [/^server\/(?:contract|route|query-repeat)-parity(?:\.[a-z]+)?\.test\.ts$/, ['server-contract']],
 ];
 
-/** Whether a native mock scenario's outcome is the runner's own code or Cezar's. */
+/** Whether a native mock scenario's outcome is the runner's own code or Squawk's. */
 export type ScenarioClass = 'runner-code' | 'shared';
 
-const MAPPER = 'a turn shape every mapper emits alike (ui-parity holds the mappers); Cezar decides the outcome';
+const MAPPER = 'a turn shape every mapper emits alike (ui-parity holds the mappers); Squawk decides the outcome';
 const TURN_PATH = 'it differs only by a turn-path fact, which the shared runner set shows value by value';
-const SQUAWK_TOOL = 'the same Cezar tool call on every wire';
+const SQUAWK_TOOL = 'the same Squawk tool call on every wire';
 const OWN_ERROR = 'the runner maps its own provider or process failure';
 const PERMISSION = 'a native permission or approval request exists only on some wires and each answers it its own way';
 const NATIVE_ASK = 'a native ask exists only where nativeAsk is answerable (codex, opencode)';
@@ -231,8 +231,8 @@ export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioC
   autonomous: ['shared', SQUAWK_TOOL],
   'autonomous-cap': ['shared', SQUAWK_TOOL],
   'autonomous-cezar-ask-cap': ['shared', SQUAWK_TOOL],
-  hold: ['shared', 'the mock delays its terminal turn signal; Cezar decides what happens meanwhile'],
-  'hold-gated': ['shared', 'the mock holds its turn until a gate file exists; Cezar decides what happens meanwhile'],
+  hold: ['shared', 'the mock delays its terminal turn signal; Squawk decides what happens meanwhile'],
+  'hold-gated': ['shared', 'the mock holds its turn until a gate file exists; Squawk decides what happens meanwhile'],
   'hold-cezar-done': ['shared', SQUAWK_TOOL],
   'hold-cezar-ask': ['shared', SQUAWK_TOOL],
   'steer-tool': ['shared', TURN_PATH],
@@ -241,8 +241,8 @@ export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioC
   // Split from provider-error (hearsay-tools/cezarion#2991): the same native provider error, raised by
   // the mock's failure control in a running turn (gated) or at a wake's opening (persistent). Seam
   // contract row S44 drives both on every runner and holds the runner's part (an error before any turn
-  // end, and an end once interrupted), so what a row reads above it is Cezar's.
-  'provider-error-controlled': ['shared', 'S44 holds each runner\'s mapping of the failure control\'s provider error on every runner; Cezar decides the outcome'],
+  // end, and an end once interrupted), so what a row reads above it is Squawk's.
+  'provider-error-controlled': ['shared', 'S44 holds each runner\'s mapping of the failure control\'s provider error on every runner; Squawk decides the outcome'],
   'provider-unavailable': ['runner-code', OWN_ERROR],
   'provider-rate-limit': ['runner-code', OWN_ERROR],
   'provider-not-found': ['runner-code', OWN_ERROR],

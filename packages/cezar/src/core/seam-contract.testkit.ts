@@ -22,7 +22,7 @@
  *   ledger records exactly these pids (worker-reboot, worker-restart).
  * - S44: a provider failure in a turn that a wake opened, or in a turn that runs a while before it
  *   fails, reaches v1 as an `error` before any turn end and v2 as an error, and the session ends
- *   once Cezar interrupts it, as `recordSessionFault` does.
+ *   once Squawk interrupts it, as `recordSessionFault` does.
  *
  * A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends these
  * rows, which run on every runner (docs/areas/runners.md).
@@ -565,7 +565,7 @@ async function observeProcesses(backend: RunnerId): Promise<ContractObservation>
       scenario: 'hold', variant: 'processes', env: { CEZ_MOCK_PID_FILE: pidFile },
       sessionOptions: { onPidChange: report },
       whileOpen: async (session, rec) => {
-        // As Cezar reads it: right after startSession returns (workflows/run/input-receipts.ts).
+        // As Squawk reads it: right after startSession returns (workflows/run/input-receipts.ts).
         report(session.pid);
         await waitFor(() => turnEnds(rec) >= 1);
         // A follow-up turn: a runner that starts a process per turn (Cursor print) starts another.
@@ -618,7 +618,7 @@ async function observeProviderFailure(backend: RunnerId, variant: typeof FAILURE
           control.release();
         }
         await waitFor(() => v1Of(rec).some(event => event.type === 'error'));
-        // Cezar interrupts a session on its first error (workflows/run/session-events.ts).
+        // Squawk interrupts a session on its first error (workflows/run/session-events.ts).
         rec.mark('interrupt');
         session.interrupt();
         // bound: the session must end after the interrupt; one that does not fails the test's timeout.

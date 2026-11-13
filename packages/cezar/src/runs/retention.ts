@@ -216,7 +216,7 @@ export async function reclaimWorktree(
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected
-  // Claimed in the run database too, for the whole reclaim (#779, plan step 3): no other cezar
+  // Claimed in the run database too, for the whole reclaim (#779, plan step 3): no other Squawk
   // process writes this run or reclaims it meanwhile, and another process's run is left alone.
   // Structural test stores have no claims.
   let pinned = typeof real.pin !== 'function';

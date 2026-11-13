@@ -16,7 +16,7 @@ export function parseRpcLine(line: string): unknown {
   }
 }
 
-/** A cezar prompt as the RPC `prompt` command's message text and images. */
+/** A Squawk prompt as the RPC `prompt` command's message text and images. */
 export function toPiPrompt(content: ContentBlock[]): {
   message: string;
   images: Array<{ type: 'image'; data: string; mimeType: string }>;
