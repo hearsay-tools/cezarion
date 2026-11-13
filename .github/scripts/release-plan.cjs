@@ -208,7 +208,7 @@ async function releaseSource({ github, context, git, registry, bump, branch, now
   if (!isReleaseBump(bump)) throw new Error(`Unknown bump ${bump}.`);
   const last = lastStablePublish(registry.time);
   if (last !== null && now - last < COOLDOWN_MS) {
-    throw new Error(`The last stable release was published ${new Date(last).toISOString()}. A second stable release within 24 hours is refused; use a rollback for a broken release.`);
+    throw new Error(`Release refused: the last stable release was published ${new Date(last).toISOString()}. A second stable release within 24 hours is refused; use a rollback for a broken release.`);
   }
   const sourceSha = branch === 'main' ? await verifiedMainCommit({ github, repo: context.repo, git, head: context.sha }) : context.sha;
   return { sourceSha, version: sourceVersion({ git, sha: sourceSha, bump, branch, registry }) };
