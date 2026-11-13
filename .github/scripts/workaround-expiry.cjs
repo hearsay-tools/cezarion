@@ -4,18 +4,59 @@ const path = require('node:path');
 
 const TITLE = 'Remove workaround rules whose replacement issue closed';
 
-// A code span renders its text, so a marker inside one is prose that names the marker.
-// It closes at the next backtick run of the same length (CommonMark), within one line here.
-const CODE_SPAN = /(?<!`)(`+)(?!`)(.*?[^`])\1(?!`)/g;
+// The start of the backtick run of exactly `length` at or after `from`, or -1.
+function backtickRun(line, from, length) {
+  for (let start = from; start < line.length;) {
+    if (line[start] !== '`') { start++; continue; }
+    let end = start;
+    while (line[end] === '`') end++;
+    if (end - start === length) return start;
+    start = end;
+  }
+  return -1;
+}
+
+// One left-to-right pass, as CommonMark reads inline text: whichever of an HTML comment or a
+// code span starts first wins, and an escaped backtick opens nothing. A code span renders its
+// text, so a marker inside one is prose that names the marker: blank the span with spaces, so
+// that the text on its two sides is not joined. Code spans are read within one line here.
+function maskCodeSpans(line, inComment) {
+  let text = '';
+  for (let i = 0; i < line.length;) {
+    if (inComment) {
+      const end = line.indexOf('-->', i);
+      const stop = end < 0 ? line.length : end + 3;
+      text += line.slice(i, stop);
+      inComment = end < 0;
+      i = stop;
+    } else if (line.startsWith('<!--', i)) {
+      text += '<!--';
+      inComment = true;
+      i += 4;
+    } else if (line[i] === '\\') {
+      text += line.slice(i, i + 2);
+      i += 2;
+    } else if (line[i] === '`') {
+      let open = i;
+      while (line[open] === '`') open++;
+      const close = backtickRun(line, open, open - i);
+      const stop = close < 0 ? open : close + open - i;
+      text += close < 0 ? line.slice(i, stop) : ' '.repeat(stop - i);
+      i = stop;
+    } else {
+      text += line[i++];
+    }
+  }
+  return { text, inComment };
+}
 
 // Read marker comments outside fenced code and code spans, preserving source line numbers.
 function markersIn(file, text) {
   const markers = [];
   let fence;
   let inComment = false;
-  for (const [index, source] of text.split(/\r?\n/).entries()) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(source);
-    const line = source.replace(CODE_SPAN, '');
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
       if (delimiter && delimiter[1][0] === fence[0] && delimiter[1].length >= fence.length && /^[ \t]*$/.test(delimiter[2])) fence = undefined;
       continue;
@@ -24,11 +65,9 @@ function markersIn(file, text) {
       fence = delimiter[1];
       continue;
     }
-    for (const token of line.matchAll(/<!--|-->/g)) {
-      if (token[0] === '<!--') inComment = true;
-      else inComment = false;
-    }
-    for (const match of line.matchAll(/<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g)) {
+    const masked = maskCodeSpans(line, inComment);
+    inComment = masked.inComment;
+    for (const match of masked.text.matchAll(/<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g)) {
       markers.push({ file, line: index + 1, issue: match[1] });
     }
   }

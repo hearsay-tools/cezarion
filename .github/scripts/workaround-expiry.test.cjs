@@ -52,8 +52,14 @@ test('reader skips markers that prose names inside code spans', () => {
     'Real rule `code` <!-- until: a/b#3 -->',
     'Unclosed ` <!-- until: a/b#4 -->',
     'Mismatched `` <!-- until: a/b#5 --> `',
+    'Escaped \\` <!-- until: a/b#6 --> `code`',
+    '<!-- ` --> <!-- until: a/b#7 --> `code`',
+    '<`example`!-- until: a/b#8 -->',
+    '<!-- a comment that spans lines `',
+    'still the comment --> <!-- until: a/b#9 --> `x`',
   ].join('\n');
-  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]), [[3, 'a/b#3'], [4, 'a/b#4'], [5, 'a/b#5']]);
+  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]),
+    [[3, 'a/b#3'], [4, 'a/b#4'], [5, 'a/b#5'], [6, 'a/b#6'], [7, 'a/b#7'], [10, 'a/b#9']]);
 });
 
 test('reader skips backtick and tilde fences and reports the marker after each closing fence', () => {
