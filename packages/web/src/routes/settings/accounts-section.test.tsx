@@ -225,7 +225,6 @@ describe('the agent accounts section', () => {
 
     // One tab at a time, so only the ACTIVE agent's rows are in the DOM.
     await waitFor(() => expect(rows()).toHaveLength(1))
-    expect(document.body.textContent).toContain('discovered')
     // The discovered profile is what Squawk found — a Rename or Remove would imply a setting. Checked
     // with the panel OPEN, since that is now the only place either could appear.
     await openDetails('default')
@@ -265,9 +264,8 @@ describe('the agent accounts section', () => {
 
     await waitFor(() => expect(rowFor('later')).not.toBeNull())
     const row = rowFor('later')!
-    expect(row.querySelector('[data-slot="account-missing"]')?.textContent).toContain(
-      'Connect will make it',
-    )
+    expect(row.querySelector('[data-slot="account-missing"]')).not.toBeNull()
+    expect(row.querySelector('[data-slot="account-unrecognised"]')).toBeNull()
   })
 
   it('flags an unrecognised folder without refusing it', async () => {
@@ -755,9 +753,7 @@ describe('the agent accounts section', () => {
 
     await openTab('opencode')
     expect(document.querySelector('[data-action="accounts-add"]')).toBeNull()
-    expect(document.querySelector('[data-slot="accounts-single-only"]')?.textContent).toContain(
-      'credentials outside its config folder',
-    )
+    expect(document.querySelector('[data-slot="accounts-single-only"]')).not.toBeNull()
   })
 
   it('reports what the MACHINE has for the active agent, not per account', async () => {

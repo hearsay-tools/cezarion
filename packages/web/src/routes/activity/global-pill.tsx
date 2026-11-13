@@ -56,6 +56,7 @@ export function ActivityPill({ projectId, task, requests, waits = NO_WAITS, inde
     <li
       data-activity-pill={task.runId}
       data-rung={task.rung}
+      data-action={box.action}
       data-linked={linked ? 'true' : undefined}
       {...hoverHandlers(task.runId, onHover)}
       className={cn(

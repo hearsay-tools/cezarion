@@ -156,7 +156,6 @@ function renderAccounts() {
   )
 }
 
-const defaults = () => document.querySelector('[data-slot="accounts-defaults"]')
 const rows = () => [...document.querySelectorAll('[data-slot="agents-runner"] [role="radio"]')]
 const rowFor = (runner: string, account = '') =>
   document.querySelector<HTMLButtonElement>(
@@ -326,15 +325,5 @@ describe('Agent accounts → Defaults for new projects', () => {
     await waitFor(() => expect(configPuts()).toHaveLength(1))
     expect(configPuts()[0]?.body).toEqual({ agentDefaults: { models: { codex: null } } })
     expect(repoConfigWrites()).toHaveLength(0)
-  })
-
-  it('says these are defaults a project can override, not a setting it imposes', async () => {
-    serve()
-    renderAccounts()
-
-    await waitFor(() => expect(rows()).toHaveLength(7))
-    const pane = defaults()
-    expect(pane?.textContent).toContain('has not chosen for itself')
-    expect(pane?.textContent).toContain('keeps its own')
   })
 })

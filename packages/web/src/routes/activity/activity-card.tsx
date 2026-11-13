@@ -173,6 +173,7 @@ export function ActivityCard({ task, requests, waits = NO_WAITS, index, ctx, den
       {...identity}
       data-flip={task.runId}
       data-rung={task.rung}
+      data-action={box.action}
       data-linked={linked && !ghost ? 'true' : undefined}
       {...(ghost ? {} : hoverHandlers(task.runId, onHover))}
       className={cn(

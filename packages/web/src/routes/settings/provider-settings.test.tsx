@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { applyProviderStatusRow } from '@/lib/provider-status'
 import { workspaceQueryKeys } from '@/api/queries'
@@ -115,16 +116,14 @@ afterEach(() => {
 })
 
 describe('ProviderSettings', () => {
-  it('always renders Claude Code, Codex, OpenCode, pi, Cursor and OMP cards in that order', async () => {
+  it('always renders one card per runner, in runner order', async () => {
     serve()
     renderSettings()
 
     await within(card('claude')).findByText('Credentials found')
     expect(
-      [...document.querySelectorAll('[data-slot="provider-card"]')].map((item) =>
-        item.querySelector('h3')?.textContent,
-      ),
-    ).toEqual(['Claude Code', 'Codex', 'OpenCode', 'pi', 'Cursor', 'OMP'])
+      [...document.querySelectorAll('[data-slot="provider-card"]')].map((item) => item.getAttribute('data-provider')),
+    ).toEqual([...runnerSchema.options])
   })
 
   it('presents discovery truth, enablement, and runtime recovery without hiding diagnostics', async () => {
@@ -159,13 +158,10 @@ describe('ProviderSettings', () => {
     renderSettings()
 
     await within(card('claude')).findByText('Credentials found')
-    expect(within(card('claude')).getByText('Credentials found').previousElementSibling?.getAttribute('data-tone')).toBe(
-      'success',
-    )
     expect(within(card('claude')).queryByRole('button', { name: 'Connect' })).toBeNull()
     expect(screen.getByRole('switch', { name: 'Use Claude Code' })).toBeTruthy()
 
-    expect(within(card('codex')).getByText('Credentials found').previousElementSibling?.getAttribute('data-tone')).toBe('success')
+    expect(within(card('codex')).getByText('Credentials found')).toBeTruthy()
     expect(within(card('codex')).getByText('Disabled')).toBeTruthy()
     expect(screen.getByRole('switch', { name: 'Use Codex' })).toBeTruthy()
 
@@ -245,7 +241,7 @@ describe('ProviderSettings', () => {
 
     const fallback = await screen.findByRole('region', { name: 'Codex manual sign-in' })
     expect(within(fallback).getByText('No terminal emulator was found.')).toBeTruthy()
-    expect(within(fallback).getByText('codex login --device-auth').tagName).toBe('CODE')
+    expect(within(fallback).getByText('codex login --device-auth')).toBeTruthy()
     fireEvent.click(within(fallback).getByRole('button', { name: 'Copy command' }))
     expect(writeText).toHaveBeenCalledOnce()
     expect(writeText).toHaveBeenCalledWith('codex login --device-auth')

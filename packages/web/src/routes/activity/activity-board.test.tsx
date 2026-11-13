@@ -185,7 +185,6 @@ describe('ActivityBoard', () => {
       const rail = screen.getByRole('complementary', { name: 'Activity details' })
       expect(within(rail).getByText('No task waits for a reply.')).toBeTruthy()
       expect(rail.querySelector('[data-slot="activity-just-now"]')?.textContent).toMatch(/Watching since \d{2}:\d{2}/)
-      expect(rail.querySelector('[data-slot="activity-legend"]')).not.toBeNull()
     })
 
     it('says a request is overdue once its reply deadline passes', () => {

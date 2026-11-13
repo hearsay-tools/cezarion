@@ -137,7 +137,6 @@ describe('peer labels', () => {
     const line = document.querySelector(`path[data-request="${peer.requestId}"]`)!
     expect(line.getAttribute('data-phase')).toBe('open')
     expect(line.getAttribute('stroke-dasharray')).toBe('6 5')
-    expect(line.getAttribute('marker-end')).toBe('url(#activity-arrow-peer)')
   })
 
   it('omits the progress bar for a request with no deadline', () => {

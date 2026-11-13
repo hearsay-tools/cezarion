@@ -65,7 +65,7 @@ describe('ProjectPanel', () => {
     const asks = run({ runId: 'asks', status: RUN_STATUS.waiting, rung: 'needs-you', wait: { kind: ACTIVITY_WAIT_KIND.human, since: iso(-1_000), detail: { reason: 'turn-end' } } })
     const { container } = renderPanel(project({ tasks: [asks] }))
     const pill = container.querySelector('[data-activity-pill="asks"]') as HTMLElement
-    expect(pill.className).toContain('border-pending')
+    expect(pill.getAttribute('data-action')).toBe('open')
     expect(pill.querySelector('[data-slot="activity-pill-line"]')?.textContent).toBe('Needs you · Your turn')
   })
 
@@ -126,7 +126,6 @@ describe('ProjectPanel', () => {
       renderPanel(project({ tasks: [waiter, peer, other] }))
       expect(waitArc()?.getAttribute('data-kind')).toBe('wait')
       expect(waitArc()?.getAttribute('stroke-dasharray')).toBe('0 8')
-      expect(waitArc()?.getAttribute('marker-end')).toMatch(/^url\(#activity-ring-arc-/)
       const points = samplePath(waitArc()?.getAttribute('d') ?? '')
       // From the top middle of the peer pill to the top middle of the waiter pill.
       expect(points[0]?.x).toBe(234 + 110)

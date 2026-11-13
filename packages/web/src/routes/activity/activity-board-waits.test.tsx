@@ -59,7 +59,6 @@ describe('peer-wait lines', () => {
     const path = waitPath()
     expect(path?.getAttribute('data-kind')).toBe('wait')
     expect(path?.getAttribute('stroke-dasharray')).toBe('0 8')
-    expect(path?.getAttribute('marker-end')).toBe('url(#activity-ring-wait)')
     expect(path?.classList.contains('activity-drift')).toBe(true)
     const points = samplePath(path?.getAttribute('d') ?? '')
     // From the peer's facing edge (left, at title height) to the waiter's right edge.

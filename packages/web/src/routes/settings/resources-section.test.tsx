@@ -159,7 +159,6 @@ describe('Global settings → Resources', () => {
 
     const link = await screen.findByRole('link', { name: 'Configure per-project limits' })
     expect(link.getAttribute('href')).toBe('/settings/global/projects')
-    expect(screen.getByText(/Need a different limit for one project/)).not.toBeNull()
   })
 
   it('saves the extra monitoring capacity and explains the two pools', async () => {

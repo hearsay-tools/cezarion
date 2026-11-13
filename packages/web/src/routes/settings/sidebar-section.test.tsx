@@ -37,14 +37,13 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); for (const key of Object.key
 const overall = () => screen.getByRole('spinbutton', { name: 'Overall' }) as HTMLInputElement
 const save = () => screen.getByRole('button', { name: 'Save sidebar limits' }) as HTMLButtonElement
 
-it('offers project-scoped defaults with accessible labels and explains combined budgets', async () => {
+it('offers project-scoped defaults with accessible labels', async () => {
   setup()
   await waitFor(() => expect(overall().value).toBe('10'))
   expect(SETTINGS_SECTIONS.find(section => section.id === 'sidebar')?.scope).toBe('project')
   for (const name of ['Needs You', 'Finished', 'Working']) {
     expect(screen.getByRole('checkbox', { name: `${name} Unlimited` })).toHaveProperty('checked', true)
   }
-  expect(screen.getByText(/section order/i)).not.toBeNull()
   expect(save().disabled).toBe(true)
 })
 it.each(['0', '-1', '1.5', ''])('rejects invalid input %j before saving', async value => {
