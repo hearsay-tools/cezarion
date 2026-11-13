@@ -60,19 +60,21 @@ previous digest carried forward, by root cause. It checks each group against
 | Watch | A first occurrence below that bar. The digest carries it forward with its count and first-seen date |
 | Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days. A group with a `came back` finding is never dropped as fixed |
 
-**Fix check.** A merged fix is not proof that the problem stopped. For each
-issue that a digest filed in the last 30 days and that a merged pull request
-closed, the digest reads the findings dated after the merge: those it reviews
-and the evidence of every carried-forward Act group and watch item. A finding
+**Fix check.** A merged fix is not proof that the problem stopped. The check
+takes each issue that a digest filed and that a merged pull request closed in
+the last 14 days, and every issue that the previous digest's results carry. For
+each, the digest reads the findings dated after the merge: those it reviews and
+the evidence of every carried-forward Act group and watch item. A finding
 counts when it has the same root cause, or when it comes from a mechanism that
 pull request added. The digest lists each counted finding under the filed issue
 and marks the fix `came back`. Otherwise it marks the fix
 `quiet since <merge date>`. A finding from a cockpit that still ran the code
 from before the merge does not count, and the digest says so. A fix marked
 `came back` stays so: the issue leaves the check, and the group that names it
-carries the recurrence. An issue leaves the check after 14 quiet days. The
-digest comment carries every other result forward, with its counted findings and
-dates, and the next digest reads it with the watch list.
+carries the recurrence. Any other issue leaves the check once 14 days have
+passed since its merge with no counted finding. Until then, the digest comment
+carries its result forward, with its counted findings and dates, and the next
+digest reads it with the watch list.
 
 For each Act group, the digest names the smallest fix that removes the whole
 class, and places any new rule as
@@ -141,7 +143,7 @@ An Act group has its own lifecycle across digests:
 | Filed | New evidence while the issue is open | The next digest | Stays filed; the evidence becomes a comment on the filed issue |
 | Filed | A merged pull request closes the issue | The next digest | Fix check |
 | Fix check | A finding after the merge has the same root cause, or comes from a mechanism the pull request added | The next digest | Came back: the finding's group names the filed issue and the pull request, and the digest ranks it like any Act group |
-| Fix check | 14 days with no counted finding | The digest | Final |
+| Fix check | 14 days after the merge with no counted finding | The digest | Final |
 
 ## Categories
 
