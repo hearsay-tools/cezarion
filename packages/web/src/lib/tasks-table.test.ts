@@ -147,6 +147,10 @@ describe('filterRuns', () => {
     expect(ids('ZOD')).toEqual(['a'])
   })
 
+  it('matches every token on its own, in any order, as the other lists do (hearsay-tools/squawk#1884)', () => {
+    expect(ids('zod bump')).toEqual(['a'])
+  })
+
   it('searches the DISPLAYED title: the auto-summary when set, and not the raw title it hides', () => {
     const summarized = [
       run({ id: 's', title: 'fix the login bug plz', titleSummary: 'Catch AuthError in the handler' }),

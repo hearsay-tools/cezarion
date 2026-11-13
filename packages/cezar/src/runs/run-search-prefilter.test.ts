@@ -14,9 +14,9 @@ import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
  * accepts must come back from `visitRootSummaries` with the prefilter's tokens, read through the
  * real `instr(lower(summary), ?)` over the stored JSON, not a model of it.
  *
- * Seeded and bounded, so CI sees the same cases every time. Two exclusions, each pinned by an
- * example below and tracked by hearsay-tools/cezarion#1884: a number the predicate matches by
- * value (`#007` is PR 7) and the two characters JavaScript folds to ASCII and SQLite does not.
+ * Seeded and bounded, so CI sees the same cases every time. One exclusion, pinned by examples
+ * below and kept by decision (hearsay-tools/squawk#1884): the two characters JavaScript folds to
+ * ASCII and SQLite does not. The random alphabet holds neither.
  */
 const SEED = 1807;
 const RUNS = 400;
@@ -70,12 +70,6 @@ const runArb: fc.Arbitrary<RunSearchRun> = fc.record({
   markerRefs: fc.record({ pr: number, issue: number }, { requiredKeys: [] }),
 }, { requiredKeys: ['id', 'title', 'workflow'] }) as fc.Arbitrary<RunSearchRun>;
 
-/** A number token the predicate matches by value, not by text: `007` for PR 7. */
-const zeroPadded = (token: string) => {
-  const bare = token.replace(/^#/, '');
-  return /^\d+$/.test(bare) && String(Number(bare)) !== bare;
-};
-
 /** Pieces of the run itself and of its automation's name (so most queries match) mixed with noise (so some do not). */
 function queryArb(run: RunSearchRun, automationName: string | undefined): fc.Arbitrary<string> {
   const numbers = [run.prNumber, run.issueNumber, run.markerRefs?.pr, run.markerRefs?.issue, ...(run.pullRequests ?? []).map((pr) => pr.number)]
@@ -86,20 +80,19 @@ function queryArb(run: RunSearchRun, automationName: string | undefined): fc.Arb
   const piece = fields.length === 0 ? text : fc.constantFrom(...fields).chain((field) =>
     fc.tuple(fc.nat({ max: field.length - 1 }), fc.integer({ min: 1, max: field.length })).map(([start, length]) => field.slice(start, start + length)));
   const token = fc.oneof({ weight: 6, arbitrary: piece }, { weight: 1, arbitrary: text })
-    .filter((candidate) => candidate.trim() !== '' && !zeroPadded(candidate));
+    .filter((candidate) => candidate.trim() !== '');
   return fc.oneof({ weight: 4, arbitrary: token }, { weight: 1, arbitrary: fc.array(token, { minLength: 2, maxLength: 3 }).map((tokens) => tokens.join(' ')) });
 }
 
 describe('sqlPrefilterTokens never drops a run matchesRunSearch accepts', () => {
-  it('holds over seeded random runs, queries, modes and automation names', () => {
+  it('holds over seeded random runs, queries and automation names', () => {
     let accepted = 0;
     fc.assert(
       fc.property(
         runArb.chain((run) => optional(text).chain((automationName) =>
-          fc.tuple(fc.constant(run), queryArb(run, automationName), fc.constantFrom('tokens', 'phrase'), fc.constant(automationName)))),
-        ([run, query, mode, automationName]) => {
+          fc.tuple(fc.constant(run), queryArb(run, automationName), fc.constant(automationName)))),
+        ([run, query, automationName]) => {
           const options: StoredRunSearch = {
-            mode,
             ...(automationName === undefined ? {} : { automationNames: new Map(run.automationId === undefined ? [] : [[run.automationId, automationName]]) }),
           };
           if (!matchesRunSearch(run, query, options)) return true;
@@ -114,20 +107,19 @@ describe('sqlPrefilterTokens never drops a run matchesRunSearch accepts', () => 
   });
 });
 
-describe('known gaps of the prefilter (hearsay-tools/cezarion#1884)', () => {
+describe('the prefilter on edge spellings (hearsay-tools/squawk#1884)', () => {
   function run(over: Partial<RunSearchRun>): RunSearchRun {
     return { id: 'run-1', title: 'T', workflow: 'w', ...over } as RunSearchRun;
   }
 
-  it('drops a number the predicate matches by value: #007 finds PR 7, the stored summary holds no 007', () => {
+  it('keeps a run the predicate finds by a zero-padded number: #007 finds PR 7', () => {
     const pr7 = run({ prNumber: 7 });
     expect(matchesRunSearch(pr7, '#007')).toBe(true);
-    const tokens = sqlPrefilterTokens('#007');
-    expect(tokens).toEqual(['007']);
-    expect(keeps(pr7, tokens)).toBe(false);
-    // The canonical spelling reads the same on both sides.
-    expect(keeps(pr7, sqlPrefilterTokens('#7'))).toBe(true);
+    expect(keeps(pr7, sqlPrefilterTokens('#007'))).toBe(true);
   });
+
+  // A known gap, kept: closing it would change case folding for every reader, or leave the ASCII
+  // tokens `k` and `i` out of the prefilter. See `sqlPrefilterTokens`.
 
   it('drops a match through U+212A (Kelvin sign), which JavaScript folds to k and SQLite lower() does not', () => {
     const kelvin = run({ title: 'Kzzz' });

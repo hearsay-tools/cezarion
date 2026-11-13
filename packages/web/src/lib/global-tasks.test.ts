@@ -438,3 +438,10 @@ it('finds every hidden PR while retaining all-token and facet matching', () => {
   expect(filterGlobalTasks([task], { ...NO_FILTERS, query: '#81' }, 'active')).toEqual([]);
   expect(filterGlobalTasks([task], { ...NO_FILTERS, query: '#812', statuses: ['running'] }, 'active')).toEqual([]);
 });
+
+it('matches the workflow label, as the per-project table does (hearsay-tools/squawk#1884)', () => {
+  const task = { run: { id: 'inbox', projectId: 'p', title: 'Neutral task', status: RUN_STATUS.done, archived: false,
+    workflow: '(inbox)', workflowLabel: 'om-fix', createdAt: '2026-10-08', tokensUsed: 0,
+  }, project: undefined, projectName: 'Project', tags: [] };
+  expect(filterGlobalTasks([task], { ...NO_FILTERS, query: 'om-fix' }, 'active')).toEqual([task]);
+});
