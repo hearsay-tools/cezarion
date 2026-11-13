@@ -61,9 +61,16 @@ test('reader skips markers that prose names inside code spans', () => {
     'text <!---> `<!-- until: a/b#11 -->`',
     'text <!-->',
     '`<!-- until: a/b#12 -->` <!-- until: a/b#13 -->',
+    'Rule <span title="`">text</span> <!-- until: a/b#14 --> `code`',
+    "Rule <a href='x`y' data-x=`z>link</a> <!-- until: a/b#15 --> `code`",
+    'See <https://example.com/`> <!-- until: a/b#16 --> `code`',
+    'Mail <me`x@example.com> <!-- until: a/b#17 --> `code`',
+    'Not a tag <1 x> `<!-- until: a/b#18 -->`',
+    'Escaped \\<!-- until: a/b#19 --> is text, and so is \\\\ before <!-- until: a/b#20 -->',
+    'A backslash before a letter \\x stays, then `<!-- until: a/b#21 -->`',
   ].join('\n');
-  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]),
-    [[3, 'a/b#3'], [4, 'a/b#4'], [5, 'a/b#5'], [6, 'a/b#6'], [7, 'a/b#7'], [10, 'a/b#9'], [14, 'a/b#13']]);
+  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]), [[3, 'a/b#3'], [4, 'a/b#4'], [5, 'a/b#5'],
+    [6, 'a/b#6'], [7, 'a/b#7'], [10, 'a/b#9'], [14, 'a/b#13'], [15, 'a/b#14'], [16, 'a/b#15'], [17, 'a/b#16'], [18, 'a/b#17'], [20, 'a/b#20']]);
 });
 
 test('reader skips backtick and tilde fences and reports the marker after each closing fence', () => {
