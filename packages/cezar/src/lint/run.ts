@@ -224,8 +224,11 @@ export function repositoryProblems(): string[] {
 }
 
 async function lintProblems(withOxlint: boolean): Promise<string[]> {
+  // Start oxlint and ast-grep first: their child processes work while the wait scans run here
+  // (hearsay-tools/squawk#2545). The report keeps its order.
+  const children = Promise.all([withOxlint ? oxlintProblems(repoRoot, LINT_PATHS) : [], astGrepProblems()]);
   const waits = waitProblems();
-  const [oxlint, astGrep] = await Promise.all([withOxlint ? oxlintProblems(repoRoot, LINT_PATHS) : [], astGrepProblems()]);
+  const [oxlint, astGrep] = await children;
   return [...waits, ...oxlint, ...astGrep, ...repositoryProblems()];
 }
 
