@@ -30,24 +30,24 @@ invalid:
   - "function f(state: ActiveRun) { state.usage ??= other.usage; }"
   - state.usage.usageInvocation.observed = true
   - state.usage.usageInvocation.epoch++
-  - state.usage.reportedClaudeCost.set("session", 1)
+  - state.usage.cumulativeSessionCost.set("session", 1)
   - state.usage.usageInvocation.startedTurns.add("turn")
   - state.usage.usageInvocation.recordedTurns.clear()
   - state.usage.usageInvocation.startedTurns["add"]("turn")
-  - const view = state.usage.reportedClaudeCost; view.set("session", 1)
-  - "const { reportedClaudeCost: costs } = state.usage; costs.clear()"
+  - const view = state.usage.cumulativeSessionCost; view.set("session", 1)
+  - "const { cumulativeSessionCost: costs } = state.usage; costs.clear()"
   - const { startedTurns } = state.usage.usageInvocation;
     startedTurns.add("turn")
   - 'function f(view: ReadonlySetView) { view.add("turn"); }'
   - "function f(view: ReadonlySetView) { Object.assign(view, {}); }"
   - 'import type { ReadonlySetView as Turns } from "./usage-accounting.ts";
     function f(view: Turns) { Reflect.set(view, "size", 1); }'
-  - state.usage.reportedClaudeCost as Map<string, number>
+  - state.usage.cumulativeSessionCost as Map<string, number>
   - state.usage.usageInvocation.startedTurns as Set<string>
   - state.usage as any
   - state.usage as unknown
   - state.usage as unknown as MutableUsage
-  - <Map<string, number>>state.usage.reportedClaudeCost
+  - <Map<string, number>>state.usage.cumulativeSessionCost
   - const view = state.usage.usageInvocation; view as any
   - "const { usageInvocation: view } = state.usage; view as unknown as
     MutableUsage"
@@ -81,7 +81,7 @@ invalid:
     other.usage; }"
   - "function f(state: ActiveRun) { const alias = state; Object.assign(alias, {
     usage: other.usage }); }"
-  - "function f(group: UsageGroup) { group.reportedClaudeCost.clear(); }"
+  - "function f(group: UsageGroup) { group.cumulativeSessionCost.clear(); }"
   - "function f(invocation: UsageInvocation) { invocation.observed = true; }"
   - 'const view = new ReadonlyMapView(backing); view as Map<string, number>'
   - 'const view = createUsageGroup(); Object.assign(view, { usageInvocation: other })'

@@ -121,7 +121,8 @@ describe('native delivery control module', () => {
 });
 
 // What each native wire can carry. Claude acknowledges agent input with its local stdin
-// write, and Cursor print cannot refuse an input, so those kinds are named exemptions.
+// write, and Cursor print rejects an input only when its process does not exit 0 after a result,
+// never by a provider refusal, so those kinds are named exemptions.
 const EXEMPT: Partial<Record<RunnerId, Partial<Record<DeliveryKind, string>>>> = {
   claude: { reject: 'U13', 'hold-ack': 'U12' },
   cursor: { reject: 'U13' },

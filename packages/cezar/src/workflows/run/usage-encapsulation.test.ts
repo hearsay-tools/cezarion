@@ -70,11 +70,11 @@ describe('usage owner encapsulation', () => {
   it('keeps cost views live, ordered and isolated from native Map and Set mutation', () => {
     const { run, state } = fixture();
     recordReportedCost(store, run.id, 'work', state, 'claude', 1);
-    const costs = state.usage.reportedClaudeCost!;
+    const costs = state.usage.cumulativeSessionCost!;
     const entries = costs.entries();
     recordReportedCost(store, run.id, 'work', state, 'claude', 3);
     expect(entries.next()).toEqual({ value: ['work', 3], done: false });
-    expect(state.usage.reportedClaudeCost).toBe(costs);
+    expect(state.usage.cumulativeSessionCost).toBe(costs);
     expect([...costs.keys()]).toEqual(['work']);
     expect([...costs.values()]).toEqual([3]);
     expect([...costs]).toEqual([['work', 3]]);
@@ -101,11 +101,11 @@ describe('usage owner encapsulation', () => {
     const { usage } = state;
     const invocation = usage.usageInvocation!;
     const cases: [object, string, unknown][] = [
-      [usage, 'usageInvocation', undefined], [usage, 'reportedClaudeCost', new Map()],
+      [usage, 'usageInvocation', undefined], [usage, 'cumulativeSessionCost', new Map()],
       [invocation, 'observed', true], [invocation, 'stepId', 'forged'],
       [invocation, 'startedTurns', new Set(['forged'])], [invocation, '#observed', true],
       [invocation.startedTurns, 'has', () => true], [invocation.recordedTurns, 'size', 999],
-      [usage.reportedClaudeCost!, 'get', () => 999],
+      [usage.cumulativeSessionCost!, 'get', () => 999],
     ];
     for (const [target, key, value] of cases) {
       expect(Object.isFrozen(target)).toBe(true);
@@ -118,7 +118,7 @@ describe('usage owner encapsulation', () => {
     expect(invocation.stepId).toBe('work');
     expect(invocation.startedTurns.size).toBe(0);
     expect(invocation.recordedTurns.size).toBe(0);
-    expect(usage.reportedClaudeCost!.get('work')).toBe(1);
+    expect(usage.cumulativeSessionCost!.get('work')).toBe(1);
     recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'real' });
     expect(invocation.observed).toBe(true);
     expect([...invocation.startedTurns]).toEqual(['real']);

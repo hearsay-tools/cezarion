@@ -10,6 +10,7 @@ import type { PeerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunRecord } from '../runs/store.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
+import { MESSAGING_OFF } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from './run.ts';
@@ -113,8 +114,7 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     const b = peer();
     store.updateRun(run.id, { allowMessaging: false });
     const registered = await handlers(run.id).registerWait({ kind: WAIT_KIND.peer, peer_ids: [b], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
-    expect(registered.answer).toMatchObject({ ok: false });
-    expect(JSON.stringify(registered.answer)).toContain('Task messaging is off for this task');
+    expect(registered.answer).toMatchObject({ ok: false, code: 'messaging_off', message: MESSAGING_OFF });
     expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
     release();
   });

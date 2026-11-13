@@ -189,14 +189,6 @@ describe('discoverSkills local entrypoints', () => {
   });
 });
 
-/**
- * #366: `discoverSkills` used to merge the developer's real `~/.agents/skills` and
- * `~/.claude/skills` into every catalog read. Those are filesystem walks with no
- * spawn cost, but they make the unit suite machine-dependent — a laptop with
- * global skills sees them, CI (a bare home) does not. Gate the dirs the same way
- * #365 gates the vendor team source (`process.env.VITEST`), and plant fixtures
- * under a temp `$HOME` so `os.homedir()` still resolves them when the gate is off.
- */
 describe('discoverSkills built-in skills (#774)', () => {
   const builtin = (name: string): Skill => ({ name, body: 'BUILT-IN', path: `builtin:${name}`, source: 'builtin' });
 
@@ -247,29 +239,28 @@ describe('discoverSkills global dirs', () => {
     };
   }
 
-  it('does not merge the real (or planted) global skill dirs under vitest', async () => {
+  // The unit suite runs under a sandbox HOME, so the real home never reaches discovery.
+  it('reads ~/.agents/skills and ~/.claude/skills as global skills', async () => {
     const { home, repoRoot, restore } = await plantGlobalHome();
-    try {
-      expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
-      const skills = await discoverSkills(repoRoot, undefined, testHome());
-      expect(skills.find((skill) => skill.name === planted.agents)).toBeUndefined();
-      expect(skills.find((skill) => skill.name === planted.claude)).toBeUndefined();
-      expect(skills.filter((skill) => skill.source === 'global')).toEqual([]);
-    } finally {
-      restore();
-    }
-  });
-
-  it('reads ~/.agents/skills and ~/.claude/skills outside vitest', async () => {
-    const { home, repoRoot, restore } = await plantGlobalHome();
-    const vitest = process.env.VITEST;
-    delete process.env.VITEST;
     try {
       expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
       const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'global');
       expect(skills.map((skill) => skill.name).sort()).toEqual([planted.agents, planted.claude].sort());
     } finally {
-      if (vitest !== undefined) process.env.VITEST = vitest;
+      restore();
+    }
+  });
+
+  it('lets a local skill win over a global skill of the same name', async () => {
+    const { home, repoRoot, restore } = await plantGlobalHome();
+    await mkdir(join(repoRoot, '.agents/skills', planted.claude), { recursive: true });
+    await writeFile(join(repoRoot, '.agents/skills', planted.claude, 'SKILL.md'), '# Local');
+    try {
+      expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
+      const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.name === planted.claude);
+      expect(skills.map((skill) => skill.source)).toEqual(['agents']);
+      expect(skills[0]?.body).toContain('# Local');
+    } finally {
       restore();
     }
   });
