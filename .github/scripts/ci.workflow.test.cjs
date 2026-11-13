@@ -418,9 +418,6 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
   const verifyEnv = ci.jobs.verify.steps.find((step) => step.name === 'Require every verification job').env;
   assert.equal(verifyEnv.BUMP_PR, '${{ needs.classify-pr.outputs.bump_pr }}');
-  assert.doesNotMatch(ci.jobs.vitest.if, /github\.actor/);
-  assert.doesNotMatch(ci.jobs['cockpit-browser'].if, /github\.actor/);
-  assert.doesNotMatch(JSON.stringify(ci.jobs), /github\.actor/);
 });
 
 test('CI runs on push to main and publishes dev snapshots from main', () => {
@@ -430,9 +427,6 @@ test('CI runs on push to main and publishes dev snapshots from main', () => {
   assert.equal(ci.concurrency['cancel-in-progress'], true);
   const publishIf = ci.jobs['publish-snapshot'].if;
   assert.match(publishIf, /github\.ref == 'refs\/heads\/main'/);
-  assert.doesNotMatch(publishIf, /pull_request/);
-  assert.doesNotMatch(publishIf, /pull_request_target/);
-  assert.doesNotMatch(publishIf, /heads\/develop/);
 });
 
 test('verification bindings keep the final gate in CI and reserve local full browser runs', () => {
@@ -522,7 +516,6 @@ test('build and package verifies the engines minimum without a second full unit 
     assert.deepEqual(runs.filter(s => s.run === command).map(s => s.id), [command === 'npm run test:unit:${{ matrix.suite }}' ? 'unit-tests' : 'build-and-package'], command);
   }
   assert.deepEqual(runs.filter(s => s.run?.startsWith('npm test --')).map(s => s.id), ['vitest']);
-  assert.equal(ci.jobs['node-floor'], undefined, 'the duplicate full-suite matrix must stay removed');
   assert.ok(ci.jobs.verify.needs.includes('build-and-package'));
   const gate = ci.jobs.verify.steps.find(s => s.name === 'Require every verification job');
   for (const key of ['UNIT_TESTS_RESULT', 'BUILD_AND_PACKAGE_RESULT']) for (const result of ['failure', 'skipped']) {

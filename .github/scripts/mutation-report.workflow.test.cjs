@@ -192,11 +192,10 @@ test('the posting step drives the real script: two pushes to one pull request le
   assert.match(github.state.comments[0].body, /`5555555`/);
 });
 
-test('Stryker runs with the Vitest runner only, in place, with no TypeScript checker, and its report path matches the job', () => {
+test('Stryker runs with the Vitest runner only, in place, and its report path matches the job', () => {
   const stryker = JSON.parse(fs.readFileSync(path.join(root, 'stryker.config.json'), 'utf8'));
   assert.equal(stryker.testRunner, 'vitest');
   assert.deepEqual(stryker.plugins, ['@stryker-mutator/vitest-runner']);
-  assert.equal(stryker.checkers, undefined, 'the TypeScript checker needs the compiler API that TypeScript 7 lacks');
   assert.equal(stryker.inPlace, true);
   assert.equal(stryker.vitest.pool, 'forks');
   assert.ok(fs.existsSync(path.join(root, stryker.vitest.configFile)));

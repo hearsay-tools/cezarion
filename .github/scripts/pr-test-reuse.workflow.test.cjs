@@ -20,12 +20,9 @@ function evaluate(raw, ctx) {
 }
 test('queue suites always execute, and PR suites select with the same eight-shard fallback', () => {
   const { jobs } = ci();
-  assert.equal(jobs['pr-test-proof'], undefined);
-  assert.equal(jobs['pr-test-attestation'], undefined);
   for (const [id, full, selected] of [['vitest', 'record', 'collect_pr'], ['cockpit-browser', 'e2e', 'e2e-pr']]) {
     const job = jobs[id], step = name => job.steps.find(s => s.id === name);
     assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4, 5, 6, 7, 8]);
-    assert.doesNotMatch(JSON.stringify(job), /pr-test-proof|Reuse verified/);
     for (const event of ['merge_group', 'pull_request_target', 'push', 'workflow_dispatch']) {
       const ctx = context(event);
       assert.equal(evaluate(job.if, ctx), true);

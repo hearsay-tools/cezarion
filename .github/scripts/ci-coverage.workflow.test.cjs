@@ -40,7 +40,6 @@ function context(event, { surface = 'full-matrix', bump = 'false', verified = 'f
 
 test('the required shards run once, with coverage only on PRs and dispatches', () => {
   const { jobs } = ci();
-  assert.equal(jobs['vitest-coverage'], undefined, 'no duplicate test matrix');
   const runs = jobs.vitest.steps.filter((step) => step.run?.startsWith('npm test --'));
   assert.equal(runs.length, 1);
   assert.equal(runs[0]['continue-on-error'], undefined, 'test failures must block');

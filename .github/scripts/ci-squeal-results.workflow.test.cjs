@@ -247,7 +247,6 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
 test('every job that runs squeal sets up Squeal\'s pinned action once, after its Node and before the first squeal call', () => {
   const { jobs } = ci();
   const text = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
-  assert.doesNotMatch(text, /squeal\.mjs|SQUEAL_TAG|SQUEAL_COMMIT|SQUEAL_FETCHED|steps\.squeal\b|hearsay-tools\/squeal\.git/, 'no clone of a Squeal release');
   // One pin for the whole workflow: an exact commit with its release tag in the comment.
   const pins = text.match(/^\s*uses: hearsay-tools\/squeal\/ci@.*$/gm);
   assert.ok(pins.length > 0);

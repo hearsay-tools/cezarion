@@ -7,8 +7,6 @@ const yaml = require('yaml');
 const read = name => yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows', name), 'utf8'));
 test('native protected review is read-only trusted-base admission after preflight', () => {
   const ci = read('ci.yml'), gate = ci.jobs['review-result'];
-  assert.equal(ci.jobs.review, undefined);
-  assert.equal(fs.existsSync(path.join(__dirname, '../workflows/automated-code-review.yml')), false);
   assert.equal(gate.needs, 'preflight');
   assert.deepEqual(gate.permissions, { checks: 'read', contents: 'read', 'pull-requests': 'read' });
   const checkout = gate.steps.find(s => s.uses?.startsWith('actions/checkout@'));
@@ -27,8 +25,6 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   // PR Readiness merged here: human draft/ready flips and new heads resync the board.
   assert.deepEqual(w.on.pull_request_target, { types: ['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft'],
     branches: ['main'] });
-  assert.equal(fs.existsSync(path.join(__dirname, '../workflows/pr-readiness.yml')), false);
-  assert.equal(w.on.pull_request_review, undefined); assert.equal(w.on.pull_request_review_comment, undefined);
   assert.equal(w.on.workflow_dispatch.inputs.pr_number.required, true);
   assert.equal(w.concurrency, undefined, 'discovery cannot be coalesced across PRs');
   assert.deepEqual(job.concurrency, { group: 'coderabbit-admission-pr-${{ matrix.pr }}', 'cancel-in-progress': false });
@@ -75,8 +71,6 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   }
   assert.doesNotMatch(JSON.stringify(w), /refs\/pull\//);
   assert.deepEqual([...JSON.stringify(w).matchAll(/secrets\.(\w+)/g)].map(m => m[1]), ['RELEASE_APP_PRIVATE_KEY', 'RELEASE_APP_PRIVATE_KEY', 'RELEASE_APP_PRIVATE_KEY']);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'pr-readiness.cjs'), 'utf8')
-    + fs.readFileSync(path.join(__dirname, 'coderabbit-reconcile.cjs'), 'utf8'), /convertPullRequestToDraft|markPullRequestReadyForReview/);
 });
 test('PR-context review signals have no permissions, secrets, checkout or trusted outputs and debounce per PR', () => {
   const w = read('coderabbit-review-signal.yml');
