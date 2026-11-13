@@ -6,7 +6,6 @@ export const SILENT_TAIL_OPENING = 'Filing the issue now.';
 export const SILENT_TAIL_REASONING =
   'Task complete. Summarize for the user. Emit CEZ:ISSUE=543, CEZ:TITLE, then call cezar_done.CEZ:ISSUE=543';
 export const SILENT_TAIL_DONE = 'Filed #543.';
-export const TOOL_TAIL_OPENING = 'Inspecting the working tree.';
 export const FINAL_MESSAGE_STANDING = 'Here is where things stand.';
 export const SLOW_DONE_PREFIX = 'Working on the wrap-up.';
 // Squawk's no-wait nudge absorbed the final-message nudge (hearsay-tools/cezarion#1234).
@@ -31,9 +30,7 @@ export function noteSilentTailPrompt(prompt) {
   else if (prompt.includes('mock:silent-tail-late-turn-start')) opened = 'silent-tail-late-turn-start';
   else if (prompt.includes('mock:silent-tail-late-reply')) opened = 'silent-tail-late-reply';
   else if (prompt.includes('mock:silent-tail-slow-done')) opened = 'silent-tail-slow-done';
-  else if (prompt.includes('mock:silent-tail-again')) opened = 'silent-tail-again';
   else if (prompt.includes('mock:silent-tail')) opened = 'silent-tail';
-  else if (prompt.includes('mock:tool-tail')) opened = 'tool-tail';
 }
 
 /** The session opened one of these scenarios, so they answer its nudge. */
@@ -45,15 +42,11 @@ export function isSilentTailScenario(prompt) {
   return typeof prompt === 'string' && prompt.includes('mock:silent-tail');
 }
 
-export function isToolTailScenario(prompt) {
-  return typeof prompt === 'string' && prompt.includes('mock:tool-tail');
-}
-
 export function isFinalMessageNudge(prompt) {
   return typeof prompt === 'string' && prompt.includes(FINAL_MESSAGE_NUDGE_PREFIX);
 }
 
-/** `done` only for mock:silent-tail; `silent` only for mock:silent-tail-again;
+/** `done` only for mock:silent-tail;
  *  `ack-only` ACKs the nudge and never opens a turn (OpenCode keeps heartbeats);
  *  `late` ACKs then replies after LATE_REPLY_MS; `late-turn-start` ACKs, emits
  *  native turn-start after LATE_REPLY_MS, then holds LATE_TURN_START_HOLD_MS
@@ -63,7 +56,6 @@ export function finalMessageNudgeKind() {
   if (opened === 'silent-tail-late-turn-start') return 'late-turn-start';
   if (opened === 'silent-tail-late-reply') return 'late';
   if (opened === 'silent-tail-slow-done') return 'slow-done';
-  if (opened === 'silent-tail-again') return 'silent';
   if (opened === 'silent-tail') return 'done';
   return 'standing';
 }

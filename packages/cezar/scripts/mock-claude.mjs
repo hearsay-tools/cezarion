@@ -699,7 +699,7 @@ function scenarioEncoder(scenario, prompt, uuid, parent, imageCount = 0) {
     end() {
       const result = name === 'turn-messages' ? texts.join('\n') : texts.at(-1) ?? '';
       const usage = scenarioResultUsage(name, acknowledgedOnly);
-      const uuids = ['autonomous', 'silent-tail', 'tool-tail', 'steer-tool'].includes(name)
+      const uuids = ['autonomous', 'silent-tail', 'steer-tool'].includes(name)
         ? { user_message_uuids: [uuid, ...steered.map(line => line.uuid)].filter(Boolean) } : {};
       emit({ type: 'result', subtype: 'success', result, ...uuids, ...usage });
       texts = [];
@@ -715,7 +715,7 @@ function scenarioTextUsage(name) {
 function scenarioResultUsage(name, nudge) {
   if (name === 'busy-progress') return {};
   const input = ['agent-echo', 'cezar-tool', 'ci-wait', 'hold', 'hold-gated', 'hold-cezar-done', 'hold-cezar-ask', 'steer-tool'].includes(name)
-    || ['silent-tail', 'tool-tail'].includes(name) && !nudge ? 20 : 10;
+    || name === 'silent-tail' && !nudge ? 20 : 10;
   return {
     usage: { input_tokens: input, output_tokens: input / 2 },
     ...(['hold', 'hold-gated', 'hold-cezar-done', 'hold-cezar-ask'].includes(name) ? { total_cost_usd: 0.0001 } : {}),
@@ -723,7 +723,7 @@ function scenarioResultUsage(name, nudge) {
 }
 
 function nativeScenarioTool(call) {
-  const ids = { 'tool-steer': 'toolu_steer', 'tool-silent-gh': 'toolu_silent_gh', 'tool-tail-git': 'toolu_tool_tail', 'toolu_park_task': `toolu_park_${turn}`, 'toolu_park_read': 'late-read' };
+  const ids = { 'tool-steer': 'toolu_steer', 'tool-silent-gh': 'toolu_silent_gh', 'toolu_park_task': `toolu_park_${turn}`, 'toolu_park_read': 'late-read' };
   const names = { bash: 'Bash', read: 'Read', task: 'Task' };
   return {
     id: ids[call.id] ?? call.id, name: names[call.name] ?? call.name,
@@ -734,7 +734,7 @@ function nativeScenarioTool(call) {
 
 // Ordered matchers preserve scenario priority and the silent-tail fall-through.
 const earlyReplies = [
-  'ack-only', 'autonomous', 'silent-tail', 'tool-tail', 'steer-tool',
+  'ack-only', 'autonomous', 'silent-tail', 'steer-tool',
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:hook-after-park'), replyWithParkedHook],
   'subagent-after-park',
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:forked-skill'), replyWithForkedSkill],

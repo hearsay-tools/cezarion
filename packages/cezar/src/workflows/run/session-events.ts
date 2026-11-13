@@ -69,7 +69,6 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
       sink.flushAll();
       host.trackTurnEnd(runId, turn.text);
       turn.text = '';
-      turn.tail = 'none';
       const turnWakeDelay = turn.scheduleWakeup;
       turn.scheduleWakeup = undefined;
       host.endTurn(runId, state, sink, { stepId, scheduleWakeup: turnWakeDelay });

@@ -110,7 +110,6 @@ function* silentSteps(prompt, context) {
     silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(prompt);
   });
-  const cursorSilent = context.runner === 'cursor' && silent.finalMessageNudgeKind() === 'silent';
   if (silent.isFinalMessageNudge(prompt)) {
     const kind = silent.finalMessageNudgeKind();
     yield open({ ackOnly: true });
@@ -119,26 +118,18 @@ function* silentSteps(prompt, context) {
     if (kind === 'late' || lateStart) yield { kind: 'release', fallbackMs: silent.LATE_REPLY_MS };
     yield open({ acknowledged: true });
     if (lateStart) yield { kind: 'release', fallbackMs: silent.LATE_TURN_START_HOLD_MS, suffix: '.content' };
-    if (kind === 'silent') {
-      if (!cursorSilent) yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING };
+    if (kind === 'slow-done') {
+      yield text(silent.SLOW_DONE_PREFIX);
+      yield context.runner === 'cursor' ? { kind: 'release', fallbackMs: silent.SLOW_DONE_TAIL_MS } : { kind: 'sleep', ms: silent.SLOW_DONE_TAIL_MS };
     }
-    else {
-      if (kind === 'slow-done') {
-        yield text(silent.SLOW_DONE_PREFIX);
-        yield context.runner === 'cursor' ? { kind: 'release', fallbackMs: silent.SLOW_DONE_TAIL_MS } : { kind: 'sleep', ms: silent.SLOW_DONE_TAIL_MS };
-      }
-      yield text(() => silent.finalNudgeText(kind === 'slow-done' ? 'done' : kind, context.lifecycle));
-    }
+    yield text(() => silent.finalNudgeText(kind === 'slow-done' ? 'done' : kind, context.lifecycle));
     yield end();
     return;
   }
   yield open();
-  const toolTail = silent.isToolTailScenario(prompt);
-  yield text(toolTail ? silent.TOOL_TAIL_OPENING : silent.SILENT_TAIL_OPENING);
-  // Cursor F3 pins this reasoning in read-tool output, with no thinking frames.
-  yield* calls(cursorSilent ? tool('tool-silent-read', 'read', { path: 'README.md' }, silent.SILENT_TAIL_REASONING)
-    : tool(toolTail ? 'tool-tail-git' : 'tool-silent-gh', 'bash', { command: toolTail ? 'git status --short' : 'gh issue create' }, toolTail ? ' M src/example.ts' : 'created'));
-  if (!toolTail && !cursorSilent) yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING, index: 1 };
+  yield text(silent.SILENT_TAIL_OPENING);
+  yield* calls(tool('tool-silent-gh', 'bash', { command: 'gh issue create' }, 'created'));
+  yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING, index: 1 };
   yield end();
 }
 
@@ -231,8 +222,8 @@ function earlyScenario(prompt, context) {
   if (matches('autonomous') || !context.unsupported?.includes('autonomous') && prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
     return scenario('autonomous', autonomous(prompt, context), { early: true, beforeFailure: true, variant: autonomousVariant(prompt) });
   }
-  if (matches('silent-tail') || matches('tool-tail') || !context.unsupported?.includes('silent-tail') && silentNudge(prompt)) {
-    return scenario(matches('tool-tail') ? 'tool-tail' : 'silent-tail', silentSteps(prompt, context), { early: true, beforeFailure: true });
+  if (matches('silent-tail') || !context.unsupported?.includes('silent-tail') && silentNudge(prompt)) {
+    return scenario('silent-tail', silentSteps(prompt, context), { early: true, beforeFailure: true });
   }
   if (matches('crash-stderr')) {
     return scenario('crash-stderr', [effect(() => context.crash(prompt))], { early: true, beforeFailure: true, result: matches('crash-stderr-clean') ? 'continue' : 'handled' });

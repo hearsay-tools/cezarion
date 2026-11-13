@@ -439,7 +439,6 @@ Recovery reads use `.recovery`, auto-resume reads use `.autoResumeScheduler`, an
 continuations call `.continuationAcceptance`. The facade removes those compatibility getters
 and delegators, plus `terminateFinishedWorkerGroups`, `holdForMaintenance`,
 `noticeParkedWorkers`, `retireSettledQuestions` and `fallbackRoutedQuestions`.
-`reconcileAllWorkerFamilies` is internal to `.familyReconciler`.
 `delegationExecutionSettings` stays public as the per-manager synthetic-parent fixture seam
 (coordinator decision); live-state reads in `provision-workflows.test.ts` use the pure
 `delegation/execution-settings.ts` function. `parentCompletionBlockers`,
@@ -560,9 +559,9 @@ A move never answers these:
 5. At Phase 4, `registerAsk`, `stopPreviewServer` and `autosaveCleanupBlocker` were public, but no shipped code
    outside `run.ts` calls them. The only caller of the first two is the cezar-tools host that
    `run.ts` builds, which `cezar-tools.ts` calls. `autosaveCleanupBlocker` has one test caller
-   (`harness-autosave-settlement.test.ts`). `reconcileAllWorkerFamilies` delegates to
-   `FamilyReconciler` and has test callers only (`delegation-reconcile.test.ts`). Phase 5 makes them
-   private, points the host at the modules, or moves the tests. `registerAsk` now goes directly
+   (`harness-autosave-settlement.test.ts`). Phase 5 makes them private, points the host at the
+   modules, or moves the tests. A fourth method, which reconciled every worker family at once,
+   had no production caller and was deleted (hearsay-tools/squawk#2699). `registerAsk` now goes directly
    to `WaitRegistry` (hearsay-tools/cezarion#2232).
 6. `stepLeftOpen` is now a pure read (hearsay-tools/cezarion#2233); each caller clears the
    consumed mark under its original conditions. A cancelled Continue keeps the mark, and

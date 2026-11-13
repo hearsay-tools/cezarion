@@ -35,7 +35,7 @@ describe('shared mock scenario selection', () => {
   });
 
   it.each([
-    ['mock:silent-tail', 'silent-tail'], ['mock:tool-tail', 'tool-tail'],
+    ['mock:silent-tail', 'silent-tail'],
     ['mock:crash-stderr-clean', 'crash-stderr'], ['mock:ack-only', 'ack-only'],
     ['mock:ci-wait', 'ci-wait'], ['mock:steer-tool', 'steer-tool'],
     ['mock:steer-late', 'steer-late'], ['mock:multi-pr-refs', 'multi-pr-refs'],
@@ -244,28 +244,8 @@ describe('shared mock scenario player', () => {
 
 
 describe('silent-tail shared scripts', () => {
-  it.each(['cursor', 'pi'] as const)('keeps the %s silent-again reasoning boundary', async runner => {
-    const state = context();
-    state.runner = runner;
-    const events: string[] = [];
-    const wire = encoder(events);
-    const calls: { name: string; output: string }[] = [];
-    wire.toolEnd = step => { calls.push(step.call); };
-    await play(scenarioFor('mock:silent-tail-again', state)!, wire);
-    if (runner === 'cursor') {
-      expect(calls).toEqual([expect.objectContaining({ name: 'read', output: expect.stringContaining('cezar_done') })]);
-      expect(events.some(value => value.startsWith('Task complete.'))).toBe(false);
-    } else {
-      expect(calls).toEqual([expect.objectContaining({ name: 'bash', output: 'created' })]);
-      expect(events.some(value => value.startsWith('Task complete.'))).toBe(true);
-    }
-    events.length = 0;
-    await play(scenarioFor('Your turn ended without a wait or done.', state)!, wire);
-    if (runner === 'cursor') expect(events).toEqual(['open', 'open', 'end']);
-    else expect(events).toEqual(['open', 'open', expect.stringContaining('cezar_done'), 'end']);
-  });
   it.each([
-    ['pi', 'silent-tail'], ['pi', 'tool-tail'], ['pi', 'silent-tail-again'],
+    ['pi', 'silent-tail'],
     ['pi', 'silent-tail-no-reply'], ['pi', 'silent-tail-late-reply'],
     ['pi', 'silent-tail-slow-done'], ['pi', 'silent-tail-late-turn-start'],
     ['codex', 'silent-tail-late-turn-start'], ['cursor', 'silent-tail-slow-done'],
@@ -274,7 +254,7 @@ describe('silent-tail shared scripts', () => {
     state.runner = runner;
     const events: string[] = [];
     await play(scenarioFor(`mock:${token}`, state)!, encoder(events));
-    expect(events).toContain(token === 'tool-tail' ? 'Inspecting the working tree.' : 'Filing the issue now.');
+    expect(events).toContain('Filing the issue now.');
     events.length = 0;
     vi.useFakeTimers();
     vi.stubEnv('CEZ_MOCK_RELEASE_FILE', '');
@@ -287,7 +267,6 @@ describe('silent-tail shared scripts', () => {
       if (token === 'silent-tail-no-reply') expect(events).toEqual(['open']);
       else expect(events.at(-1)).toBe('end');
       if (token === 'silent-tail-slow-done') expect(events).toContain('Working on the wrap-up.');
-      if (token === 'silent-tail-again') expect(events.some(value => value.startsWith('Task complete.'))).toBe(true);
     } finally { vi.useRealTimers(); vi.unstubAllEnvs(); }
   });
 });
