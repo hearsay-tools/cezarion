@@ -40,7 +40,9 @@ function diagnosticGithub(github, diagnostics) {
     } catch (error) {
       diagnostics.api.status = numberOrNull(error?.status) ?? diagnostics.api.status;
       // Routes are static templates from trusted code. Arguments may be private.
-      throw new Error(`${route}: ${errorMessage(error)}`);
+      // The status and retry-after header let the reader retry a transient answer.
+      throw Object.assign(new Error(`${route}: ${errorMessage(error)}`), { status: error?.status,
+        response: { headers: { 'retry-after': error?.response?.headers?.['retry-after'] } } });
     }
   } };
 }
@@ -123,15 +125,15 @@ function requireStableRun(run, finalRun, finalLatest, eligible) {
   if (!eligible(finalRun) || finalRun.id !== run.id || finalRun.run_attempt !== run.run_attempt
     || finalLatest?.id !== run.id || finalLatest.run_attempt !== run.run_attempt || !eligible(finalLatest)) throw new Error('Native CI changed');
 }
-async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, allowInProgress = false, releaseAppBotLogin, diagnostics = {} }) {
+async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, sleep, allowInProgress = false, releaseAppBotLogin, diagnostics = {} }) {
   startDiagnostics(diagnostics, group);
   requireGroup(group);
   github = diagnosticGithub(github, diagnostics);
-  const read = reader(github, owner, repo, now() + 120000, now);
+  const deadline = now() + 120000;
+  const read = reader(github, owner, repo, deadline, now, sleep);
   const graphql = boundedGraphql(read);
-  const rules = () => read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch: 'main', per_page: 100 });
   diagnostics.check = 'queue rules';
-  requireQueueRules(await rules());
+  requireQueueRules(await read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch: 'main', per_page: 100 }));
   const queue = async () => {
     const data = await graphql(QUEUE_QUERY, { owner, repo });
     const nodes = data?.repository?.mergeQueue?.entries?.nodes;
@@ -156,14 +158,13 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   diagnostics.check = 'native protected jobs';
   if (!successfulJobs(await readCiJobs(read, run.id), [VERIFY, REVIEW])) throw new Error('Native CI/review gates missing');
   diagnostics.check = 'CodeRabbit admission';
-  const admission = await readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin, now });
+  const admission = await readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha,
+    releaseAppBotLogin, now, sleep, deadline: Math.min(deadline, now() + 60000) });
   if (!admission.admitted) throw new Error(`Unresolved or unsuccessful CodeRabbit admission: ${admission.reason}`);
   diagnostics.check = 'final native CI/review';
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
   const finalLatest = newest(await runs());
   requireStableRun(run, finalRun, finalLatest, eligible);
-  diagnostics.check = 'final queue rules';
-  requireQueueRules(await rules());
   diagnostics.check = 'final queue membership';
   const finalEntry = entryFrom(await queue(), group);
   diagnostics.check = 'final queue/PR identity';

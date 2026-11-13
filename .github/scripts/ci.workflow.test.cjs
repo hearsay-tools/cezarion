@@ -306,11 +306,11 @@ test('classification is not a path filter and build-and-package follows queue pr
 });
 
 test('preflight typecheck lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
-  const steps = workflow().jobs.typecheck.steps;
-  const index = steps.findIndex((step) => step.name === 'Lint workflows');
-  assert.ok(index > 0, 'expected a Lint workflows step');
-  assert.equal(steps[index - 1].name, 'Check out repository', 'lint before Node setup so it fails in seconds');
-  const { env, run } = steps[index];
+  const { env, steps } = workflow().jobs.typecheck;
+  const names = steps.map((step) => step.name);
+  const index = names.indexOf('Lint workflows');
+  assert.deepEqual(names.slice(index - 2, index + 2), ['Check out repository', 'Restore workflow lint tools', 'Lint workflows', 'Save workflow lint tools'],
+    'lint before Node setup so it fails in seconds, and save the tools before checked-out code runs');
   const [major, minor, patch] = String(env.ACTIONLINT_VERSION).split('.').map(Number);
   assert.ok(major * 1e6 + minor * 1e3 + patch >= 1_007_010,
     `actionlint ${env.ACTIONLINT_VERSION}: 1.7.10 is the first release that reads YAML anchors`);
@@ -318,15 +318,65 @@ test('preflight typecheck lints workflows with pinned, hash-verified actionlint 
   assert.match(env.ACTIONLINT_SHA256, /^[0-9a-f]{64}$/);
   assert.match(env.SHELLCHECK_SHA256, /^[0-9a-f]{64}$/);
   assert.equal(env.SHELLCHECK_OPTS, '--severity=warning');
-  assert.doesNotMatch(run, /\$\{\{/, 'versions and hashes reach the script through env, not interpolation');
-  const verify = run.indexOf('sha256sum -c');
-  assert.ok(verify > run.lastIndexOf('curl -fsSL --retry 3 '), 'verify after both downloads');
-  assert.ok(verify < run.indexOf('tar '), 'verify before extracting');
-  assert.match(run, /\$ACTIONLINT_SHA256/);
-  assert.match(run, /\$SHELLCHECK_SHA256/);
-  const lint = run.split('\n').find((line) => line.includes('-shellcheck='));
-  assert.match(lint ?? '', /-shellcheck="[^"]*shellcheck-v\$\{SHELLCHECK_VERSION\}\/shellcheck"/, 'shellcheck comes from the pinned download, not the runner image');
-  assert.match(lint, /-pyflakes=(\s|$)/, 'pyflakes is off');
+  assert.doesNotMatch(steps[index].run, /\$\{\{/, 'versions and hashes reach the script through env, not interpolation');
+  // The cache key changes with either pinned hash, so a new pin never reads an old tarball.
+  const [restore, save] = [steps[index - 1], steps[index + 1]];
+  assert.equal(restore.with.key, 'workflow-lint-${{ env.ACTIONLINT_SHA256 }}-${{ env.SHELLCHECK_SHA256 }}');
+  assert.deepEqual(save.with, restore.with);
+  assert.equal(save.if, `steps.${restore.id}.outputs.cache-hit != 'true'`);
+});
+
+// hearsay-tools/squawk#3017: one release-download 504 removed three green PRs from the queue.
+test('workflow lint uses cached tarballs whose hashes match, and downloads only a missing or wrong one', () => {
+  const { env, steps } = workflow().jobs.typecheck;
+  const { run } = steps.find((step) => step.name === 'Lint workflows');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-lint-'));
+  const [bin, releases, tools] = ['bin', 'releases', 'workflow-lint'].map((dir) => path.join(root, dir));
+  for (const dir of [bin, releases, tools]) fs.mkdirSync(dir);
+  const tarball = (name, file) => {
+    const src = path.join(root, `src-${name}`);
+    fs.mkdirSync(path.dirname(path.join(src, file)), { recursive: true });
+    fs.writeFileSync(path.join(src, file), `#!/bin/sh\necho "${name} $*" >> "${root}/ran"\n`, { mode: 0o755 });
+    const out = path.join(releases, `${name}.tar.gz`);
+    assert.equal(spawnSync('tar', ['-czf', out, '-C', src, file]).status, 0);
+    return { out, sha: require('node:crypto').createHash('sha256').update(fs.readFileSync(out)).digest('hex') };
+  };
+  const actionlint = tarball('actionlint', 'actionlint');
+  const shellcheck = tarball('shellcheck', `shellcheck-v${env.SHELLCHECK_VERSION}/shellcheck`);
+  // A download serves the release tarball named by the URL's tool, or fails as a 504 would.
+  fs.writeFileSync(path.join(bin, 'curl'), `#!/bin/sh
+# curl -fsSL --retry 3 -o <file> <url>
+echo "$6" >> "${root}/downloads"
+[ -f "${root}/offline" ] && exit 22
+case "$6" in *actionlint*) cp "${actionlint.out}" "$5" ;; *) cp "${shellcheck.out}" "$5" ;; esac
+`, { mode: 0o755 });
+  const lint = () => {
+    for (const file of ['ran', 'downloads']) fs.rmSync(path.join(root, file), { force: true });
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', run], { encoding: 'utf8',
+      env: { ...process.env, ...env, ACTIONLINT_SHA256: actionlint.sha, SHELLCHECK_SHA256: shellcheck.sha,
+        RUNNER_TEMP: root, PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+    const lines = (file) => fs.existsSync(path.join(root, file)) ? fs.readFileSync(path.join(root, file), 'utf8').trim().split('\n') : [];
+    return { status: result.status, ran: lines('ran'), downloads: lines('downloads') };
+  };
+  const pinned = `actionlint -shellcheck=${tools}/shellcheck-v${env.SHELLCHECK_VERSION}/shellcheck -pyflakes=`;
+  try {
+    assert.deepEqual(lint(), { status: 0, ran: [pinned], downloads: [
+      `https://github.com/rhysd/actionlint/releases/download/v${env.ACTIONLINT_VERSION}/actionlint_${env.ACTIONLINT_VERSION}_linux_amd64.tar.gz`,
+      `https://github.com/koalaman/shellcheck/releases/download/v${env.SHELLCHECK_VERSION}/shellcheck-v${env.SHELLCHECK_VERSION}.linux.x86_64.tar.gz`,
+    ] }, 'an empty cache downloads both pinned tarballs');
+    fs.writeFileSync(path.join(root, 'offline'), '');
+    assert.deepEqual(lint(), { status: 0, ran: [pinned], downloads: [] }, 'a cache hit needs no release download');
+    fs.writeFileSync(path.join(tools, 'actionlint.tar.gz'), 'tampered');
+    const tampered = lint();
+    assert.deepEqual([tampered.status, tampered.ran, tampered.downloads.length], [22, [], 1],
+      'a wrong cached tarball is downloaded again, and a failed download fails the step');
+    fs.rmSync(path.join(root, 'offline'));
+    fs.writeFileSync(path.join(releases, 'actionlint.tar.gz'), 'a changed release');
+    const changed = lint();
+    assert.deepEqual([changed.status, changed.ran, changed.downloads.length], [1, [], 1], 'a download that misses its hash is never extracted');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('preflight typecheck fails an added bare issue citation before every merge (hearsay-tools/cezarion#1310)', () => {

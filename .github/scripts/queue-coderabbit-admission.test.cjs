@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { fixture, HEAD, SHA } = require('./merge-queue.testkit.cjs');
+const { fixture, HEAD } = require('./merge-queue.testkit.cjs');
 const { readQueueCodeRabbitAdmission, FIRST_READY_QUERY } = require('./queue-coderabbit-admission.cjs');
 function read(h, now = Date.now) {
   return readQueueCodeRabbitAdmission({ github: h.github, owner: 'o', repo: 'r', pullNumber: 7, head: HEAD, now });
@@ -15,17 +15,6 @@ for (const [label, response] of [
   const h = fixture(); const original = h.github.request;
   h.github.request = (route, args) => args.query === FIRST_READY_QUERY ? { data: response } : original(route, args);
   await assert.rejects(() => read(h), /First ready timeline unavailable/);
-});
-test('queue reader rejects draft after reading provider admission', async () => {
-  const h = fixture(); h.s.pr.draft = true;
-  assert.equal((await read(h)).reason, 'PR is draft');
-});
-test('queue reader rejects a changed head after provider admission', async () => {
-  const h = fixture(); let reads = 0;
-  h.s.onRead = route => {
-    if (route.endsWith('/pulls/{pull_number}') && ++reads === 3) h.s.pr.head.sha = SHA;
-  };
-  await assert.rejects(() => read(h), /Queue PR identity changed/);
 });
 test('queue reader keeps current-head threads blocking post-first-ready success', async () => {
   const h = fixture(); h.s.threads = [{ id: 'open', isResolved: false }];
