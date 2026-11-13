@@ -43,14 +43,6 @@ vi.mock('node:child_process', async (original) => {
     return child;
   }) as typeof actual.spawn };
 });
-const eofGrace = vi.hoisted(() => ({ termMs: 100 }));
-vi.mock('./runner-runtime.ts', async (original) => ({
-  ...await original<typeof import('./runner-runtime.ts')>(),
-  KILL_GRACE_MS: 100,
-  // Read at each use, so S30 can leave a leader that exits on EOF time to do so on its own.
-  get EOF_TERM_GRACE_MS() { return eofGrace.termMs; },
-  EOF_KILL_GRACE_MS: 100,
-}));
 
 import { RUNNER_IDS, type AgentEvent, type AgentSession, type RunnerId } from './agent-runner.js';
 import { createRunner } from './runner-factory.js';
@@ -78,7 +70,7 @@ async function leftovers(cwd: string): Promise<{ group: number; session: number 
   }, { timeout: 10_000 });
 }
 
-async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>, cwd: string) => Promise<void>, scenario: 'no-progress' | 'no-progress-leftover' | 'no-progress-ignore-term' = 'no-progress') {
+async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>, cwd: string) => Promise<void>, scenario: 'no-progress' | 'no-progress-leftover' | 'no-progress-ignore-term' = 'no-progress', eofTermGraceMs = 100) {
   const adapter = HARNESS_ADAPTERS[backend];
   const cwd = mkdtempSync(join(tmpdir(), `cez-shutdown-${backend}-`));
   vi.stubEnv('CEZ_DRY_RUN', '');
@@ -89,6 +81,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
   eventStreams.length = 0;
   const session = createRunner(backend).startSession({ toolGrant: UNSET_TOOL_GRANT,
     cwd, userPrompt: promptFor(backend, scenario), timeoutMs: 0,
+    timings: { killGraceMs: 100, eofTermGraceMs, eofKillGraceMs: 100 },
   }, event => events.push(event), {
     autoEndAfterFirstTurn: false,
     onUiEvent: event => { if (event.type === 'turn.started') openingTurnStarted = true; },
@@ -279,21 +272,16 @@ function exitReaping(backend: RunnerId, it: typeof registerTest = registerTest):
     it.skipIf(process.platform === 'win32')(`${backend} ${ownExit.id} ${ownExit.name}`, async () => {
       const signalsOnEnd = backend === 'opencode' || backend === 'cursor';
       // Past any EOF exit and short of the test timeout: only the leader's own exit settles it.
-      if (!signalsOnEnd) eofGrace.termMs = 10_000;
-      try {
-        await withChild(backend, async (session, child, _events, settled, cwd) => {
-          const { group, session: setsid } = await leftovers(cwd);
-          session.end();
-          await settled;
-          if (!signalsOnEnd) expect(child.signalCode).toBeNull();
-          // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
+      await withChild(backend, async (session, child, _events, settled, cwd) => {
+        const { group, session: setsid } = await leftovers(cwd);
+        session.end();
+        await settled;
+        if (!signalsOnEnd) expect(child.signalCode).toBeNull();
+        // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
 
-          await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
-          expect(alive(setsid)).toBe(true);
-        }, 'no-progress-leftover');
-      } finally {
-        eofGrace.termMs = 100;
-      }
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
+        expect(alive(setsid)).toBe(true);
+      }, 'no-progress-leftover', signalsOnEnd ? 100 : 10_000);
     }, 50_000);
 
     // hearsay-tools/cezarion#1286: a leader killed from outside (a crash, the OOM killer) gets no

@@ -43,7 +43,7 @@ import {
   ompTurnStarted,
 } from './omp-ui-mapper.js';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { boundOutputDrainAfterExit, DEFAULT_RUNNER_TIMINGS } from './runner-runtime.js';
 import { productName } from '../home/display.ts';
 
 /**
@@ -90,6 +90,7 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
  */
 export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: `explicit CI --extension; the ${productName('Cezar')} tools admitted when --tools is set` },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
@@ -239,14 +240,14 @@ export class OmpRunner implements AgentRunner {
   readonly facts = RUNNER_FACTS.omp;
   readonly inputDelivery: InputDelivery = RUNNER_FACTS.omp.inputDelivery;
   private readonly bin: string;
-  private readonly timeoutMs: number;
-  private readonly killGraceMs: number;
+  private readonly timeoutMs: number | undefined;
+  private readonly killGraceMs: number | undefined;
   private lastSession: AgentSession | null = null;
 
   constructor(opts: OmpRunnerOptions = {}) {
     this.bin = opts.bin ?? productEnv('OMP_BIN') ?? (productEnv('DRY_RUN') === '1' ? mockOmpPath() : 'omp');
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
-    this.killGraceMs = opts.killGraceMs ?? KILL_GRACE_MS;
+    this.timeoutMs = opts.timeoutMs;
+    this.killGraceMs = opts.killGraceMs;
   }
 
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
@@ -262,13 +263,14 @@ export class OmpRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const killGraceMs = this.killGraceMs;
+    const killGraceMs = this.killGraceMs ?? spec.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs;
     let spawnError: Error | null = null;
     let inputError: Error | undefined;
     const stderr: string[] = [];
     const spawnOmp = (args: string[]): ChildProcessWithoutNullStreams => {
       const spawned = spawnSessionLeader(this.bin, args, {
         cwd: spec.cwd,
+        timings: spec.timings,
         env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
       });
       boundOutputDrainAfterExit(spawned);
@@ -470,7 +472,7 @@ export class OmpRunner implements AgentRunner {
     };
     startup();
 
-    const limitMs = spec.timeoutMs ?? this.timeoutMs;
+    const limitMs = spec.timeoutMs ?? this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
     // One wall-clock limit for the whole run: a Ruling 13 respawn re-arms with what is left.
     const deadlineAt = Date.now() + limitMs;
     const armDeadline = (): NodeJS.Timeout | undefined => {

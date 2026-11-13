@@ -10,11 +10,28 @@ export const KILL_GRACE_MS = 10_000;
  *  SIGTERM, then SIGKILL. */
 export const EOF_TERM_GRACE_MS = 8_000;
 export const EOF_KILL_GRACE_MS = 4_000;
+/** Internal runner deadlines. Omitted fields retain the production constants. */
+export interface RunnerTimings {
+  runTimeoutMs: number;
+  killGraceMs: number;
+  eofTermGraceMs: number;
+  eofKillGraceMs: number;
+  noProgressTimeoutMs: number;
+}
+
 /** Reopen window after a turn ends before an auto-ended session closes stdin. */
 export const AUTO_END_DELAY_MS = 250;
 
 /** Managed open turns fail after this long without native stream activity. */
 export const DEFAULT_NO_PROGRESS_TIMEOUT_MS = 30 * 60_000;
+
+export const DEFAULT_RUNNER_TIMINGS: Readonly<RunnerTimings> = {
+  runTimeoutMs: DEFAULT_RUN_TIMEOUT_MS,
+  killGraceMs: KILL_GRACE_MS,
+  eofTermGraceMs: EOF_TERM_GRACE_MS,
+  eofKillGraceMs: EOF_KILL_GRACE_MS,
+  noProgressTimeoutMs: DEFAULT_NO_PROGRESS_TIMEOUT_MS,
+};
 
 /** Post-exit drain budget for output a pipe-inheriting descendant still writes. */
 export const EXIT_DRAIN_MS = 250;

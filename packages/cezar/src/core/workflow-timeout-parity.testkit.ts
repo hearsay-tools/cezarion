@@ -1,5 +1,5 @@
 import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
-import { expect, vi } from 'vitest';
+import { expect } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { driveSeam, waitFor, WORKFLOW_TIMEOUT_CRITERIA } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
@@ -8,10 +8,6 @@ import { workflowDefSchema } from '../workflows/types.ts';
 // Compress only the deadline, not the runner, manager, clock or native wire.
 // Every adapter's hold scenario lasts at least 500ms. The unfixed manager
 // leaves the default enabled and kills that non-final step before its check.
-vi.mock('./runner-runtime.ts', async importOriginal => ({
-  ...await importOriginal<typeof import('./runner-runtime.ts')>(),
-  DEFAULT_RUN_TIMEOUT_MS: 150,
-}));
 
 // T1, T2, T3, T5 and T6 test which deadline Squawk passes (`step.timeoutMs ?? 0`,
 // workflows/run/step-session.ts) and what a timed-out step does, and run on the shared runner set.
@@ -33,19 +29,19 @@ describe('workflow wall-clock policy — #470', () => {
       it(`${backend} ${criterion.id} ${criterion.name}`, async () => {
         if (criterion.id === 'T7') {
           // The runner owns how it applies the deadline Squawk passes: zero means none, a longer limit
-          // outlives its own default (compressed to 150 ms above; every hold lasts 500 ms), and a
+          // outlives its own default (injected as 150 ms; every hold lasts 500 ms), and a
           // shorter one ends the turn with a timed-out error.
           for (const timeoutMs of [0, 15_000]) {
-            const observed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs } });
+            const observed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs, timings: { runTimeoutMs: 150 } } });
             expect(observed.v1.filter(e => e.type === 'error'), `timeoutMs ${timeoutMs}`).toEqual([]);
             expect(observed.v1.some(e => e.type === 'turn-end'), `timeoutMs ${timeoutMs}`).toBe(true);
           }
-          const killed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs: 100 } });
+          const killed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs: 100, timings: { runTimeoutMs: 150 } } });
           expect(killed.v1.some(e => e.type === 'error' && /timed out/.test(e.message))).toBe(true);
           return;
         }
         if (criterion.id === 'T4') {
-          const observed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs: undefined } });
+          const observed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs: undefined, timings: { runTimeoutMs: 150 } } });
           expect(observed.v1.some(e => e.type === 'error' && /timed out/.test(e.message))).toBe(true);
           return;
         }
@@ -57,7 +53,7 @@ describe('workflow wall-clock policy — #470', () => {
             manager.finish(runId);
             await waitFor(() => !manager.isActive(runId));
             expect(store.getRun(runId)?.error).toBeUndefined();
-          });
+          }, { timings: { runTimeoutMs: 150 } });
           return;
         }
         const workflowDef = workflowDefSchema.parse({ name: 'deadline-test', source: 'file', steps: [
@@ -82,7 +78,7 @@ describe('workflow wall-clock policy — #470', () => {
               { stepId: 'verify', exitCode: 0 },
             ]);
           }
-        }, { workflowDef });
+        }, { workflowDef, timings: { runTimeoutMs: 150 } });
       }, 30_000);
     }
   }

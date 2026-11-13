@@ -1,7 +1,5 @@
 import { finished } from 'node:stream/promises';
-import {
-  afterExitDrain, CRASH_EXIT_DRAIN_MS, EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, isCrashExit,
-} from './runner-runtime.ts';
+import { afterExitDrain, CRASH_EXIT_DRAIN_MS, isCrashExit, DEFAULT_RUNNER_TIMINGS, type RunnerTimings } from './runner-runtime.ts';
 import { signalExitedSession, signalSession, spawnSessionLeader } from './session-process.ts';
 
 export interface CursorPrintProcessOptions {
@@ -10,6 +8,7 @@ export interface CursorPrintProcessOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   /** Test overrides; production uses the shared runner deadlines. */
+  timings?: Partial<RunnerTimings> | undefined;
   drainMs?: number;
   termGraceMs?: number;
   killGraceMs?: number;
@@ -38,7 +37,7 @@ export function startCursorPrintProcess(
   const args = isNodeScript ? [options.bin, ...options.args] : [...options.args];
   // A registered session leader (hearsay-tools/cezarion#1286): Squawk's own SIGINT/SIGTERM and the
   // worker ledger reach its group, and every signal after its exit keeps the reuse guard.
-  const child = spawnSessionLeader(command, args, { cwd: options.cwd, env: options.env });
+  const child = spawnSessionLeader(command, args, { cwd: options.cwd, env: options.env, timings: options.timings });
   const pid = child.pid;
   let closed = false;
   let inputClosed = false;
@@ -102,8 +101,8 @@ export function startCursorPrintProcess(
     closeInput();
     if (termTimer) clearTimeout(termTimer);
     if (killTimer) clearTimeout(killTimer);
-    const termGrace = mode === 'interrupt' ? 0 : options.termGraceMs ?? EOF_TERM_GRACE_MS;
-    const killGrace = options.killGraceMs ?? EOF_KILL_GRACE_MS;
+    const termGrace = mode === 'interrupt' ? 0 : options.termGraceMs ?? options.timings?.eofTermGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofTermGraceMs;
+    const killGrace = options.killGraceMs ?? options.timings?.eofKillGraceMs ?? DEFAULT_RUNNER_TIMINGS.eofKillGraceMs;
     if (termGrace === 0) signalSession(child, 'SIGTERM');
     else termTimer = setTimeout(() => signalSession(child, 'SIGTERM'), termGrace);
     killTimer = setTimeout(() => signalSession(child, 'SIGKILL'), termGrace + killGrace);

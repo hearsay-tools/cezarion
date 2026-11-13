@@ -136,13 +136,13 @@ export const FOLLOW_ON_CRITERION: SeamCriterion<FollowOnObservation> = {
  * could put it. `deadline` is cezar-side, proven by a held turn ending in the
  * runner's own timeout error.
  */
-const SPEC_FIELD_PROBE_KINDS = ['boundary', 'process', 'deadline'] as const;
+const SPEC_FIELD_PROBE_KINDS = ['boundary', 'process', 'deadline', 'timings'] as const;
 type SpecFieldProbeKind = (typeof SPEC_FIELD_PROBE_KINDS)[number];
 
 type SpecFieldProbe =
   | { readonly kind: Extract<SpecFieldProbeKind, 'boundary'>; readonly without: Partial<AgentRunSpec>; readonly with: Partial<AgentRunSpec> }
   | { readonly kind: Extract<SpecFieldProbeKind, 'process'> }
-  | { readonly kind: Extract<SpecFieldProbeKind, 'deadline'> };
+  | { readonly kind: Extract<SpecFieldProbeKind, 'deadline' | 'timings'> };
 
 const PROBE_IMAGE: ContentBlock = {
   type: 'image',
@@ -165,6 +165,7 @@ export const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProb
   model: { kind: 'boundary', without: {}, with: { model: 'parity-probe/model-sentinel' } },
   effort: { kind: 'boundary', without: {}, with: { effort: 'xhigh' } },
   timeoutMs: { kind: 'deadline' },
+  timings: { kind: 'timings' },
   // A session id is a resume handle on codex, so both sides resume; `resume`
   // alone is a no-op on every runner, which keeps `without` a clean base.
   sessionId: { kind: 'boundary', without: { resume: true }, with: { resume: true, sessionId: PINNED_SESSION_ID } },
@@ -504,6 +505,7 @@ export const SESSION_GROUPS = {
           let dir = '';
           const recordings = new Map<string, string[]>();
           let deadlineErrors: string[] = [];
+          let timingErrors: string[] = [];
 
           beforeAll(async () => {
             dir = mkdtempSync(join(tmpdir(), `cez-spec-support-${backend}-`));
@@ -528,6 +530,12 @@ export const SESSION_GROUPS = {
             const held = await driveSeam(backend, 'hold', {
               spec: { cwd: dir, timeoutMs: 150, env: probeEnv('deadline') },
             });
+            const timed = await driveSeam(backend, 'hold', {
+              spec: { cwd: dir, timeoutMs: undefined, timings: { runTimeoutMs: 150 }, env: probeEnv('timings') },
+            });
+            timingErrors = timed.v1
+              .filter((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error')
+              .map((e) => e.message);
             deadlineErrors = held.v1
               .filter((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error')
               .map((e) => e.message);
@@ -550,6 +558,8 @@ export const SESSION_GROUPS = {
                 observed = JSON.stringify(without) !== JSON.stringify(withField);
               } else if (probe.kind === 'process') {
                 observed = (recordings.get(variantKey({}))?.length ?? 0) > 0;
+              } else if (probe.kind === 'timings') {
+                observed = timingErrors.some((message) => /timed out/.test(message));
               } else {
                 observed = deadlineErrors.some((message) => /timed out/.test(message));
               }

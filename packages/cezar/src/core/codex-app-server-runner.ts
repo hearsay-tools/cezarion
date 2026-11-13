@@ -19,13 +19,7 @@ import {
 import { RUNNER_FACTS } from './runner-facts.ts';
 import { codexToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession } from './session-process.ts';
-import {
-  afterExitDrain,
-  AUTO_END_DELAY_MS,
-  DEFAULT_RUN_TIMEOUT_MS,
-  exitDrainBudget,
-  KILL_GRACE_MS,
-} from './runner-runtime.ts';
+import { afterExitDrain, AUTO_END_DELAY_MS, exitDrainBudget, DEFAULT_RUNNER_TIMINGS } from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, sessionExitEvent, sessionStderrIsUnexpected, startupCrashOwnsFailure, stringField, turnIdOf } from './codex-native-frames.ts';
@@ -90,6 +84,7 @@ export interface CodexRunnerOptions {
  */
 export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars and default_tools_approval_mode approve' },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: 'prepended to the opening turn/start input through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
@@ -113,12 +108,12 @@ export class CodexAppServerRunner implements AgentRunner {
   readonly inputDelivery: InputDelivery = RUNNER_FACTS.codex.inputDelivery;
 
   private readonly bin: string;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private lastSession: CodexSession | null = null;
 
   constructor(opts: CodexRunnerOptions = {}) {
     this.bin = resolveCodexExecutable(opts.bin);
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs;
   }
 
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
@@ -134,7 +129,7 @@ export class CodexAppServerRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const session = new CodexSession(this.bin, this.timeoutMs, spec, onEvent, opts);
+    const session = new CodexSession(this.bin, this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs, spec, onEvent, opts);
     this.lastSession = session;
     return session;
   }
@@ -232,7 +227,7 @@ class CodexSession implements AgentSession {
     private readonly opts: SessionOptions,
   ) {
     try {
-      this.child = spawnCodexAppServer(bin, spec.cwd, spec.env, { session: true });
+      this.child = spawnCodexAppServer(bin, spec.cwd, spec.env, { session: true, timings: spec.timings });
       this.rpc = new CodexAppServerRpc(this.child, (error) => {
         if (!this.hardStopStarted && !this.hasExited()) this.fail(error);
       });
@@ -537,6 +532,7 @@ class CodexSession implements AgentSession {
           this.automaticCleanupStarted = true;
           this.terminatedBySquawk ||= this.explicitEnd || state === 'live';
         },
+        this.spec.timings,
       );
     } catch { /* already gone */ }
   }
@@ -556,7 +552,7 @@ class CodexSession implements AgentSession {
     signalSession(this.child, 'SIGTERM');
     this.stopKillTimer = setTimeout(() => {
       if (!this.hasExited()) signalSession(this.child, 'SIGKILL');
-    }, KILL_GRACE_MS);
+    }, this.spec.timings?.killGraceMs ?? DEFAULT_RUNNER_TIMINGS.killGraceMs);
     this.stopKillTimer.unref?.();
   }
 

@@ -27,7 +27,7 @@ import { buildChildEnv } from './agent-env.ts';
 import { opencodeTaskScopeEnv } from './opencode-task-scope.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
-import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
+import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUNNER_TIMINGS } from './runner-runtime.ts';
 import { formatModelIdentity, parseModelIdentity } from './model-identity.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import {
@@ -143,6 +143,7 @@ export const KILL_GRACE_MS = 4_000;
  */
 export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   squawkTools: { honored: true, via: 'merged OPENCODE_CONFIG_CONTENT local mcp entry' },
+  timings: { honored: true, via: 'internal runner deadlines; omitted fields retain production defaults' },
   systemPrompt: { honored: true, via: 'prepended to the opening prompt_async text through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'prompt_async text part' },
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
@@ -160,7 +161,6 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
 };
 /** How long an idle session may sit on steered input before it counts as a lost wake. */
 export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
-
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
@@ -169,14 +169,14 @@ export class OpencodeServerRunner implements AgentRunner {
   readonly inputDelivery: InputDelivery = RUNNER_FACTS.opencode.inputDelivery;
 
   private readonly bin: string;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private readonly serverStartTimeoutMs: number;
   private lastSession: OpencodeSession | null = null;
 
   constructor(opts: OpencodeRunnerOptions = {}) {
     this.bin = opts.bin ?? productEnv('OPENCODE_BIN') ?? (productEnv('DRY_RUN') === '1'
       ? fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url)) : 'opencode');
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs;
     this.serverStartTimeoutMs = opts.serverStartTimeoutMs ?? SERVER_START_TIMEOUT_MS;
   }
 
@@ -193,7 +193,7 @@ export class OpencodeServerRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const session = new OpencodeSession(this.bin, this.timeoutMs, this.serverStartTimeoutMs, spec, onEvent, opts);
+    const session = new OpencodeSession(this.bin, this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs, this.serverStartTimeoutMs, spec, onEvent, opts);
     this.lastSession = session;
     return session;
   }
@@ -607,7 +607,7 @@ class OpencodeSession implements AgentSession {
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawnSessionLeader(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-        cwd: this.spec.cwd,
+        cwd: this.spec.cwd, timings: this.spec.timings,
         env: buildChildEnv({ backend: 'opencode', extraEnv: opencodeTaskScopeEnv(ciOpenCodeEnv(this.spec), this.spec.restrictCrossSessionMessaging) }),
       });
     } catch (err) {
