@@ -4,17 +4,14 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp, type ServerDeps } from './server.ts';
 
 // Health starts availability probes without awaiting them. These guard tests do
 // not need host CLIs writing caches into HOME after their requests have returned.
-vi.mock('../core/backend-detect.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../core/backend-detect.ts')>(),
-  detectEnvironment: async () => [],
-}));
+const detectEnvironment = async () => [];
 
 /**
  * DNS-rebinding guard: in local mode (loopback bind, no `CEZ_REMOTE`) every
@@ -55,7 +52,7 @@ describe('host-header guard (DNS rebinding)', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
+    createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', detectEnvironment, ...over });
 
   const request = (host: string | null, path = '/api/v1/health', over: Partial<ServerDeps> = {}) =>
     makeApp(over).request(path, host === null ? {} : { headers: { host } });

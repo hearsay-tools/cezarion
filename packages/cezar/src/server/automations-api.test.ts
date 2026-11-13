@@ -36,11 +36,8 @@ import { createRunManager } from './run-manager.testkit.ts';
 // Server prewarming outlives the HTTP response. Keep unrelated host discovery
 // from starting CLIs that write HOME caches during fixture teardown. GitHub
 // availability still uses the real forge probe and its existing fake gh fixture.
-vi.mock('../core/backend-detect.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../core/backend-detect.ts')>(),
-  detectEnvironment: async () => [],
-}));
 const discovery = () => ({
+  detectEnvironment: async () => [],
   modelCatalog: new RunnerModelCatalog({ adapters: {} }),
   providerAuth: new ProviderAuthService({
     runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }),

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { detectEnvironment, type BackendCheck } from '../core/backend-detect.ts';
+import type { BackendCheck } from '../core/backend-detect.ts';
 import { RunnerModelCatalog, type ModelOption } from '../core/runner-model-catalog.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -16,12 +16,12 @@ import { apiRequest } from './loopback-request.testkit.ts';
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
 
-vi.mock('../core/backend-detect.ts', () => ({ detectEnvironment: vi.fn() }));
+const detectEnvironment = vi.fn<() => Promise<BackendCheck[]>>();
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); vi.restoreAllMocks(); });
 function build(modelCatalog = new RunnerModelCatalog({ adapters: {} }), extra: Partial<ServerDeps> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cez-nonblocking-')); roots.push(root);
-  return createApp({ home: testHome(), repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: 'test', modelCatalog, ...extra });
+  return createApp({ home: testHome(), repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: 'test', modelCatalog, detectEnvironment, ...extra });
 }
 
 // hearsay-tools/cezarion#974: the full Node 24.15 run took 1734ms against 1500ms.
@@ -106,7 +106,7 @@ it('prewarms Cursor on the live path and publishes completion to both transports
   const sse = vi.fn(); events.on(sse);
   const app = createApp({ home: testHome(),
     repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager,
-    version: 'test', modelCatalog: catalog, workspaceEvents: events,
+    version: 'test', modelCatalog: catalog, detectEnvironment, workspaceEvents: events,
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }),
     socketHub: { registerTopic: (name, topic) => { topics.set(name, topic); }, registerTopicFamily: () => {}, handleUpgrade: () => {}, close: () => {}, onClose: () => () => undefined },
   });

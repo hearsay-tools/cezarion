@@ -8,6 +8,7 @@
  */
 import { runnerDiscoversModels } from '@open-mercato/cezar-contract/workspace';
 import { AutomationStore } from '../automations/store.ts';
+import { detectEnvironment } from '../core/backend-detect.ts';
 import { hostModelCatalogAdapters } from '../core/host-model-catalog.ts';
 import {
   ProviderAuthService,
@@ -28,7 +29,7 @@ import type { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import type { ServerDeps, WorkspaceEventBus } from './server.ts';
 
 /** The host-wide services `createApp` always has: the injected one, or the real default. */
-type HostServiceKey = 'modelCatalog' | 'providerAuth' | 'workspaceConfig' | 'openTerminal' | 'openFile' | 'openApp';
+type HostServiceKey = 'modelCatalog' | 'providerAuth' | 'detectEnvironment' | 'workspaceConfig' | 'openTerminal' | 'openFile' | 'openApp';
 type HostServices = { [K in HostServiceKey]: Exclude<ServerDeps[K], undefined> };
 
 /**
@@ -43,6 +44,7 @@ export function resolveServerDeps(deps: Pick<ServerDeps, HostServiceKey> & Pick<
     // so a runner added to the contract without an adapter fails typecheck (AGENT_PROTOCOL.md §10).
     modelCatalog: deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) }),
     providerAuth: deps.providerAuth ?? new ProviderAuthService(),
+    detectEnvironment: deps.detectEnvironment ?? detectEnvironment,
     workspaceConfig: deps.workspaceConfig ?? {
       load: (path = home.workspaceConfig) => loadWorkspaceConfig(path),
       mergeWrite: (mutate, selected = home) => mergeWriteWorkspaceConfig(mutate, selected),
