@@ -169,7 +169,10 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     expect(document.body.textContent).toContain('—') // null size
     // A reclaimable row inside the keep limit is kept; a review row is in use.
     expect(states()).toEqual(['kept · newest 10', 'in use'])
-    expect(document.querySelector('[data-slot="worktrees-retention"]')?.textContent).toContain('newest 10')
+    const limited = document.querySelector('[data-slot="worktrees-retention"]')?.textContent ?? ''
+    expect(limited).toContain('newest 10')
+    expect(limited).toMatch(/reclaims the rest/)
+    expect(limited).not.toMatch(/nothing is reclaimed/)
   })
 
   it('labels the rows past the keep limit reclaimable and sizes the button from exactly those', async () => {
@@ -220,7 +223,10 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     serve({ worktrees: [], totalBytes: 0, keep: 0 })
     renderPanel()
     await waitFor(() => expect(document.querySelector('[data-slot="worktrees-empty"]')).not.toBeNull())
-    expect(document.querySelector('[data-slot="worktrees-retention"]')?.textContent).toContain('unlimited')
+    const unlimited = document.querySelector('[data-slot="worktrees-retention"]')?.textContent ?? ''
+    expect(unlimited).toContain('unlimited')
+    expect(unlimited).toMatch(/nothing is reclaimed/)
+    expect(unlimited).not.toMatch(/reclaims the rest/)
   })
 
   it('disables Reclaim now when reclaimable finished worktrees are within keep', async () => {
