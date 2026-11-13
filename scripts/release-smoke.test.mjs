@@ -114,6 +114,28 @@ test('each npm call is bounded by what is left of its phase, and never by less t
   assert.equal(installs.at(-1).timeout, 15_000, 'the attempt at the deadline still gets one poll interval');
 });
 
+test('an npm attempt that takes time before it fails still gets only what is left, and the pause stops at the bound', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  // Each `npm view` runs 50 s and fails: attempts start 65 s apart, and the 14th ends 5 s before the bound.
+  let now = 0;
+  const views = [], pauses = [];
+  const options = {
+    now: () => now, log: () => {},
+    sleep: async ms => { pauses.push({ at: now, ms }); now += ms; },
+    exec: (args, { timeout }) => {
+      views.push({ at: now, timeout });
+      now += 50_000;
+      throw Object.assign(new Error('Command failed: npm view'), { stderr: 'npm error 404 No match found\n' });
+    },
+  };
+  await assert.rejects(registryInstall(prefix, 'fake@1.2.1', options), /is not on the registry after 950 s \(15 attempts\)/);
+  assert.deepEqual(views.map(v => v.timeout), views.map(v => Math.max(PUBLISH_WAIT_MS - v.at, 15_000)));
+  assert.ok(pauses.every(p => p.at + p.ms <= PUBLISH_WAIT_MS), 'no pause runs past the bound');
+  assert.deepEqual(pauses.at(-1), { at: 895_000, ms: 5_000 }, 'the last pause is cut to what is left');
+  assert.deepEqual(views.at(-1), { at: PUBLISH_WAIT_MS, timeout: 15_000 }, 'the attempt at the bound gets one poll interval');
+});
+
 // A package whose binary is a tiny server with the routes the smoke reads. Its project
 // registry lives in the product home, unless `forget` drops what an older version saved.
 const fakeServer = `
