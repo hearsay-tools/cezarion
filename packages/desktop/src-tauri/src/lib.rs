@@ -360,7 +360,7 @@ pub fn run() {
             }
         })
         .build(context)
-        .expect("failed to build the Squawk desktop shell")
+        .expect("failed to build the desktop shell")
         .run(move |app, event| match event {
             RunEvent::Ready => {
                 if app.get_webview_window("main").is_some() {
@@ -489,7 +489,7 @@ fn run_cockpit(shell: &Shell, window: &WebviewWindow) -> bool {
         let _ = item.set_enabled(true);
     }
     let cwd = pick_cwd();
-    splash_reset(window, "Starting Squawk…", &entry.to_string_lossy());
+    splash_reset(window, &format!("Starting {}…", identity::DISPLAY_NAME), &entry.to_string_lossy());
 
     let log: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
     // Spawn and publish under the child lock, after checking quit there: quit either finds this
@@ -591,7 +591,7 @@ fn watch_cockpit(shell: &Shell, window: &WebviewWindow, pid: u32, log: &Mutex<Ve
     };
     match status.and_then(|s| s.code()) {
         Some(RESTART_EXIT_CODE) => {
-            splash_reset(window, "Restarting Squawk…", "Switching to the newly activated version.");
+            splash_reset(window, &format!("Restarting {}…", identity::DISPLAY_NAME), "Switching to the newly activated version.");
             true
         }
         Some(code) if !shell.quitting.load(Ordering::SeqCst) => {
@@ -645,7 +645,7 @@ fn check_node() -> Result<String, String> {
         return Err("Node.js was not found on your PATH.".into());
     }
     if !node_meets_floor(&version) {
-        return Err(format!("Node.js {version} is installed, but Squawk needs {MIN_NODE_LABEL} or newer."));
+        return Err(format!("Node.js {version} is installed, but {} needs {MIN_NODE_LABEL} or newer.", identity::DISPLAY_NAME));
     }
     Ok(version)
 }
@@ -683,7 +683,7 @@ const INSTALL_TAG: &str = "latest";
 /// is installed (`entry_or_install`); the shell never replaces an installed cockpit. Streams
 /// npm's output to the splash. Returns whether the install succeeded.
 fn install_cezar(window: &WebviewWindow, versions: &Path) -> bool {
-    splash_reset(window, "Installing Squawk…", &format!("{PACKAGE}@{INSTALL_TAG} → {}", versions.display()));
+    splash_reset(window, &format!("Installing {}…", identity::DISPLAY_NAME), &format!("{PACKAGE}@{INSTALL_TAG} → {}", versions.display()));
 
     let mut lines: Vec<String> = Vec::new();
     let installed = install_into(versions, |staging| {
@@ -1261,7 +1261,7 @@ fn fail_needs_node(window: &WebviewWindow, reason: &str) {
         "{}?needs_node=1&error={}&title={}",
         app_origin(),
         urlencode(reason),
-        urlencode(&format!("cezar needs Node.js {MIN_NODE_LABEL} or newer"))
+        urlencode(&format!("{} needs Node.js {MIN_NODE_LABEL} or newer", identity::DISPLAY_NAME))
     )) {
         let _ = window.navigate(url);
     }

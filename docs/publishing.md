@@ -63,7 +63,7 @@ two authentication methods (#33):
   `NPM_TOKEN`. Its trusted publisher never builds or executes PR code; validated archive files are repacked
   before npm receives them with lifecycle scripts disabled. Forks never publish.
 - **Nightlies** are **clock-driven**: [`nightly.yml`](../.github/workflows/nightly.yml)
-  cuts `main`'s tip every night under the `nightly` dist-tag, so `npx -p @hearsay-tools/squawk@nightly hsq`
+  cuts `main`'s tip every night under the `nightly` dist-tag, so `npx cezarion@nightly`
   is always the trunk. Also runnable on demand from the Actions tab.
   Authenticated with `NPM_TOKEN`.
 
@@ -413,7 +413,7 @@ comments on it), and the Release workflow refuses a stable release until the new
 finished rehearsal passed.
 
 ```bash
-npx -p @hearsay-tools/squawk@nightly hsq              # whatever is on main as of last night
+npx cezarion@nightly              # whatever is on main as of last night
 npx cezarion@0.1.5-nightly.20260813.126   # that exact night, forever
 ```
 
