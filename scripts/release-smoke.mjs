@@ -66,10 +66,11 @@ export const INSTALL_WAIT_MS = 5 * 60_000;
 export const POLL_MS = 15_000;
 
 // `--prefer-online` revalidates npm's local metadata cache, so a document cached before
-// the version appeared cannot keep answering "no such version".
-function runNpm(args, { quiet = false } = {}) {
+// the version appeared cannot keep answering "no such version". `timeout` stops one stalled
+// call; it is never 0, which would mean no limit.
+function runNpm(args, { quiet = false, timeout } = {}) {
   return execFileSync(npm, args, {
-    encoding: 'utf8', shell: process.platform === 'win32', stdio: quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+    encoding: 'utf8', shell: process.platform === 'win32', timeout, stdio: quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   });
 }
 
@@ -78,14 +79,18 @@ function reason(error) {
   return (line ?? error.message.split('\n')[0]).trim();
 }
 
+// Each attempt may run for what is left of `waitMs`, and at least one poll interval, so a
+// stalled npm call cannot outlive the phase by more than that interval.
 async function untilDeadline(what, attempt, waitMs, { now, sleep, log }) {
   const start = now();
+  const left = () => waitMs - (now() - start);
   for (let n = 1; ; n++) {
-    try { return await attempt(); } catch (error) {
+    try { return await attempt(Math.max(left(), POLL_MS)); } catch (error) {
       const elapsed = Math.round((now() - start) / 1000);
-      if (now() - start >= waitMs) throw new Error(`${what} after ${elapsed} s (${n} attempts): ${reason(error)}`, { cause: error });
-      log(`release-smoke: ${what} (attempt ${n}, ${elapsed} s elapsed): ${reason(error)}; retrying in ${POLL_MS / 1000} s.`);
-      await sleep(POLL_MS);
+      if (left() <= 0) throw new Error(`${what} after ${elapsed} s (${n} attempts): ${reason(error)}`, { cause: error });
+      const pause = Math.min(POLL_MS, left());
+      log(`release-smoke: ${what} (attempt ${n}, ${elapsed} s elapsed): ${reason(error)}; retrying in ${Math.ceil(pause / 1000)} s.`);
+      await sleep(pause);
     }
   }
 }
@@ -95,13 +100,13 @@ export async function registryInstall(prefix, spec, { exec = runNpm, now = Date.
   const clock = { now, sleep, log };
   mkdirSync(prefix, { recursive: true });
   const version = spec.slice(spec.lastIndexOf('@') + 1);
-  await untilDeadline(`${spec} is not on the registry`, async () => {
-    const shown = `${exec(['view', spec, 'version', '--prefer-online'], { quiet: true }) ?? ''}`.trim();
+  await untilDeadline(`${spec} is not on the registry`, async (timeout) => {
+    const shown = `${exec(['view', spec, 'version', '--prefer-online'], { quiet: true, timeout }) ?? ''}`.trim();
     if (shown !== version) throw new Error(`npm view printed "${shown}"`);
   }, PUBLISH_WAIT_MS, clock);
   log(`release-smoke: the registry serves ${spec}.`);
-  await untilDeadline(`${spec} did not install`, () => exec(
-    ['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec]), INSTALL_WAIT_MS, clock);
+  await untilDeadline(`${spec} did not install`, (timeout) => exec(
+    ['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { timeout }), INSTALL_WAIT_MS, clock);
 }
 
 function binary(prefix, name) {

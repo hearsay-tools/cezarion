@@ -43,8 +43,8 @@ function fakeRegistry({ visibleAt = 0, installableAt = visibleAt, version = '1.2
     options() {
       return {
         now: () => now, sleep: async ms => { now += ms; }, log: line => this.logs.push(line),
-        exec: args => {
-          calls.push({ at: now, command: args[0], args });
+        exec: (args, { timeout } = {}) => {
+          calls.push({ at: now, command: args[0], args, timeout });
           if (args[0] === 'view') { if (now < visibleAt) throw notFound(); return `${version}\n`; }
           if (now < installableAt) throw Object.assign(new Error('Command failed: npm install'), { stderr: '' });
           return null;
@@ -99,6 +99,19 @@ test('an install that keeps failing once the version is visible stops at the sho
     new RegExp(`fake@1\\.2\\.1 did not install after ${INSTALL_WAIT_MS / 1000} s`));
   assert.equal(registry.now, INSTALL_WAIT_MS);
   assert.equal(registry.calls.filter(call => call.command === 'view').length, 1);
+});
+
+test('each npm call is bounded by what is left of its phase, and never by less than one poll', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const registry = fakeRegistry({ visibleAt: 60_000, installableAt: Infinity });
+  await assert.rejects(registryInstall(prefix, 'fake@1.2.1', registry.options()), /did not install/);
+  const views = registry.calls.filter(call => call.command === 'view');
+  assert.deepEqual(views.map(call => call.timeout), [0, 15_000, 30_000, 45_000, 60_000].map(at => PUBLISH_WAIT_MS - at));
+  const installs = registry.calls.filter(call => call.command === 'install');
+  assert.equal(installs[0].timeout, INSTALL_WAIT_MS);
+  assert.ok(installs.every(call => call.timeout >= 15_000), 'a 0 timeout would mean no limit');
+  assert.equal(installs.at(-1).timeout, 15_000, 'the attempt at the deadline still gets one poll interval');
 });
 
 // A package whose binary is a tiny server with the routes the smoke reads. Its project
