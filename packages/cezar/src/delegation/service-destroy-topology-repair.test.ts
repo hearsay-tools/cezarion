@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 
-import { gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
+import { gitCommonDir } from './workspace-git.ts';
+import { WORKTREE_LOCK_BUSY_ERROR } from './workspace-removal.ts';
 
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 

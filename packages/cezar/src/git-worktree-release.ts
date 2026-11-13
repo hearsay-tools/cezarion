@@ -1,5 +1,3 @@
-import type { WorkerDestroyResult, WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { removeOwnedWorkspace, type RemovalReport } from './delegation/workspace.ts';
 import { removeWorktree, type RemoveWorktreeOptions } from './git-worktree.ts';
 import type { PreviewHostLike } from './preview/registration.ts';
 
@@ -8,9 +6,11 @@ import type { PreviewHostLike } from './preview/registration.ts';
  * triggers"): the task's preview is released once the removal is going ahead and before git
  * removes the checkout, so a dev server never keeps running from a directory that is gone and the
  * open pane is told why. A removal that declines (a dirty tree under `onlyClean`, an owned or
- * protected path) releases nothing. `git-worktree-release.test.ts` scans the sources so no site
- * calls `removeWorktree` or `removeOwnedWorkspace` directly, and git's `worktree remove` runs only
- * inside those two. A failed release never blocks the removal.
+ * protected path) releases nothing. A destroyed owned worker follows the same rule through
+ * `releaseThenRemoveOwnedWorkspace` (`delegation/owned-workspace-release.ts`).
+ * `git-worktree-release.test.ts` scans the sources so no site calls `removeWorktree` or
+ * `removeOwnedWorkspace` directly, and git's `worktree remove` runs only inside those two. A failed
+ * release never blocks the removal.
  */
 export async function releaseThenRemoveWorktree(
   deps: { previewHost?: Pick<PreviewHostLike, 'release'> | undefined },
@@ -27,18 +27,4 @@ export async function releaseThenRemoveWorktree(
       await opts?.beforeRemove?.();
     },
   });
-}
-
-/** A destroyed owned worker's checkout: the same rule, through the delegation cleanup's own fenced removal. */
-export async function releaseThenRemoveOwnedWorkspace(
-  deps: { previewHost?: Pick<PreviewHostLike, 'release'> | undefined },
-  repoRoot: string,
-  workspace: WorkerWorkspace,
-  assertCurrent?: () => void,
-  assertUnheld?: () => void,
-  report?: RemovalReport,
-): Promise<WorkerDestroyResult> {
-  return removeOwnedWorkspace(repoRoot, workspace, assertCurrent, async () => {
-    await deps.previewHost?.release(workspace.ownerRunId).catch(() => undefined);
-  }, assertUnheld, report);
 }

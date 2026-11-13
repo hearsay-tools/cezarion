@@ -9,7 +9,8 @@ import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { holdersStillHold, observeDestroy, recordHolders } from './destroy-observation.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { fixture } from './service.testkit.ts';
-import { ensureOwnedWorkspace, gitCommonDir } from './workspace.ts';
+import { ensureOwnedWorkspace } from './workspace.ts';
+import { gitCommonDir } from './workspace-git.ts';
 
 describe('destroy observation (hearsay-tools/cezarion#879)', () => {
   let f: ReturnType<typeof fixture>;

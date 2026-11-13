@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { createRunner } from '../core/runner-factory.ts';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { CockpitOwnership, ProjectMigrationFencedError, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';

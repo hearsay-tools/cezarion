@@ -29,6 +29,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { readPersistedRuns, seedRuns, runIds } from '../runs/run-store.testkit.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs') & { default: typeof import('node:fs') }>();
@@ -43,7 +44,7 @@ vi.mock('node:fs', async original => {
 // without polling. Timeout matches the suite's 15s git/manager waits rather than the 5s default.
 describe('verified destruction retains results through explicit history deletion', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(workerCleanups()); });
   afterEach(async () => {
     for (const run of f.store.listRuns()) f.manager.cancel(run.id);
     vi.restoreAllMocks(); await f.close(); vi.unstubAllEnvs();
@@ -95,7 +96,7 @@ describe('verified destruction retains results through explicit history deletion
   // With every owned-workspace Git call slowed by 100 ms it needs ~10 s (hearsay-tools/cezarion#1109).
   it('retries a locked owned worktree after the Git lock is removed', { timeout: 30_000 }, async () => {
     await f.close();
-    f = fixture({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    f = fixture(workerCleanups({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } }));
     const { workerId, workspace } = await completed();
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });

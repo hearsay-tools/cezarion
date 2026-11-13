@@ -6,7 +6,7 @@ const order: string[] = [];
 /** Whether the fake removal declines (a dirty tree under `onlyClean`, a protected path). */
 let declines = false;
 
-vi.mock('./delegation/workspace.ts', () => ({
+vi.mock('./delegation/workspace-removal.ts', () => ({
   removeOwnedWorkspace: vi.fn(async (repoRoot: string, value: { ownerRunId: string; path: string }, _assert?: unknown, beforeRemove?: () => Promise<void>) => {
     if (declines) return { workerId: value.ownerRunId, state: 'incomplete', remaining: ['worktree', 'branch'] };
     await beforeRemove?.();
@@ -23,7 +23,8 @@ vi.mock('./git-worktree.ts', () => ({
   }),
 }));
 
-const { releaseThenRemoveOwnedWorkspace, releaseThenRemoveWorktree } = await import('./git-worktree-release.ts');
+const { releaseThenRemoveWorktree } = await import('./git-worktree-release.ts');
+const { releaseThenRemoveOwnedWorkspace } = await import('./delegation/owned-workspace-release.ts');
 
 /**
  * Worktree removal releases the task's preview (#781, spec 2026-10-02-live-preview-v1 "Exit
@@ -83,9 +84,9 @@ describe('releaseThenRemoveOwnedWorkspace (#781 final review: a destroyed worker
 
 describe('removeWorktree call sites', () => {
   const SRC = import.meta.dirname;
-  const ALLOWED = new Set(['git-worktree.ts', 'git-worktree-release.ts']);
+  const ALLOWED = new Set(['git-worktree.ts', 'git-worktree-release.ts', join('delegation', 'owned-workspace-release.ts')]);
   /** Where git removes a worktree itself: the two removals the helpers wrap. */
-  const RAW_REMOVAL = new Set(['git-worktree.ts', join('delegation', 'workspace.ts')]);
+  const RAW_REMOVAL = new Set(['git-worktree.ts', join('delegation', 'workspace-removal.ts')]);
 
   function sources(dir: string): string[] {
     return readdirSync(dir).flatMap(name => {

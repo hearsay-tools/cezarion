@@ -4,7 +4,8 @@ import { mkdtemp, realpath, readFile, rename, rm, symlink, writeFile } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace } from './workspace.ts';
+import { removeOwnedWorkspace } from './workspace-removal.ts';
 import { installWindowsIdentityStore } from './windows-identity-store.ts';
 
 // The Windows CI job runs this file in-process, as the CLI entry would (ADR 0032).

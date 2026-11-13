@@ -15,6 +15,7 @@ import '../core/every-runner.testkit.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 // Every test spawns real worker worktrees through git. Alone at load 91 they take 0.25-1.2 s
 // (the transport round trips, with `wait`'s ~1 s, are the slowest); the Node 24.15 floor shard
@@ -23,7 +24,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   let f: ReturnType<typeof fixture>, transport: Awaited<ReturnType<typeof startDelegationTransport>>;
   let output: ReturnType<typeof vi.spyOn>, env: NodeJS.ProcessEnv;
   beforeEach(async () => {
-    f = fixture();
+    f = fixture(workerCleanups());
     transport = await startDelegationTransport(createDelegationApp(createDelegationRoutes(f.service, f.credentials)));
     env = { CEZ_DELEGATION_URL: transport.url, CEZ_DELEGATION_TOKEN: f.token };
     output = vi.spyOn(console, 'log').mockImplementation(() => {});

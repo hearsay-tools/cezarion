@@ -14,6 +14,7 @@ import { ensureOwnedWorkspace } from './workspace.ts';
 
 import { readableHolder } from './non-dumpable.testkit.ts';
 import { workerDestroyView } from '../runs/delegation-state.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 export let f: ReturnType<typeof fixture>;
 
@@ -24,7 +25,7 @@ export const input = () => ({ task: 'do work', baseline: 'parent-head', requestI
 /** Each fixture receives its test cadence at construction. */
 export const cadence = async (backoff = { fastMs: 40, fastCount: 3, capMs: 300 }, attention = 5) => {
     await f.close();
-    f = fixture({ backoff, attentionAttempts: attention });
+    f = fixture(workerCleanups({ backoff, attentionAttempts: attention }));
   };
 
 /** A settled worker with a real worktree and complete execution, optionally held by a real process. */

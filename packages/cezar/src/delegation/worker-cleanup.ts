@@ -3,13 +3,14 @@ import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import type { WorkerDestroy, WorkerDestroyResult } from '@open-mercato/cezar-contract/delegation';
 import type { RunRecord } from '../runs/store.ts';
-import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
+import { releaseThenRemoveOwnedWorkspace } from './owned-workspace-release.ts';
 import { collectWorkerEvidence } from './results.ts';
 import { DelegationPolicyError } from './policy.ts';
-import { gitCommonDir, WorkspaceHeldError } from './workspace.ts';
+import { gitCommonDir } from './workspace-git.ts';
+import { WorkspaceHeldError } from './workspace-removal.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
-import type { DelegationProject } from './service.ts';
+import type { DelegationProject, WorkerCleanupFactory } from './service.ts';
 
 /** Tests pass shorter cadences and termination waits through these constructor options. */
 export type WorkerCleanupOptions = {
@@ -20,6 +21,11 @@ export type WorkerCleanupOptions = {
 };
 
 type Serialize = <T>(key: string, operation: () => Promise<T>) => Promise<T>;
+
+/** What a process entry hands to `DelegationService`: one `WorkerCleanup` per registered project. */
+export function workerCleanups(options: WorkerCleanupOptions = {}): WorkerCleanupFactory {
+  return (project, isAttached, serialized) => new WorkerCleanup(project, isAttached, serialized, options);
+}
 
 /** One registered project's destroy state and retry lifecycle. */
 export class WorkerCleanup {

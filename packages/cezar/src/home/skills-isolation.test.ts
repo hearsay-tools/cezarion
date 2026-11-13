@@ -32,7 +32,7 @@ it('resolves a worker --skill from Home A while the ambient home and cached cata
   const selected = isolatedHome(join(root, 'selected'));
   const ambient = isolatedHome(join(root, 'ambient'));
   useTestHome(ambient);
-  const f = fixture({}, selected);
+  const f = fixture(undefined, selected);
   try {
     seedSkills(root, selected, 'selected-skill'); seedSkills(root, ambient, 'ambient-skill');
     writeFileSync(join(f.root, '.ai/cezar/config.json'), JSON.stringify({ skillsRepos: [{ repo: 'team/skills' }] }));

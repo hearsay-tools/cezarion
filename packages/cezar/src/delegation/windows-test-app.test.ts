@@ -9,7 +9,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { windowsStartToken, windowsTestAppHolds, windowsTestAppOwned } from './windows-test-app.ts';
-import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace } from './workspace.ts';
+import { removeOwnedWorkspace } from './workspace-removal.ts';
 import { installWindowsIdentityStore } from './windows-identity-store.ts';
 
 // The Windows CI job runs this file in-process, as the CLI entry would (ADR 0032).

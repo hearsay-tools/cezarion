@@ -24,10 +24,11 @@ import {
   workerListEntrySchema,
 } from '@open-mercato/cezar-contract/delegation';
 import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 describe('authenticated delegation HTTP family', () => {
   let f: ReturnType<typeof fixture>, app: ReturnType<typeof createDelegationRoutes>;
-  beforeEach(() => { f = fixture(); app = createDelegationRoutes(f.service, f.credentials); });
+  beforeEach(() => { f = fixture(workerCleanups()); app = createDelegationRoutes(f.service, f.credentials); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const request = (path: string, body?: unknown, headers: Record<string, string> = {}, method = body === undefined ? 'GET' : 'POST') => app.request(`http://127.0.0.1${path}`, { method, headers: { host: '127.0.0.1', authorization: `Bearer ${f.token}`, 'content-type': 'application/json', ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   async function spawn() {

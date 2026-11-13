@@ -4,6 +4,7 @@ import { npmPackageIdentity, scopedNpxCommand } from './home/identity.ts';
 import { once } from 'node:events';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
+import type { WorkerCleanupFactory } from './delegation/service.ts';
 import { ProviderAuthService } from './core/provider-auth.ts';
 import { detectEnvironment } from './core/backend-detect.ts';
 import { getRepoInfo } from './server/git.ts';
@@ -49,6 +50,8 @@ export type ServeDeps = typeof defaultServeDeps & {
   openBootStore: (repoRoot: string) => RunStore;
   readOwnName: () => string;
   readOwnVersion: () => string;
+  /** The process entry's worker cleanup, so the cockpit's delegation can destroy workers. */
+  workerCleanup: WorkerCleanupFactory;
 };
 
 export async function serveCommand(
@@ -104,7 +107,7 @@ export async function serveCommand(
     home, createRunner: deps.createRunner, semaphore, preview: previewHost, squawkPort, cockpit, toolActivity, acquireCiResources,
     sweepBranches: (keep) => void deps.sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
-  const delegation = await deps.DelegationController.start();
+  const delegation = await deps.DelegationController.start(deps.workerCleanup);
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager, home });
   const providerAuth = new deps.ProviderAuthService();
   const discovery = deps.createHostDiscovery(repoRoot, providerAuth, home);

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { createRunner } from '../core/runner-factory.ts';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { Home } from '../home/home.ts';
 import { holdCockpitLease } from '../home/leases.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';

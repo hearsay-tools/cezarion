@@ -120,6 +120,7 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     const { acquireCiResources } = await load('ci-wait/resources.js') as typeof import('../../src/ci-wait/resources.ts');
     const { createRunner } = await load('core/runner-factory.js') as typeof import('../../src/core/runner-factory.ts');
     const { DelegationController, bundledWorkerInvocation } = await load('delegation/provision.js') as typeof import('../../src/delegation/provision.ts');
+    const { workerCleanups } = await load('delegation/worker-cleanup.js') as typeof import('../../src/delegation/worker-cleanup.ts');
     const { WorkspaceSemaphore } = await load('workspace/semaphore.js') as typeof import('../../src/workspace/semaphore.ts');
     const { QUICK_TASK_WORKFLOW } = await load('workflows/types.js') as typeof import('../../src/workflows/types.ts');
     const repo = join(root, 'repo'); const wire = join(root, 'wire'); const home = join(root, 'claude-home');
@@ -184,7 +185,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
       const session = provisioner(id); if (session) environments.set(id, session.env); return session;
     });
 
-    controller = await DelegationController.start();
+    controller = await DelegationController.start(workerCleanups());
     controller.attachProject({ home: selectedHome, id: 'package-project', root: repo, store, manager });
     const parent = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'package parent', runner: 'claude', worktree: false });
     await until(() => exists(join(wire, parent.id + '.started')), 'parent process starts');

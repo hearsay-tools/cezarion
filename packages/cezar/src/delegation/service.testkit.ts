@@ -21,8 +21,7 @@ import { afterAll, expect, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
-import { DelegationService, type DelegationProject } from './service.ts';
-import type { WorkerCleanupOptions } from './worker-cleanup.ts';
+import { DelegationService, type DelegationProject, type WorkerCleanupFactory } from './service.ts';
 
 export async function waitForOwnedWork(manager: RunManager, store: RunStore): Promise<void> {
   // A manager a restart disposed owns nothing any more: the recovered one does (#779).
@@ -108,7 +107,7 @@ afterAll(() => {
   if (repositoryTemplate) rmSync(repositoryTemplate.root, { recursive: true, force: true });
 });
 
-export function fixture(options: WorkerCleanupOptions = {}, home: Home = testHome()): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; holdAdmission(): Promise<void>; releaseAdmission(): Promise<void>; close(): Promise<void> } {
+export function fixture(cleanup?: WorkerCleanupFactory, home: Home = testHome()): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; holdAdmission(): Promise<void>; releaseAdmission(): Promise<void>; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   const sha = copyServiceRepository(root);
   const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
@@ -123,7 +122,7 @@ export function fixture(options: WorkerCleanupOptions = {}, home: Home = testHom
   const token = credentials.issue('project', parent.id, randomUUID());
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
-  const service = new DelegationService(options);
+  const service = new DelegationService(cleanup);
   const spawn = service.spawn.bind(service);
   vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
     const existingWorkers = new Set(store.listWorkerIds());

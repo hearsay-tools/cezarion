@@ -8,10 +8,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 
 import { scheduledDestroyAttempts, workerCleanupInternals } from './service.testkit.ts';
-import { WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
+import { WORKTREE_LOCK_BUSY_ERROR } from './workspace-removal.ts';
 import { DelegationService } from './service.ts';
 
 import { f, linux, cadence, settled, destroyOf, listings, useDestroyBackoffFixture } from './service-destroy-backoff.testkit.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 describe('destroy backoff cadence', { timeout: 30_000 }, () => {
   useDestroyBackoffFixture();
@@ -49,7 +50,7 @@ describe('destroy backoff cadence', { timeout: 30_000 }, () => {
       // bound: not a wait on the product. It holds each termination open for 150 ms, so a second attempt that started at the same 40 ms tick would overlap it and raise `most` above 1.
       try { await sleep(150); return await termination(...args); } finally { inFlight--; }
     });
-    const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 300 }, attentionAttempts: 5 });
+    const restarted = new DelegationService(workerCleanups({ backoff: { fastMs: 40, fastCount: 3, capMs: 300 }, attentionAttempts: 5 }));
     const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       restarted.armDestroyRetries('project');

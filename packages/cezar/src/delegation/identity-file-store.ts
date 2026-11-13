@@ -1,7 +1,7 @@
 import { posixIdentityFileStore } from './posix-workspace-identity.ts';
 
 /**
- * Where the ownership policy in `workspace.ts` keeps its identity files: the receipt directory,
+ * Where the ownership policy in `workspace-record.ts` keeps its identity files: the receipt directory,
  * receipts, cleanup checkpoints and Git administration markers. The store owns the platform's
  * safety rules; the policy owns what the files prove (ADR 0032).
  *

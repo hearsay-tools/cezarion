@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { parentFileSnapshotPath, verifyWorkerContext } from '../delegation/context.ts';
 import { ownedWorkflow, workerContextHash, workerWorkflowHash } from '../delegation/execution-identity.ts';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { handoffPath } from '../handoff.ts';
 import { LEGACY_RUNS_FILE } from '../legacy-runs.ts';
 import { isFallbackProjectPath } from '../project-paths.ts';

@@ -17,6 +17,7 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, toolGenerationOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { workerCleanups } from '../delegation/worker-cleanup.ts';
 
 // Hold only native turn content: the mock admits the hold scenario (ACK and turn start where the
 // wire has them) and sends nothing more until release. The runner, lifecycle, IPC and persistence
@@ -95,7 +96,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
           expect(waitOf(store.getRun(run.id))).toMatchObject({ id: wait.id, phase: 'wake-pending' });
           expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toHaveLength(1);
         } else {
-          const service = new DelegationService();
+          const service = new DelegationService(workerCleanups());
           const unregister = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
           try {
             expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });

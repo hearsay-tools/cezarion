@@ -17,7 +17,7 @@ Git common-directory discovery remains independent of either directory name.
 The project migration engine (P4b2, [project routes](project-routes.md#project-state-migration-engine))
 moves task worktrees with their directory, runs `git worktree repair` for them, and rewrites
 only `workspace.path` in this project's owned-workspace receipts and cleanup checkpoints
-(`delegation/workspace.ts` exports the checked receipt-file readers it uses). The admin
+(`delegation/workspace-record.ts` exports the checked receipt-file readers it uses). The admin
 directory, its identity marker and the branch identity do not change, so ownership checks
 still pass at the new path.
 

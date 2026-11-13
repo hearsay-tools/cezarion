@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { crashThenCheckDurability, beforeRepair, recordedMigration, TIMEOUT } from './engine.testkit.ts';
 import { removeMigrationProject, type MigrationProject } from './project-migration.testkit.ts';
 

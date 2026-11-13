@@ -17,6 +17,7 @@ import { main, defaultCliDeps } from './cli-dispatch.ts';
 import { serverCommand } from './server-command.ts';
 import { runHeadless, defaultHeadlessDeps, type TaskAccess } from './headless-run.ts';
 import { serveCommand, defaultServeDeps } from './serve-command.ts';
+import { workerCleanups } from './delegation/worker-cleanup.ts';
 import { onTerminal } from './serve-listener.ts';
 import { installWindowsIdentityStore } from './delegation/windows-identity-store.ts';
 
@@ -84,7 +85,7 @@ async function runCommand(
   }
   const stopHint = hintRunningCockpit(repoRoot);
   try {
-    await runHeadless(home, repoRoot, task, workflowName, model, access, { ...defaultHeadlessDeps, initWorkspace, openStore, onTerminal });
+    await runHeadless(home, repoRoot, task, workflowName, model, access, { ...defaultHeadlessDeps, initWorkspace, openStore, onTerminal, workerCleanup: workerCleanups() });
   } finally {
     stopHint();
   }
@@ -130,7 +131,7 @@ function readOwnVersion(): string {
 
 main({
   ...defaultCliDeps, resolveCliHome: () => resolveHome({ purpose: 'cli' }), readOwnVersion, runCommand, initCommand, initWorkspace, serverCommand,
-  serveCommand: (...args) => serveCommand(...args, { ...defaultServeDeps, initWorkspace, openBootStore, readOwnName, readOwnVersion }),
+  serveCommand: (...args) => serveCommand(...args, { ...defaultServeDeps, initWorkspace, openBootStore, readOwnName, readOwnVersion, workerCleanup: workerCleanups() }),
 }).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);

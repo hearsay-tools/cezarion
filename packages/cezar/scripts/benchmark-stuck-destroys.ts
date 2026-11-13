@@ -57,6 +57,7 @@ const { RunManager } = await import('../src/workflows/run.ts');
 const home = benchmarkHome((await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' }));
 const { DelegationService } = await import('../src/delegation/service.ts');
 const { acquireCiResources } = await import('../src/ci-wait/resources.ts');
+const { workerCleanups } = await import('../src/delegation/worker-cleanup.ts');
 const { planOwnedWorkspace, ensureOwnedWorkspace } = await import('../src/delegation/workspace.ts');
 const { WorkspaceSemaphore } = await import('../src/workspace/semaphore.ts');
 const { agentTmpDir } = await import('../src/runs/agent-tmpdir.ts');
@@ -88,7 +89,7 @@ let store: RunStoreInstance | undefined, manager: RunManagerInstance | undefined
 try {
   store = RunStore.open(dataDir, { keepLive: true });
   manager = new RunManager(store, root, { home, createRunner: noRunners, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }), acquireCiResources });
-  const service = new DelegationService();
+  const service = new DelegationService(workerCleanups());
   detach = service.registerProject({ id: 'bench', root, store, manager, home });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
   setRunStatus(store, parent.id, 'waiting', { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });

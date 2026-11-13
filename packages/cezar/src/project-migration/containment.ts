@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { gitCommonDir } from '../delegation/workspace.ts';
+import { gitCommonDir } from '../delegation/workspace-git.ts';
 import { MIGRATION_JOURNAL_FILE } from '../server/cockpit-ownership.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';

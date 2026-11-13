@@ -3,13 +3,13 @@ import { join, relative, sep } from 'node:path';
 import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
-// The ownership policy in workspace.ts has no store on Windows until a process entry installs one,
+// The ownership policy in workspace-record.ts has no store on Windows until a process entry installs one,
 // and only entries may import the Windows store, so the policy's importers never load it
 // (hearsay-tools/cezarion#3244, ADR 0032). A process entry is a package bin, a source module with
 // a shebang or an `argv[1]` main guard, or a .ts or .mjs script under scripts/, the repo's scripts/ or .ai/scripts/. The closure follows
 // static and dynamic imports. Paths use forward slashes on every host.
 const pkg = join(import.meta.dirname, '../..');
-const POLICY = 'src/delegation/workspace.ts';
+const POLICY = 'src/delegation/workspace-record.ts';
 // The Windows store and the native helper it wraps.
 const WINDOWS = ['src/delegation/windows-identity-store.ts', 'src/delegation/windows-workspace-identity.ts'];
 const SCRIPT_DIRS = ['scripts', '../../scripts', '../../.ai/scripts'];

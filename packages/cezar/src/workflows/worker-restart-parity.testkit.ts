@@ -21,6 +21,7 @@ import { historyPaths } from '../runs/history-file.ts';
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { manager, store, root, worker, until, executions, bookkeeping, reopenRuntime, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { workerCleanups } from '../delegation/worker-cleanup.ts';
 
 // Only enumeration is synthetic. Native wires, tokens, kernel cwd denial, cancellation,
 // persistence, Git locking, collection and parent Finish are real.
@@ -138,7 +139,7 @@ it.each(RESTART_RUNNERS.r60)('%s R60 cold terminal starting-proof recovery repai
       }) as typeof fs.readlinkSync);
       syncBuiltinESMExports();
       setRunStatus(store, w.id, RUN_STATUS.waiting); store.flush(); reopenRuntime();
-      const service = new DelegationService({ terminationTimeoutMs: 4_000 }); const detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
+      const service = new DelegationService(workerCleanups({ terminationTimeoutMs: 4_000 })); const detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       try {
         destroying = true;
         // Destroy waits on the readable holder through its polls, then the unreadable process is no evidence.
@@ -192,7 +193,7 @@ it.each(RESTART_RUNNERS.r47)('%s settles a same-boot crash as gone once recorded
     setRunStatus(store, w.id, RUN_STATUS.waiting); store.flush(); reopenRuntime();
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', p.id, 'test'))!;
-    let service = new DelegationService(); let detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
+    let service = new DelegationService(workerCleanups()); let detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
     try {
       const partial = await service.collect(caller, { workerId: w.id });
       expect(partial).toMatchObject({ settled: false });
@@ -203,7 +204,7 @@ it.each(RESTART_RUNNERS.r47)('%s settles a same-boot crash as gone once recorded
       writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...ledger,
         processes: [...ledger.processes, { pid: ambient.pid, startToken: `${boot}:1` }] }));
       detach(); manager.dispose(); store.flush(); reopenRuntime(); await manager.recover();
-      service = new DelegationService(); detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
+      service = new DelegationService(workerCleanups()); detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       // Exit proof, not abandonment: the generation completes and nothing cancels the task.
       expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', generation: proof.generation });
       expect(store.readWorkerExecution(w.id)?.abandoned).toBeUndefined();

@@ -5,7 +5,8 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace } from './workspace.ts';
+import { removeOwnedWorkspace } from './workspace-removal.ts';
 import { fixture, git, receiptPath, WORKSPACE_TEST_TIMEOUT_MS } from './workspace-fixture.testkit.ts';
 
 describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
