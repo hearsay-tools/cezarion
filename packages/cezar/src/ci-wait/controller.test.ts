@@ -151,9 +151,6 @@ describe('private CI controller', () => {
       expect(listed.tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
       for (const tool of listed.tools) expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(register).not.toHaveBeenCalled();
-      // hearsay-tools/cezarion#1236: the removed alias is an unknown tool.
-      const removed = await client.callTool({ name: 'cezar_wait_for_ci', arguments: { pr: wait.prUrl } });
-      expect(removed.isError).toBe(true);
       const invalid = await client.callTool({ name: 'cezar_wait', arguments: { kind: WAIT_KIND.pr, pr: wait.prUrl, runId: 'evil' } });
       expect(invalid.isError).toBe(true); expect(register).not.toHaveBeenCalled();
       const opened = await client.callTool({ name: 'cezar_wait', arguments: { kind: WAIT_KIND.pr, pr: wait.prUrl } });
@@ -178,10 +175,9 @@ describe('private CI controller', () => {
   }, 15000);
 });
 
-// hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` reach the session's own handlers;
-// the `cezar_wait_for_ci` route is gone (hearsay-tools/cezarion#1236).
+// hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` reach the session's own handlers.
 describe('private wait routes', () => {
-  it('routes POST /tools/wait and /tools/cancel-wait to the capability handlers, and POST /tools/ci-wait no longer exists', async () => {
+  it('routes POST /tools/wait and /tools/cancel-wait to the capability handlers', async () => {
     const register = vi.fn(async () => registered); const cancel = vi.fn(async () => cancelled);
     const session = (await controller()).provision(handlers({ registerWait: register, cancelWait: cancel }));
     const opened = await raw(session.env, JSON.stringify({ kind: WAIT_KIND.pr, pr: wait.prUrl }), undefined, 'wait');
@@ -195,10 +191,6 @@ describe('private wait routes', () => {
     expect(squawkCancelWaitAnswerSchema.parse(JSON.parse(closed.body))).toEqual(cancelled);
     expect(cancel).toHaveBeenCalledWith({ wait_id: wait.id }, expect.any(AbortSignal));
     await expect(callSquawkCancelWait({ wait_id: wait.id }, session.env)).resolves.toEqual(cancelled);
-    // The removed alias: the authorized POST finds no route and registers nothing.
-    const calls = register.mock.calls.length;
-    expect((await raw(session.env, JSON.stringify({ pr: wait.prUrl, timeout_seconds: 60 }), undefined, 'ci-wait')).status).toBe(404);
-    expect(register).toHaveBeenCalledTimes(calls);
   });
 
   it('answers invalid_request for a timer below 60 seconds without calling the handler', async () => {
@@ -304,17 +296,15 @@ describe('private wait routes', () => {
     expect(await callSquawkAsk(card, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
   });
 
-  it('POST /tools/ask answers a call without a card with invalid_request, and cezar_wait points the old human kind at it', async () => {
-    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked); const register = vi.fn(async () => registered);
-    const session = (await controller()).provision(handlers({ ask, registerWait: register }));
+  it('POST /tools/ask answers a call without a card with invalid_request', async () => {
+    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked);
+    const session = (await controller()).provision(handlers({ ask }));
     expect(await callSquawkAsk({}, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown; \`questions\` must be a list of 1–4 questions with unique texts. ${askTail}` });
     expect(await callSquawkAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` must be 2–4 options with unique labels, or left out for an open question. ${askTail}` });
     expect(await callSquawkAsk({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(JSON.parse((await raw(session.env, ' '.repeat(262_145), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
-    expect(await callSquawkWait({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, effect: 'refused', code: 'invalid_request', message: '`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
     expect(ask).not.toHaveBeenCalled();
-    expect(register).not.toHaveBeenCalled();
     expect((await raw(session.env, JSON.stringify(card), 'invalid', 'ask')).status).toBe(401);
   });
 

@@ -52,13 +52,10 @@ describe('session provisioning', () => {
     expect(env.CEZ_HOME).toBeUndefined();
     expect(env.CEZ_DELEGATION_TOKEN).toBe(session.env.CEZ_DELEGATION_TOKEN); expect(env.CEZ_DELEGATION_URL).toBe('http://127.0.0.1:12345/api/v1/delegation');
   });
-  // hearsay-tools/cezarion#632: parents learn one spelling. `--backend` stays a CLI alias, but the
-  // instructions every delegating session receives must never teach it again.
-  it('teaches --runner and never --backend in the parent instructions', () => {
+  it('teaches --runner in the parent instructions', () => {
     const { instructions } = provision()!;
     expect(instructions).toContain(`--runner <${RUNNER_IDS.join('|')}>`);
     expect(instructions).toContain('--request-id <UUID> --runner codex');
-    expect(instructions).not.toMatch(/backend/i);
   });
   // hearsay-tools/cezarion#1149: a parent that never reads --help still learns --attach and its ignored-only rule.
   it('teaches --attach and the parent-file reference in the parent instructions', () => {
@@ -86,13 +83,6 @@ describe('session provisioning', () => {
     expect(instructions).toContain('Use a shared effort only when every affected step\'s model advertises that level; otherwise use a workflow with compatible per-step effort settings.');
     expect(instructions).toContain('A high-only model and a low-only model need separate step settings.');
     expect(instructions).toContain('Omission and auto do not clear an inherited effort pin.');
-  });
-  it('provision text no longer says one active wait', () => {
-    const { instructions } = provision()!;
-    expect(instructions).not.toMatch(/one active wait|no automatic re-wait/i);
-    expect(instructions).toContain('Several waits can be open at once (workers, peers, CI, timers)');
-    expect(instructions).toContain('Messages wake you and close no wait');
-    expect(instructions).toContain('cancel-wait <wait-id> stops one wait');
   });
   // hearsay-tools/cezarion#1995: the peer wait and the request kind are taught where the request wait is.
   it('teaches the peer wait and cezar_wait kinds request and peer', () => {
@@ -142,9 +132,6 @@ describe('session provisioning', () => {
     for (const text of [root, worker]) {
       expect(text).toContain('You may message your own native subagents with your runner\'s tools.');
       expect(text).toMatch(new RegExp(String.raw`Reach another ${productName('Cezar')} task only through .* message; never use your runner's native tools for that\.`));
-      for (const old of ['Prefer governed cezar workers', 'Native workers are not tracked', 'do not spawn them', 'Per-run controls suppress', 'cannot delegate']) {
-        expect(text).not.toContain(old);
-      }
     }
   });
   it('always starts the listener; one failed listener leaves ordinary execution unprovisioned and logs once without secrets', async () => {

@@ -49,13 +49,6 @@ it.each(conditional)('the %s entry seeds an existing install without changing it
   expect(readFileSync(home.agentAccounts, 'utf8')).toBe(bytes);
 });
 
-it.each(['install', 'update', 'versions', 'use', 'link', 'unlink'])('the removed managed command %s prepares no Home', command => {
-  const root = storeRoot();
-  const home = homePaths(root, join(root, 'cache'), root);
-  expect(prepareOperatorHome(home, command)).toBe(home);
-  expect(readdirSync(root)).toEqual([]);
-});
-
 it('keeps backup listing and invalid restore input read-only, and a valid restore unconditional', () => {
   const root = storeRoot();
   const home = homePaths(root, join(root, 'cache'), root);

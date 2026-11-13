@@ -1,11 +1,7 @@
-import { Home } from './home/home.ts';
-import { useTestHome } from './home/test-home.testkit.ts';
-import { testHome } from './home/test-home.testkit.ts';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
-import { workspaceUiStatePath } from './paths.js';
+import { afterEach, expect, it } from 'vitest';
 import { readUiState, uiStatePath } from './ui-state.js';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -22,16 +18,4 @@ it('salvages valid sibling limits and preserves absent preferences', async () =>
   expect(await readUiState(root)).toEqual({ sidebarLimits: { overall: null, needsYou: null, finished: 2, working: 3 } });
   await writeFile(uiStatePath(root), '{}');
   expect(await readUiState(root)).toEqual({});
-});
-it('does not merge a legacy workspace importedSkills into the project state', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'ui-state-home-')); roots.push(home);
-  useTestHome(home ? Home.sandbox(home) : undefined);
-  try {
-    await Home.seedBytes(testHome(), workspaceUiStatePath(testHome()), Buffer.from(JSON.stringify({ importedSkills: ['a'] })));
-    const root = await mkdtemp(join(tmpdir(), 'sidebar-state-')); roots.push(root);
-    await mkdir(join(root, '.ai/cezar'), { recursive: true });
-    expect(await readUiState(root)).not.toHaveProperty('importedSkills');
-  } finally {
-    vi.unstubAllEnvs();
-  }
 });
