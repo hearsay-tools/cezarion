@@ -160,7 +160,7 @@ describe('buildClaudeArgs empty tool list', () => {
     expect(toolFlags(buildClaudeArgs(empty, { CEZ_CLAUDE_PERMISSION_MODE: mode }))).toEqual(['--tools', '']);
   });
 
-  it('keeps and pre-approves only the Squawk tools', () => {
+  it('pre-approves the Squawk tools', () => {
     const allowed = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']
       .map(tool => `mcp__cezar_ci_probe__${tool}`).join(',');
     expect(toolFlags(buildClaudeArgs({ ...empty, squawkTools }, {}))).toEqual(['--tools', '', '--allowedTools', allowed]);
