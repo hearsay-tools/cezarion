@@ -68,6 +68,7 @@ async function renderVirtualDiff(ui: React.ReactElement) {
 }
 
 describe('the flat tier (small changesets)', () => {
+  // Rule: docs/adr/0034-bound-large-view-rendering-and-scroll-ownership.md.
   it('renders every file, each hinted for content-visibility skipping', async () => {
     await renderDiff(<Diff files={[file('a.ts', 3), file('b.ts', 3)]} />, 'a.ts')
 
@@ -81,6 +82,7 @@ describe('the flat tier (small changesets)', () => {
     expect(slot.style.containIntrinsicBlockSize).toMatch(/^auto \d+px$/)
   })
 
+  // Rule: docs/adr/0034-bound-large-view-rendering-and-scroll-ownership.md.
   it('gives no-wrap unified rows a width floor, so a size-contained row cannot shrink the horizontal scroll', async () => {
     await renderDiff(<Diff files={[file('a.ts', 3)]} />, 'a.ts')
 
@@ -89,6 +91,7 @@ describe('the flat tier (small changesets)', () => {
     expect(rows.className).toContain('[content-visibility:auto]')
   })
 
+  // Rule: docs/adr/0034-bound-large-view-rendering-and-scroll-ownership.md.
   it('drops the width floor when wrapping, where rows never exceed the box', async () => {
     await renderDiff(<Diff files={[file('a.ts', 3)]} wrap />, 'a.ts')
 

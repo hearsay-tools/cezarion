@@ -46,6 +46,7 @@ function renderList(count: number, route = '/') {
 }
 
 describe('CommitList', () => {
+  // Rule: docs/adr/0034-bound-large-view-rendering-and-scroll-ownership.md.
   it('renders every row flat below the threshold, each content-visibility hinted', () => {
     renderList(5)
 

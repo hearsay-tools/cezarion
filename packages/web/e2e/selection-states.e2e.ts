@@ -389,6 +389,7 @@ describe('selection and control states (#171)', () => {
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })
   }
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast, focus).
   it('keeps the same selection cue in the multi-project navigation', () => {
     const home = Home.sandbox(join(root, '.cez-home'))
     const config = JSON.parse(new HomeStore(home).read(home.workspaceConfig))

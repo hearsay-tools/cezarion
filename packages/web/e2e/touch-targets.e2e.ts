@@ -15,6 +15,7 @@ import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
 
 // Real layout regression: jsdom cannot resolve density, clipping, or hit testing.
+// Rules: docs/areas/web-ui.md § Touch and phone rules and § Accessibility rules.
 let browser: AgentBrowser
 let baseUrl: string
 let project: string
@@ -164,6 +165,26 @@ function focus(selector: string) {
 // matrix checks it once per density and theme (hearsay-tools/cezarion#2905).
 describe('density-independent mobile action targets (#166)', () => {
   for (const density of ['comfortable', 'compact', 'ultra']) {
+    // Hit areas follow density, not theme, so the audit runs once per density.
+    it(`${density}: mobile shell, composer, appearance and workflow targets`, () => {
+      browser.setViewport(360, 640)
+      for (const path of [`/p/${project}/new`, '/settings/global/appearance', `/p/${project}/workflows`]) {
+        browser.goto(`${baseUrl}${path}`)
+        browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea, [data-slot="appearance-section"], [data-slot="wb-name"]') !== null`)
+        appearance(density, 'dark')
+        // Below the fold at 360×640 the summary sits behind the tab bar's row until scrolled to.
+        if (path.endsWith('/new')) {
+          browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
+          browser.click('[data-slot="execution-options"] summary')
+        }
+        browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+        const audit = targetAudit()
+        expect(audit.small, path).toEqual([])
+        expect(audit.overlaps, path).toEqual([])
+        expect(audit.fitsWidth, path).toBe(true)
+      }
+    })
+
     for (const theme of ['light', 'dark']) {
       it(`${density}/${theme}: mobile keyboard outline contrast`, () => {
         browser.setViewport(360, 640)
@@ -200,25 +221,6 @@ describe('density-independent mobile action targets (#166)', () => {
         browser.waitForFunction(`document.querySelector('[data-slot="tooltip-content"]') === null`)
         browser.press('Escape')
         browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
-      })
-
-      it(`${density}/${theme}: mobile shell, composer, appearance and workflow targets`, () => {
-        browser.setViewport(360, 640)
-        for (const path of [`/p/${project}/new`, '/settings/global/appearance', `/p/${project}/workflows`]) {
-          browser.goto(`${baseUrl}${path}`)
-          browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea, [data-slot="appearance-section"], [data-slot="wb-name"]') !== null`)
-          appearance(density, theme)
-          // Below the fold at 360×640 the summary sits behind the tab bar's row until scrolled to.
-          if (path.endsWith('/new')) {
-            browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
-            browser.click('[data-slot="execution-options"] summary')
-          }
-          browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-          const audit = targetAudit()
-          expect(audit.small, path).toEqual([])
-          expect(audit.overlaps, path).toEqual([])
-          expect(audit.fitsWidth, path).toBe(true)
-        }
       })
 
       // Rendering and hit regions change with width, density and theme, so every variant keeps

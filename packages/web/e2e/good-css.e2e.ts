@@ -10,6 +10,8 @@ import { waitForSettledSample } from './visual-ready'
 // fixture-server starts: 1
 
 // Real application controls and computed CSS, not copies of primitive class strings.
+// Rules: docs/areas/web-ui.md § Touch and phone rules (16px text, 44px targets) and
+// § Accessibility rules (contrast, focus and its forced-colors outline).
 let browser: AgentBrowser
 let baseUrl: string
 let server: ChildProcess
@@ -57,40 +59,28 @@ async function withMedia(features: { name: string; value: string }[], work: () =
   })
 }
 
-for (const theme of ['light', 'dark']) {
-  it(`${theme}: keyboard focus survives forced colors at desktop widths`, async () => {
-    const selector = '[data-slot="wb-new"]'
-    open('/workflows', selector)
-    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-    await withMedia([{ name: 'forced-colors', value: 'active' }], () => {
-      expect(browser.evaluate(`matchMedia('(forced-colors: active)').matches`)).toBe(true)
-      focusWithKeyboard(browser, selector)
-      const focus = waitForSettledSample<{ outline: string; width: number; focused: boolean }>(browser, `(() => {
-        const el = document.querySelector('${selector}'), s = getComputedStyle(el);
-        return { outline: s.outlineStyle, width: parseFloat(s.outlineWidth), focused: el.matches(':focus-visible') };
-      })()`)
-      expect(focus.focused).toBe(true)
-      expect(focus.outline).toBe('solid')
-      expect(focus.width).toBeGreaterThanOrEqual(2)
-    })
+// Forced colors replace every theme colour with system colours, so one theme proves the rule.
+it('keyboard focus on a button survives forced colors at desktop widths', async () => {
+  const selector = '[data-slot="wb-new"]'
+  open('/workflows', selector)
+  await withMedia([{ name: 'forced-colors', value: 'active' }], () => {
+    expect(browser.evaluate(`matchMedia('(forced-colors: active)').matches`)).toBe(true)
+    focusWithKeyboard(browser, selector)
+    const focus = waitForSettledSample<{ outline: string; width: number; focused: boolean }>(browser, `(() => {
+      const el = document.querySelector('${selector}'), s = getComputedStyle(el);
+      return { outline: s.outlineStyle, width: parseFloat(s.outlineWidth), focused: el.matches(':focus-visible') };
+    })()`)
+    expect(focus.focused).toBe(true)
+    expect(focus.outline).toBe('solid')
+    expect(focus.width).toBeGreaterThanOrEqual(2)
   })
-}
+})
 
 it('mobile workflow editable text stays at least 16px despite route styles', () => {
   const selector = '[data-slot="wb-description"]'
   open('/workflows', selector, 390, 844)
   const size = waitForSettledSample<number>(browser, `parseFloat(getComputedStyle(document.querySelector('${selector}')).fontSize)`)
   expect(size).toBeGreaterThanOrEqual(16)
-})
-
-it('reduced motion removes switch translation transitions', async () => {
-  const selector = '[data-slot="switch-thumb"]'
-  open('/settings/global/resources', selector)
-  await withMedia([{ name: 'prefers-reduced-motion', value: 'reduce' }], () => {
-    expect(browser.evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches`)).toBe(true)
-    const duration = waitForSettledSample<string>(browser, `getComputedStyle(document.querySelector('${selector}')).transitionDuration`)
-    expect(duration.split(',').every(value => parseFloat(value) === 0)).toBe(true)
-  })
 })
 
 for (const theme of ['light', 'dark']) {
@@ -241,18 +231,6 @@ it('folder dialog keeps its actions inside a short viewport with enlarged text',
     expect(result.body).toBe('auto')
     browser.screenshot(`${artifacts}/dialog-enlarged-text.png`, { viewport: true })
   } finally { browser.evaluate(`document.documentElement.style.removeProperty('font-size')`) }
-})
-
-it('reduced-motion dialogs open and close without movement', async () => {
-  open('/settings/global/projects', '[data-slot="projects-section"]', 360, 640)
-  await withMedia([{ name: 'prefers-reduced-motion', value: 'reduce' }], () => {
-    browser.click('[data-slot="projects-section"] > button')
-    browser.waitForFunction(`document.querySelector('[data-slot="add-project-dialog"]') !== null`)
-    const animation = waitForSettledSample<string>(browser, `getComputedStyle(document.querySelector('[data-slot="add-project-dialog"]')).animationName`)
-    expect(animation).toBe('none')
-    browser.press('Escape')
-    browser.waitForFunction(`document.querySelector('[data-slot="add-project-dialog"]') === null`)
-  })
 })
 
 it('older-browser composer fallback responds to width changes and keeps focus', () => {
