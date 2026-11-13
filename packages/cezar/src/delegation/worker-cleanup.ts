@@ -10,6 +10,7 @@ import { gitCommonDir } from './workspace-git.ts';
 import { describeProcesses } from './process-liveness.ts';
 import { WorkspaceHeldError } from './workspace-removal.ts';
 import { runWorktreeTeardown } from './worktree-teardown.ts';
+import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { loadConfig } from '../config.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
@@ -209,10 +210,11 @@ export class WorkerCleanup {
      * failure. A complete destroy keeps nothing, and neither does a failure no key input or named
      * holder accounts for (lock contention, a failed Git step, an unnamed blocker): it can clear
      * without changing anything a tick could see, so the next tick attempts in full. */
-    // A failed worktree teardown runs again in the next tick's full attempt.
-    let tornDown = true;
+    // A tick that skips runs no teardown. With a hook configured, every tick runs in full, so a service
+    // the worker started after this attempt's teardown is stopped by the next one.
+    const skippable = resolveWorktreeSetup(teardown).kind === 'none';
     const observed = (result: WorkerDestroyResult, holders: readonly number[], explained: boolean) => {
-      this.observeAttempt(project, workerId, result.state === 'complete' || !explained || !tornDown ? undefined : { key, holders: recordHolders(holders) });
+      this.observeAttempt(project, workerId, result.state === 'complete' || !explained || !skippable ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
     const terminationFailure = (): WorkerDestroyResult => {
@@ -311,7 +313,6 @@ export class WorkerCleanup {
       const teardownError = await runWorktreeTeardown(project.root, teardown, workspace);
       // A project replaced during the teardown keeps its old manager alive: never reap through it.
       assertAttached();
-      tornDown = !teardownError;
       if (teardownError) project.store.appendEvent(workerId, { type: 'lifecycle', message: `worktree teardown failed: ${teardownError}` });
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();

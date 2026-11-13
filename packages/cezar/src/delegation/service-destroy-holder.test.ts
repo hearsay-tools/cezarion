@@ -121,6 +121,21 @@ describe('destroy backoff holder', { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
   });
 
+  // A worker still running when the teardown ran can start a service after it: with a hook configured,
+  // scheduled ticks never skip, so a later teardown stops that service.
+  it.runIf(linux)('with a worktreeTeardown configured, scheduled retries run it again while a holder stays', async () => {
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    const service = await worktreeService(workspace.path);
+    const pidFile = join(scratchDir(), 'service.pid');
+    // The teardown stops only a service it knows of; at first it knows none.
+    useTeardown(`[ ! -f '${pidFile}' ] || { ${stop(service.pid!)}; }`);
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    writeFileSync(pidFile, String(service.pid));
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+  });
+
   it.runIf(linux)('a holder that moves out of the worktree ends the skipping', async () => {
     await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
