@@ -293,7 +293,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       detail.scrollTop = 160;
       const detailMoved = detail.scrollTop >= 80;
       const listStill = list.scrollTop === listBefore;
-      const listHasNoXScroll = list.scrollWidth <= list.clientWidth;
+      const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
       return {
         panesUncovered,
         titleGone,
