@@ -1,5 +1,6 @@
 import { logPrefix } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
+import { isAbsoluteHostPath } from '../core/host-path.ts';
 import type { Home } from '../home/home.ts';
 import { HomeStore, homeFileRoot, readHomeFile } from '../home/store.ts';
 import { z } from 'zod';
@@ -97,7 +98,7 @@ const workspaceProjectSchema = z
     id: z.string().regex(PROJECT_ID_RE),
     /** Absolute, realpath-normalized repo root (normalization is the writer's
      *  job — `registerProject` in step 1.3; the schema only demands absolute). */
-    root: z.string().min(1).max(4096).refine((p) => p.startsWith('/'), 'root must be absolute'),
+    root: z.string().min(1).max(4096).refine(isAbsoluteHostPath, 'root must be absolute'),
     /** Display name (basename by default). `''` = caller derives a fallback. */
     name: z.string().max(200).catch(''),
     addedAt: z.string().max(64).catch(''),

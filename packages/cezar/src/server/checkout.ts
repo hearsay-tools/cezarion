@@ -1,4 +1,5 @@
 import { productEnv } from '../core/product-env.ts';
+import { isAbsoluteHostPath } from '../core/host-path.ts';
 import { execFile, spawn } from 'node:child_process';
 import { lstat, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -45,7 +46,7 @@ export function createProgressLineSplitter(onLine: (line: string) => void) {
 
 /** Validate and resolve the checkout target before any filesystem work. */
 export function checkoutTarget(projectsDir: string, name: string) {
-  if (!projectsDir.startsWith('/')) {
+  if (!isAbsoluteHostPath(projectsDir)) {
     return { ok: false as const, status: 500 as const, error: `checkout root is not an absolute path: ${projectsDir}` };
   }
   const root = resolve(projectsDir);

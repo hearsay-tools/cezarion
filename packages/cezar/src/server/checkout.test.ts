@@ -22,6 +22,7 @@ import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import {
   checkoutRepo,
+  checkoutTarget,
   cleanupCheckout,
   ghCloneArgs,
   ghCloneRunner,
@@ -611,5 +612,17 @@ describe('POST /api/v1/projects/checkout', () => {
     // registry outcome, and the message says where it is.
     expect(body.error).toContain(target);
     expect(existsSync(join(target, '.git'))).toBe(true);
+  });
+});
+
+// hearsay-tools/squawk#3493: a POSIX-only absolute check refused every Windows checkout root.
+describe('checkoutTarget on Windows', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  afterEach(() => { Object.defineProperty(process, 'platform', platform); });
+
+  it('takes a drive-letter checkout root as absolute and still refuses a relative one', () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    expect(checkoutTarget('C:\\Users\\dev\\checkouts', 'app')).not.toHaveProperty('ok', false);
+    expect(checkoutTarget('checkouts', 'app')).toMatchObject({ ok: false, status: 500 });
   });
 });
