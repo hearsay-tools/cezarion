@@ -453,16 +453,17 @@ describe('workspace runs index API', () => {
     });
   });
 
-  it('reads a crashed process’s `running` row as interrupted, exactly as opening it would', async () => {
+  it('reads a cold project’s `running` row as running, exactly as `serve` opening it would', async () => {
     await registerProject(repoRoot, undefined, testHome());
     await registerProject(otherRoot, undefined, testHome());
-    seedColdProject(otherRoot, [storedRun({ id: 'ghost', title: 'Ghost', status: RUN_STATUS.running })]);
+    seedColdProject(otherRoot, [storedRun({ id: 'live', title: 'Live', status: RUN_STATUS.running })]);
 
     const body = await getIndex();
 
-    // Shared with `RunStore.open` through `reconcileLoadedRun`: a task cannot read as running in
-    // the palette and failed the moment it is opened.
-    expect(body.runs[0]?.status).toBe('failed');
+    // Shared with `RunStore.open(..., { keepLive: true })` through `reconcileLoadedRun`: another
+    // cockpit may own the run, or recovery will decide how it ends once this cockpit builds the
+    // project; no holder here is no failure (hearsay-tools/squawk#967).
+    expect(body.runs[0]?.status).toBe('running');
   });
 
   it('skips a project whose folder is gone and degrades a corrupt index to no rows', async () => {

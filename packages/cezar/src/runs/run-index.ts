@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/cezar-contract/runs';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
-import { decodeRunRecord, LEGACY_INDEX_FILE, reconcileLoadedRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
-import { rescopeRun } from './run-references.ts';
+import { decodeRunRecord, LEGACY_INDEX_FILE, LOAD_REPAIR_SQL, reconcileLoadedRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
+import { namesForeignReference, rescopeRun } from './run-references.ts';
 import { matchesRunSearch, searchTokens, sqlPrefilterTokens } from '@open-mercato/cezar-contract/run-search';
 
 /** A cold project's runs as list rows, and whether older archived roots were left out. */
@@ -160,20 +160,26 @@ function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handl
 }
 
 /** Rows as list rows: the stored summary when reading cold cannot change it, else the decoded
- *  record projected as the store would. A row that decodes to nothing is left out. */
+ *  record projected as the store would. The store's own selection (`LOAD_REPAIR_SQL`, and
+ *  `namesForeignReference` with a handle) decides which rows those are. A row that decodes to
+ *  nothing is left out. */
 function projectRows(db: RunDatabase, rows: readonly RunSummaryRow[], dataDir: string, handle?: RepoHandle | null): RunSummary[] {
   const summaries = rows.map((row) => parseSummary(row.summary));
-  const decode = rows.filter((row, i) => {
+  // `json_extract` throws on a summary that is not JSON; such a row is decoded anyway.
+  const repaired = new Set(rows.length === 0 ? [] : db.listKeysWhere(
+    `id IN (SELECT value FROM json_each(?)) AND CASE WHEN json_valid(summary) THEN (${LOAD_REPAIR_SQL}) ELSE 1 END`,
+    [JSON.stringify(rows.map((row) => row.id))],
+  ).map((key) => key.id));
+  const decode = rows.map((row, i) => {
     const summary = summaries[i];
-    return summary === undefined || needsRecord(summary, handle);
+    return summary === undefined || repaired.has(row.id) || (!!handle && namesForeignReference(summary, handle));
   });
-  const records = new Map(db.getMany(decode.map((row) => row.id)).map((row) => [row.id, decodeRunRecord(row.data)]));
+  const records = new Map(db.getMany(rows.filter((_, i) => decode[i]).map((row) => row.id)).map((row) => [row.id, decodeRunRecord(row.data)]));
   const runs: RunSummary[] = [];
   let unreadable = 0;
   rows.forEach((row, i) => {
-    const summary = summaries[i];
-    if (summary !== undefined && !needsRecord(summary, handle)) {
-      runs.push(summary);
+    if (!decode[i]) {
+      runs.push(summaries[i]!);
       return;
     }
     // A row that decodes to nothing is one the store leaves out of its list rows too.
@@ -195,36 +201,6 @@ function parseSummary(text: string): RunSummary | undefined {
   } catch {
     return undefined;
   }
-}
-
-/**
- * Whether reading this run cold could change its stored summary: the questions
- * `reconcileLoadedRun`, `rescopeRun` and the ask refresh would answer, asked of the summary. Only
- * these runs pay for decoding their full record; every other row is served as stored.
- *
- * One case is invisible from here: a finished run that still carries an accepted Stop (`stopping`
- * is not in the summary) would read as cancelled once its record were decoded. The writer clears
- * `stopping` as the run settles, so that takes a crash inside that window.
- */
-function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
-  // A live-looking run reads as interrupted (or cancelled, after an accepted Stop).
-  if (summary.status === 'queued' || summary.status === 'running' || summary.status === 'waiting') return true;
-  // Monitoring state, and a usage-limit resume on anything but a waiting run, are cleared; an old
-  // failed one is read as waiting (hearsay-tools/cezarion#1236). Any resume time, not
-  // `isUsageLimitHold`: a stale one on a finished summary is what the record must correct.
-  if ((summary as { activity?: unknown }).activity !== undefined) return true;
-  if (summary.autoResumeAt !== undefined) return true;
-  // A referenced PR that an older Squawk's created-PR declaration erased is restored.
-  if (summary.referencedPullRequestUrl === undefined && summary.markerRefs?.pr !== undefined) return true;
-  // Issue markers may have overwritten the originating issue in older records.
-  if (summary.markerRefs?.issue !== undefined) return true;
-  // A foreign reference the prompt does not corroborate is dropped; the prompt is in the record.
-  if (handle && (summary.referencedPullRequestUrl !== undefined || summary.referencedIssueUrl !== undefined)) return true;
-  // A summary an older build stored may still show the old engine's `delegation.wait`: it is
-  // re-derived, so the upgraded record speaks instead (hearsay-tools/cezarion#1301). A pending
-  // question is an open human wait in the record since phase 4b (hearsay-tools/cezarion#1236), so no
-  // transcript is read for it.
-  return summary.delegation?.role === 'root' && summary.delegation.wait !== undefined;
 }
 
 function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null | undefined; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
@@ -263,10 +239,12 @@ function readLegacyRecords(dataDir: string): RunRecord[] {
 /**
  * One record read cold, as its list row. `reconcileLoadedRun` mutates, which is safe here in a way
  * it is not in the store: the record was just parsed into a fresh object nothing else holds.
- * Never `keepLive` — this reader has no RunManager, so there is nothing to recover into.
+ * `keepLive`, as `serve` opens a project: a live run keeps its status, because the cockpit that
+ * owns it, or recovery once this one builds the project, decides how it ends
+ * (hearsay-tools/squawk#967). No process here holding it does not make it failed.
  */
 function coldSummary(run: RunRecord, handle?: RepoHandle | null): RunSummary {
-  reconcileLoadedRun(run);
+  reconcileLoadedRun(run, { keepLive: true });
   rescopeRun(run, handle);
   return toRunSummary(run);
 }

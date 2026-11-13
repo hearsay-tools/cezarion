@@ -90,9 +90,9 @@ describe('atomic CI wait checkpoints', () => {
     seedRuns(directory, records);
     const reopened = RunStore.open(directory, { keepLive: true });
     expect(reopened.getRun(id)?.status).toBe(status);
-    // The read-only index intentionally marks orphan running records failed. It answers list rows,
-    // which carry no CI observation; the salvaged field is the store's to keep.
-    expect(readRunIndexFromDisk(directory).runs[0]?.status).toBe(status === 'running' ? 'failed' : status);
+    // The read-only index reads a live run as its stored status (hearsay-tools/squawk#967). It
+    // answers list rows, which carry no CI observation; the salvaged field is the store's to keep.
+    expect(readRunIndexFromDisk(directory).runs[0]?.status).toBe(status);
     expect(reopened.getRun(id)).toMatchObject({ lastWaitsError: expect.stringContaining('saved wait is unreadable') });
     expect(reopened.getRun(id)?.lastWaits).toBeUndefined();
     reopened.flush();

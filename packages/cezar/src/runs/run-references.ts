@@ -8,7 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { runPullRequestSchema } from '@open-mercato/cezar-contract/runs';
 import type { RunEvent, RunPullRequest } from '@open-mercato/cezar-contract';
 import { mergePullRequests } from './pull-requests.ts';
-import { extractTaskRefs, isRepoScopedRef, MAX_REF } from './task-refs.ts';
+import { extractTaskRefs, isRepoScopedRef, MAX_REF, refUrlRepo } from './task-refs.ts';
 import type { RepoHandle, RunRecord } from './store.ts';
 
 export const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
@@ -120,6 +120,13 @@ export function restoreOriginatingIssue(run: RunRecord): void {
   if (run.referencedIssueCandidates !== undefined || refUrlNumber(run.referencedIssueUrl) !== origin) {
     run.referencedIssueUrl = resolveIssueReference(run);
   }
+}
+
+/** Whether a stored summary names a referenced PR or issue outside `handle`'s repository: a row
+ *  `rescopeRun` may change once the handle is known (`LOAD_REPAIR_SQL`, store.ts). */
+export function namesForeignReference(summary: { referencedPullRequestUrl?: string | undefined; referencedIssueUrl?: string | undefined }, handle: RepoHandle): boolean {
+  const own = `${handle.owner}/${handle.name}`.toLowerCase();
+  return [summary.referencedPullRequestUrl, summary.referencedIssueUrl].some((url) => url !== undefined && refUrlRepo(url) !== own);
 }
 
 /**

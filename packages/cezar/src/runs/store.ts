@@ -55,11 +55,11 @@ import { inspectGeneration, processStartToken, type CwdSource, type RecordedProc
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey } from './pull-requests.ts';
-import { isRepoScopedRef, promptNamesRepo, refUrlRepo } from './task-refs.ts';
+import { isRepoScopedRef, promptNamesRepo } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
-import { ISSUE_URL_RE, originatingIssue, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, scanEventReferences, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
+import { ISSUE_URL_RE, namesForeignReference, originatingIssue, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, scanEventReferences, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
 import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
@@ -303,19 +303,6 @@ export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean | undef
   return reconcileLoadedRun(run, { keepLive: false });
 }
 
-/**
- * Every field `RunStore.open` may rewrite while loading a record: what `reconcileLoadedRun`
- * assigns. Compared before and after, it tells open() which rows normalization changed, so it
- * marks those dirty and no others. Edit it together with that function, or a normalized row stays unsaved (the store tests pin each field).
- */
-function loadNormalizedFields(run: RunRecord): string {
-  return JSON.stringify([
-    run.stopping, run.status, run.finishedAt, run.error, run.autoResumeAt,
-    run.referencedPullRequestUrl, run.pullRequests,
-    run.issueNumber, run.referencedIssueUrl, run.referencedIssueNumberSeeded, run.hasPendingPermission, run.steps.map((step) => step.status),
-  ]);
-}
-
 /** Test seam (#779): `beforeTransaction` runs once `runs.json` is read and parsed, before the
  *  import asks for the write lock; `beforeCommit` runs inside the import transaction, after every
  *  row is written and before the last check that no older Squawk wrote `runs.json` meanwhile. */
@@ -368,6 +355,17 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
 const LEGACY_REFERENCE_HEAL_SQL =
   "(json_extract(summary, '$.markerRefs.pr') IS NOT NULL AND json_extract(summary, '$.referencedPullRequestUrl') IS NULL)" +
   " OR (NOT EXISTS (SELECT 1 FROM meta WHERE key = 'issue-attribution:' || runs.id AND value = CAST(runs.revision AS TEXT)) AND json_extract(summary, '$.markerRefs.issue') IS NOT NULL)";
+
+/**
+ * The rows whose stored summary reading their record can change, as SQL over `runs`: the rows
+ * `open` decodes to normalize (the `live` column it loads by, then `LEGACY_REFERENCE_HEAL_SQL`).
+ * With a repository handle, a row whose summary `namesForeignReference` is one too, as
+ * `setRepoHandle` reads it. The cold reader (run-index.ts) decodes exactly these rows and serves
+ * every other stored summary, so the two read paths cannot disagree about which rows to read.
+ * `AUTOMATION_ORIGIN_HEAL_SQL` is left out on purpose: no cross-project view reads
+ * `automationId`, and asking it scans `data`.
+ */
+export const LOAD_REPAIR_SQL = `live = 1 OR ${LEGACY_REFERENCE_HEAL_SQL}`;
 
 /**
  * Rows whose record names the automation that launched it while the stored summary does not
@@ -778,11 +776,12 @@ export class RunStore extends EventEmitter {
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     if (this.db?.familyHasFallback(rowFamily(row))) return;
-    const before = loadNormalizedFields(run);
+    // Serialized, so a key set to `undefined` reads as the absent key it is once written.
+    const before = JSON.stringify(run);
     const wasCancelled = run.status === 'cancelled';
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
-    const changed = upgraded === true || loadNormalizedFields(run) !== before;
+    const changed = upgraded === true || JSON.stringify(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
     this.held.set(run.id, run);
     this.base.set(run.id, { revision: row.revision, seq: row.seq, data: row.data, extras });
@@ -1070,12 +1069,10 @@ export class RunStore extends EventEmitter {
     // `touch` per healed run: the cockpit is already live when the handle lands, so a corrected
     // chip has to reach the open page over SSE, not just the next `runs.json` write.
     let healed = false;
-    const own = `${handle.owner}/${handle.name}`.toLowerCase();
-    const foreign = (url: string | undefined) => url !== undefined && refUrlRepo(url) !== own;
     const stored = this.db?.listWhere(REFERENCED_RUN_RULE.sql).filter((row) => {
       if (this.held.has(row.id) || this.deleted.has(row.id)) return false;
       const summary = parseStoredSummary(row.summary);
-      return !summary || foreign(summary.referencedPullRequestUrl) || foreign(summary.referencedIssueUrl);
+      return !summary || namesForeignReference(summary, handle);
     }) ?? [];
     for (const run of [...this.held.values()]) {
       if (rescopeRun(run, this.repoHandle)) {
