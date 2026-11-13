@@ -52,6 +52,7 @@ test('a release-plan refusal in the Release workflow is no cause; other lines an
   for (const line of ['Error: Release refused: the last stable release was published 2026-11-11T18:15:31.289Z.', 'Error: Release refused:', 'Error: Promotion refused:', 'Error: Staging refused: the candidate commit publishes x']) {
     assert.deepEqual(causesForStep(at(line)), [], line);
   }
+  assert.deepEqual(causesForStep(at('##[error]API rate limit exceeded for installation.\nError: Release refused:')), []);
   assert.equal(causesForStep(at('Error: connect: connection refused'))[0].failureIdentity, 'Error: connect: connection refused');
   assert.match(causesForStep({...at('Error: Release refused:'), run: {...a.run, name: 'Nightly'}})[0].failureIdentity, /Release refused/);
 });

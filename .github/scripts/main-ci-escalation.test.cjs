@@ -61,15 +61,16 @@ test('a summary open for 60 minutes gets one owner mention, and a later run adds
 const summary = (number, run, attempt = 1) => ({ number, created_at: minutesAgo(90), body: `<!-- cez-main-ci-attempt:v1:o/r:${run}:${attempt} -->\n\nRepair` });
 test('a summary closes once a later main CI run or attempt passed; its members are not touched', async () => {
   const green = { id: 20, run_attempt: 2, head_sha: 'a'.repeat(40), html_url: 'https://github.com/o/r/actions/runs/20' };
-  const issues = [summary(1, 10), summary(2, 20), summary(3, 20, 2), summary(4, 30), { number: 5, created_at: minutesAgo(90), body: 'A legacy report' }];
+  const issues = [summary(1, 10), summary(2, 20), summary(3, 20, 2), summary(4, 30), { number: 5, created_at: minutesAgo(90), body: 'A legacy report' },
+    { ...summary(6, 10), labels: [{ name: 'main-ci-failure' }, { name: 'do-not-close' }] }];
   const f = fake({ issues, green });
   const result = await run(f);
   assert.deepEqual(result.closed, [1, 2]);
-  assert.deepEqual(issues.map((i) => i.state ?? 'open'), ['closed', 'closed', 'open', 'open', 'open']);
+  assert.deepEqual(issues.map((i) => i.state ?? 'open'), ['closed', 'closed', 'open', 'open', 'open', 'open']);
   assert.equal(issues[0].state_reason, 'completed');
   assert.match(f.posted[0].body, /^Main CI passed after this attempt: \[run 20 attempt 2\]/);
   assert.deepEqual(f.runReads.map((a) => [a.workflow_id, a.branch, a.event, a.status]), [['ci.yml', 'main', 'push', 'success']]);
-  assert.deepEqual(result.mentioned, [3, 4, 5]);
+  assert.deepEqual(result.mentioned, [3, 4, 5, 6]);
 });
 
 test('a close that failed after its comment retries without a second comment', async () => {

@@ -87,8 +87,9 @@ function causesForStep({run, job, step, log}) {
     if (/^(?:npm (?:ERR!|error) code \w+|\[REDACTED.*\])$/.test(normalized)) return [];
     return [{key:`${stage}:${normalizeIdentity(step.name)}:${normalized}`,title:normalized,index,kind:'error',failureIdentity:normalized}];
   });
+  // A refused step files nothing, even when a GitHub quota line precedes its refusal.
+  if (candidates.some(item => isRefusal(run, item))) return [];
   const errors = candidates.slice(0, 1);
-  if (isRefusal(run, errors[0])) return [];
   const found = tests.length ? tests.filter(item => item.hasDiagnostic || !tests.some(other => other.testKey === item.testKey && other.hasDiagnostic)) : errors;
   // Workflow, job and step identify a cause the log does not, so each run of the same
   // unrecognized failure adds an occurrence to one issue (hearsay-tools/squawk#1447).

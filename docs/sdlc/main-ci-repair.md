@@ -62,7 +62,7 @@ that run follows (a later run, or a later attempt of the same run) gets a commen
 links the passing run, and closes as completed. The comment carries the marker
 `<!-- cez-main-ci-green:v1 -->`, so a retry after a failed close posts no second comment. Its member reports stay open: they
 record causes, and a passing run does not resolve a cause. A legacy report without the
-summary marker is never closed this way.
+summary marker, or a summary labeled `do-not-close`, is never closed this way.
 
 For each summary still open
 open 60 minutes or longer, it posts one comment that mentions the repository's admins

@@ -21,9 +21,10 @@ function summaryAttempt(issue) {
 }
 
 // Main is repaired once a later CI push run on main passed. The summary closes; its member
-// reports stay open for their causes.
+// reports stay open for their causes. Only a person closes a `do-not-close` summary.
+const protectedIssue = (issue) => (issue.labels ?? []).some((label) => (label.name ?? label) === 'do-not-close');
 async function closeGreenSummaries({ github, owner, repo, issues, log }) {
-  const summaries = issues.filter((i) => !i.pull_request && summaryAttempt(i));
+  const summaries = issues.filter((i) => !i.pull_request && summaryAttempt(i) && !protectedIssue(i));
   if (summaries.length === 0) return [];
   const { data } = await github.request('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs', {
     owner, repo, workflow_id: 'ci.yml', branch: 'main', event: 'push', status: 'success', exclude_pull_requests: true, per_page: 1,
