@@ -93,3 +93,29 @@ test('quota counts survive a failed issue read',async()=>{
  const m=await sweep(h);
  assert.equal(m.complete,false);assert.deepEqual(m.suppressed,{occurrences:1,runs:[4]});
 });
+const QUOTA_THEN_ERROR='##[error]API rate limit exceeded for installation.\nTypeError: build failed';
+test('quota steps with another error are classified by that error, and the quota is still counted',async()=>{
+ const h=harness();recurring(h);for(const id of [10,20,30])h.state.logs.set(id,QUOTA_THEN_ERROR);
+ const m=await sweep(h);
+ assert.equal(m.complete,true);assert.equal(m.patterns,1);assert.deepEqual(m.suppressed,{occurrences:3,runs:[1,2,3]});
+ assert.equal(h.state.issues.length,1);assert.match(h.state.issues[0].body,/TypeError: build failed/);assert.doesNotMatch(h.state.issues[0].body,/rate limit/i);
+ assert.equal(m.reports.occurrences,3);
+});
+test('a step the pre-change reporter recorded under its quota cause keeps that report',async()=>{
+ const {causesForStep}=require('./failure-diagnostics.cjs');
+ const {defaultBodyFor,commentFor}=require('./failure-issue-writer.cjs');
+ const h=harness();recurring(h);for(const id of [10,20,30])h.state.logs.set(id,QUOTA_THEN_ERROR);
+ // Run 1 was reported by the pre-change reporter: main's selection, the quota line.
+ const r=run(1),j=job(10),step=j.steps[0],runUrl=`https://github.com/hearsay-tools/cezarion/actions/runs/1/attempts/1`;
+ const {independentCause,...quota}=causesForStep({run:r,job:j,step,log:QUOTA_THEN_ERROR})[0];
+ assert.ok(independentCause);
+ const signature=`<!-- cez-failure-signature:v1:${quota.signature} -->`,occurrence=`<!-- cez-failure-occurrence:v1:1:1:10:${step.number}:${quota.signature} -->`;
+ h.state.issues.push({number:1,state:'open',title:'[Task]: Investigate verification failure',body:defaultBodyFor({cause:quota,runUrl,signature,occurrence})});
+ h.state.comments.push({id:1,issue_number:1,body:commentFor({cause:quota,run:r,job:j,step,runUrl,jobUrl:'https://github.com/hearsay-tools/cezarion/actions/runs/1/job/10',occurrence})});
+ const m=await sweep(h);
+ assert.equal(m.complete,true);assert.equal(m.patterns,1);
+ // Runs 2 and 3 file the TypeError; run 1 keeps its quota report untouched.
+ assert.equal(h.state.issues.length,2);assert.match(h.state.issues[1].body,/TypeError: build failed/);
+ assert.equal(m.reports.occurrences,2);
+ assert.deepEqual(h.state.comments.filter(c=>c.issue_number===1).map(c=>c.id),[1]);
+});

@@ -27,7 +27,12 @@ async function sweepCiFailures({github,owner,repo,start='',end='',now=Date.now,l
     // recurrence threshold and before any issue read, so the summary shows them.
     const quota=collected.occurrences.filter(occurrence=>isQuotaCause(occurrence.cause));
     manifest.suppressed={occurrences:quota.length,runs:[...new Set(quota.map(occurrence=>occurrence.run.id))].sort((a,b)=>a-b)};
-    const patterns=classifyPatterns({...collected,occurrences:collected.occurrences.filter(occurrence=>!isQuotaCause(occurrence.cause)),owner,repo});
+    // A quota step with another error is classified by that error, as the
+    // writer reports it for an unrecorded step; `sourceCause` lets the writer
+    // make that choice from the step's records. Quota-only steps drop out.
+    const classifiable=collected.occurrences.flatMap(occurrence=>!isQuotaCause(occurrence.cause) ? [occurrence]
+      : occurrence.cause.independentCause ? [{...occurrence,cause:occurrence.cause.independentCause,sourceCause:occurrence.cause}] : []);
+    const patterns=classifyPatterns({...collected,occurrences:classifiable,owner,repo});
     manifest.patterns=patterns.length;
     await reportPatterns({api,owner,repo,patterns,start:manifest.start,end:manifest.end});
   } catch {api.problem('sweep-incomplete');}
