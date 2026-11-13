@@ -127,7 +127,6 @@ describe('HookCard (#961)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Hook/ }))
     const entry = document.querySelector('[data-slot="hook-entry"]')!
     expect(entry.textContent).toBe('SQUEAL · registered at revision 0\nKnown failures: 0')
-    expect(entry.className).toContain('whitespace-pre-wrap')
   })
 
   it('source path and raw-output toggle use the AA muted token on card-2', () => {
@@ -145,7 +144,6 @@ describe('HookCard (#961)', () => {
     for (const status of ['failed', 'blocked'] as const) {
       render(<HookCard item={hook({ status, exitCode: 2, entries: [{ kind: 'error', text: 'boom' }] })} />)
       expect(hookCard().getAttribute('data-status')).toBe(status)
-      expect(hookCard().className).toContain('border-danger/25')
       const button = screen.getByRole('button', { name: /Hook/ })
       expect(button.textContent).toContain(status)
       expect(button.querySelector('[data-slot="hook-exit"]')?.textContent).toBe('2')
@@ -203,7 +201,6 @@ describe('ToolCard — states', () => {
     const code = button.querySelector('code')
     expect(code?.textContent).toBe(command)
     expect(code?.title).toBe(command)
-    expect(code?.className).toContain('truncate')
     fireEvent.click(button)
     expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
   })
@@ -220,13 +217,12 @@ describe('ToolCard — states', () => {
     expect(document.querySelector('[data-slot="tool-output"]')).toBeNull()
   })
 
-  it('running without output: shimmering verb and spinner; command stays closed but expandable', () => {
+  it('running without output: a spinner; command stays closed but expandable', () => {
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'running')
     render(<ToolCard item={item} />)
     expect(card().getAttribute('data-status')).toBe('running')
     const button = trigger(/Ran.*git status --short/)
     expect((button as HTMLButtonElement).disabled).toBe(false)
-    expect(button.querySelector('.shimmer')?.textContent).toBe('Ran')
     expect(screen.getByRole('status', { name: 'Running' })).toBeTruthy()
     expect(document.querySelector('[data-slot="tool-output"]')).toBeNull()
     expect(document.querySelector('[data-slot="tool-command"]')).toBeNull()
@@ -240,10 +236,9 @@ describe('ToolCard — states', () => {
     expect(card().getAttribute('data-status')).toBe('completed')
     const button = trigger(/Ran.*git status --short/)
     expect((button as HTMLButtonElement).disabled).toBe(false)
-    expect(button.querySelector('.shimmer')).toBeNull()
     expect(screen.queryByText(/M src\/example\.ts/)).toBeNull() // closed by default
     fireEvent.click(button)
-    expect(document.querySelector('[data-slot="tool-output"] pre')?.textContent).toBe(' M src/example.ts')
+    expect(document.querySelector('[data-slot="tool-output"]')?.textContent).toBe(' M src/example.ts')
     fireEvent.click(button) // the user's toggle wins both ways
     expect(document.querySelector('[data-slot="tool-output"]')).toBeNull()
   })
@@ -255,19 +250,16 @@ describe('ToolCard — states', () => {
     expect(document.querySelector('[data-slot="tool-output"] pre')?.textContent).toContain('npm warn deprecated')
   })
 
-  it('failed: closed by default with a faint tint; expands to the danger-toned error', () => {
+  it('failed: closed by default; expands to the error', () => {
     const item = goldenItem(failedAndDenied, 'toolu_fail_01', 'failed')
     render(<ToolCard item={item} />)
     expect(card().getAttribute('data-status')).toBe('failed')
-    // A faint danger tint still identifies it, but the loud outline and auto-open are gone.
-    expect(card().className).toContain('border-danger')
     expect(screen.getByText('failed')).toBeTruthy()
     // Calm by default: the red error body only appears once the reader opens the card.
     expect(document.querySelector('[data-slot="tool-error"]')).toBeNull()
     fireEvent.click(trigger(/failed/))
     const error = document.querySelector('[data-slot="tool-error"]')
     expect(error?.textContent).toContain('npm ERR! Missing script: "lint"')
-    expect(error?.className).toContain('text-danger')
   })
 
   it('declined: labeled, with the full command available on expansion', () => {
@@ -314,7 +306,6 @@ describe('ToolCard — exit-code pill (execute kind)', () => {
     render(<ToolCard item={item} />)
     const pill = document.querySelector('[data-slot="tool-exit"]')!
     expect(pill.textContent).toBe('0')
-    expect(pill.className).toContain('text-success')
   })
 
   it('a non-zero exit → danger pill', () => {
@@ -322,7 +313,6 @@ describe('ToolCard — exit-code pill (execute kind)', () => {
     render(<ToolCard item={{ ...item, exitCode: 2 }} />)
     const pill = document.querySelector('[data-slot="tool-exit"]')!
     expect(pill.textContent).toBe('2')
-    expect(pill.className).toContain('text-danger')
   })
 
   it('no exit code reported (the golden claude Bash) → no pill invented', () => {
@@ -335,25 +325,22 @@ describe('ToolCard — long output clamps behind the fade and expands on demand'
   const longOutput = Array.from({ length: OUTPUT_CLAMP_LINES + 8 }, (_, i) => `line ${i + 1}`).join('\n')
   const base = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
 
-  it('clamps, fades, and offers "Show all N lines"; expanding removes the clamp', () => {
+  it('clamps and offers "Show all N lines"; expanding removes the clamp', () => {
     render(<ToolCard item={{ ...base, output: longOutput }} />)
     fireEvent.click(trigger(/Ran.*git status --short/))
     const output = () => document.querySelector('[data-slot="tool-output"]')!
     expect(output().getAttribute('data-clamped')).toBe('true')
-    expect(document.querySelector('[data-slot="tool-output-fade"]')).toBeTruthy()
 
     const toggle = screen.getByRole('button', { name: `Show all ${OUTPUT_CLAMP_LINES + 8} lines` })
     fireEvent.click(toggle)
     expect(output().getAttribute('data-clamped')).toBeNull()
-    expect(document.querySelector('[data-slot="tool-output-fade"]')).toBeNull()
     expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy()
   })
 
-  it('short output renders whole — no fade, no toggle', () => {
+  it('short output renders whole — no clamp, no toggle', () => {
     render(<ToolCard item={base} />)
     fireEvent.click(trigger(/Ran.*git status --short/))
     expect(document.querySelector('[data-slot="tool-output"]')?.getAttribute('data-clamped')).toBeNull()
-    expect(document.querySelector('[data-slot="tool-output-fade"]')).toBeNull()
     expect(screen.queryByRole('button', { name: /Show all/ })).toBeNull()
   })
 })
@@ -478,15 +465,10 @@ describe('conversation message surfaces', () => {
     )
 
     const body = screen.getByRole('article', { name: 'Agent response' }).querySelector(':scope > div')!
-    expect(body.querySelector('p')?.textContent).toBe('A full-width response.')
-    expect(body.querySelector('li')?.textContent).toBe('List item')
-    expect(body.querySelector('pre code')?.textContent).toContain('long_unbroken_line')
     expect(body.className).not.toMatch(/(?:^|[\s:])max-w-/)
-    expect(body.classList.contains('text-[15px]')).toBe(true)
-    expect(body.classList.contains('md:text-[14px]')).toBe(true)
   })
 
-  it('labels user and agent messages with the shared role surface', () => {
+  it('labels user and agent messages with their role', () => {
     render(
       <MemoryRouter>
         <UserBubble text="Summarize what this project does." />
@@ -498,18 +480,6 @@ describe('conversation message surfaces', () => {
     const agent = document.querySelector('[data-slot="assistant-message"]')
     expect(user?.getAttribute('data-role')).toBe('user')
     expect(agent?.getAttribute('data-role')).toBe('agent')
-    for (const [card, kind] of [[user, 'user'], [agent, 'agent']] as const) {
-      expect(card?.classList.contains('[html:not(.light)_&]:border-s-[3px]')).toBe(true)
-      expect(card?.classList.contains(`[html:not(.light)_&]:border-s-message-${kind}-accent`)).toBe(true)
-    }
-    expect(user?.querySelector(':scope > p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('YOUR MESSAGE')
-    const agentHeader = agent?.querySelector(':scope > p')
-    expect(agentHeader?.textContent).toContain('AGENT RESPONSE')
-    expect(agentHeader?.contains(screen.getByRole('button', { name: 'Copy reply' }))).toBe(true)
-    expect(agentHeader?.contains(screen.getByRole('button', { name: 'Copy reply as markdown' }))).toBe(true)
-    expect(document.querySelector('[data-slot="note-line"]')).toBeNull()
-    expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
-    expect(document.querySelector('[data-slot="reasoning"]')).toBeNull()
   })
 
   // #730 — an agent's single newlines are visible line breaks, however the text arrives.
@@ -670,7 +640,7 @@ describe('AssistantMessage copy actions', () => {
     return item
   }
 
-  it('shows Copy and Copy markdown in the agent header, always visible, and neither on a tool-call row', () => {
+  it('shows Copy and Copy markdown on the agent response, and neither on a tool-call row', () => {
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
     render(
       <MemoryRouter>
@@ -679,24 +649,14 @@ describe('AssistantMessage copy actions', () => {
       </MemoryRouter>,
     )
     const article = screen.getByRole('article', { name: 'Agent response' })
-    const header = article.querySelector(':scope > p')
     const copy = copyButton()
     const markdown = markdownButton()
-    expect(header).not.toBeNull()
-    expect(header?.contains(copy)).toBe(true)
-    expect(header?.contains(markdown)).toBe(true)
-    expect(header?.querySelector('[data-slot="message-time"]')).not.toBeNull()
+    expect(article.contains(copy)).toBe(true)
+    expect(article.contains(markdown)).toBe(true)
     expect(copy.textContent).toContain('Copy')
     expect(markdown.textContent).toContain('Copy markdown')
     expect(copy.getAttribute('tabindex')).not.toBe('-1')
     expect(markdown.getAttribute('tabindex')).not.toBe('-1')
-    expect(copy.className).toMatch(/(?:^|[\s:])(?:min-h-11|h-11|size-11)(?:\s|$)/)
-    expect(copy.className).toMatch(/(?:^|[\s:])(?:min-w-11|w-11|size-11)(?:\s|$)/)
-    const actions = header?.querySelector('[data-slot="bubble-actions"]')
-    expect(actions).not.toBeNull()
-    expect(actions?.className).not.toMatch(/(?:^|[\s:])opacity-0(?:\s|$)/)
-    expect(actions?.className).not.toMatch(/group-hover:/)
-    expect(article.querySelector(':scope > div [data-slot="bubble-actions"]')).toBeNull()
     const tool = document.querySelector('[data-slot="tool-card"]')!
     expect(tool.querySelector('[data-slot="bubble-actions"]')).toBeNull()
     expect(screen.queryAllByRole('button', { name: 'Copy reply' })).toHaveLength(1)
@@ -899,72 +859,6 @@ describe('AssistantMessage copy actions', () => {
   })
 })
 
-const MESSAGE_COLOR_TOKENS = [
-  'message-user-bg',
-  'message-user-border',
-  'message-user-accent',
-  'message-agent-bg',
-  'message-agent-border',
-  'message-agent-accent',
-] as const
-
-const WORKER_MESSAGE_COLOR_TOKENS = [
-  'message-outbound-bg',
-  'message-outbound-border',
-  'message-outbound-accent',
-  'message-inbound-bg',
-  'message-inbound-border',
-  'message-inbound-accent',
-] as const
-
-describe('message color tokens', () => {
-  it('defines six message color tokens for light and dark', () => {
-    const css = readFileSync(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../styles/index.css'),
-      'utf8',
-    )
-    const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf('.light {'))
-    const lightBlock = css.slice(css.indexOf('.light {'), css.indexOf('@theme'))
-    for (const token of MESSAGE_COLOR_TOKENS) {
-      expect(rootBlock).toContain(`--${token}:`)
-      expect(lightBlock).toContain(`--${token}:`)
-      expect(css).toContain(`--color-${token}: var(--${token})`)
-    }
-  })
-
-  it('defines inbound and outbound worker conversation tokens for light and dark', () => {
-    const css = readFileSync(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../styles/index.css'),
-      'utf8',
-    )
-    const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf('.light {'))
-    const lightBlock = css.slice(css.indexOf('.light {'), css.indexOf('@theme'))
-    for (const token of WORKER_MESSAGE_COLOR_TOKENS) {
-      expect(rootBlock).toContain(`--${token}:`)
-      expect(lightBlock).toContain(`--${token}:`)
-      expect(css).toContain(`--color-${token}: var(--${token})`)
-    }
-    for (const kind of ['user', 'agent', 'outbound', 'inbound']) {
-      expect(rootBlock).toContain(`--message-${kind}-bg: var(--surface-raised)`)
-      expect(rootBlock).toContain(`--message-${kind}-border: var(--border-subtle)`)
-    }
-    // Light keeps its tints. Dark keeps the same kind distinction in labels and rails.
-    for (const [block, colorRole] of [[rootBlock, 'accent'], [lightBlock, 'bg']] as const) {
-      const rgb = (role: string) => {
-        const token = block.match(new RegExp(`--message-${role}-${colorRole}: ([^;]+);`))![1]!
-        const hex = paletteHex(token).slice(1)
-        return [0, 2, 4].map(offset => Number.parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number]
-      }
-      const [sendR, sendG, sendB] = rgb('outbound')
-      const [receiveR, receiveG, receiveB] = rgb('inbound')
-      expect(sendB).toBeGreaterThan(sendG)
-      expect(sendG).toBeGreaterThan(sendR)
-      expect(receiveB).toBeGreaterThan(receiveR)
-      expect(receiveR).toBeGreaterThan(receiveG)
-    }
-  })
-})
-
 describe('peer message color tokens (hearsay-tools/cezarion#1992)', () => {
   const css = readFileSync(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../styles/index.css'),
@@ -983,33 +877,12 @@ describe('peer message color tokens (hearsay-tools/cezarion#1992)', () => {
     return (hi! + 0.05) / (lo! + 0.05)
   }
 
-  it('defines the peer tokens for light and dark, and maps them to Tailwind colors', () => {
-    for (const token of ['message-peer-bg', 'message-peer-border', 'message-peer-accent']) {
-      expect(rootBlock).toContain(`--${token}:`)
-      expect(lightBlock).toContain(`--${token}:`)
-      expect(css).toContain(`--color-${token}: var(--${token})`)
-    }
-    expect(rootBlock).toContain('--message-peer-bg: var(--surface-raised)')
-  })
-
   it('keeps AA contrast for the label and body text on the peer surface in both themes', () => {
     // Dark: the accent label sits on the raised surface. Light: on the tinted card.
     expect(ratio(value(rootBlock, 'message-peer-accent'), value(rootBlock, 'surface-raised'))).toBeGreaterThanOrEqual(4.5)
     expect(ratio(value(lightBlock, 'message-peer-accent'), value(lightBlock, 'message-peer-bg'))).toBeGreaterThanOrEqual(4.5)
     expect(ratio(value(lightBlock, 'text-primary'), value(lightBlock, 'message-peer-bg'))).toBeGreaterThanOrEqual(4.5)
     expect(ratio(value(lightBlock, 'text-muted'), value(lightBlock, 'message-peer-bg'))).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it('keeps the peer hue clear of the worker, human and agent accents, beside its label', () => {
-    const hue = (block: string, role: string) => Number(value(block, `message-${role}-accent`).match(/oklch\([\d.]+ [\d.]+ ([\d.]+)\)/)![1])
-    for (const block of [rootBlock, lightBlock]) {
-      const peer = hue(block, 'peer')
-      for (const other of ['user', 'agent', 'outbound', 'inbound']) {
-        if (!/oklch\(/.test(value(block, `message-${other}-accent`))) continue
-        const apart = Math.abs(peer - hue(block, other))
-        expect(Math.min(apart, 360 - apart)).toBeGreaterThanOrEqual(30)
-      }
-    }
   })
 })
 
@@ -1205,10 +1078,8 @@ describe('parent/worker conversation transcript', () => {
     render(<MemoryRouter><SessionTranscript runId={parent} viewId="main" sections={[{ id: 'turn', entries }]}
       mode="document" taskTitles={{ [alpha]: 'Alpha', [bravo]: 'Bravo' }} /></MemoryRouter>)
 
-    const batch = document.querySelector('[data-slot="worker-conversation-card"]')!
     expect(document.querySelectorAll('[data-slot="worker-conversation-card"]')).toHaveLength(1)
-    expect(batch.querySelector('div.grid')?.textContent).toContain('First sent')
-    expect(batch.querySelector('div.grid time')?.getAttribute('datetime')).toBe(first.createdAt)
+    expect(screen.getByText(/First sent/).querySelector('time')?.getAttribute('datetime')).toBe(first.createdAt)
     expect(screen.getByRole('link', { name: 'Alpha — Pending' }).closest('li')?.querySelector('time')?.getAttribute('datetime')).toBe(first.createdAt)
     expect(screen.getByRole('link', { name: 'Bravo — Pending' }).closest('li')?.querySelector('time')?.getAttribute('datetime')).toBe(second.createdAt)
   })

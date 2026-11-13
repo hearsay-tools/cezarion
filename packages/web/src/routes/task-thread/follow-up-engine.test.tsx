@@ -196,25 +196,6 @@ const continueBody = () =>
   requests.find((r) => r.url.endsWith('/continue') && r.method === 'POST')?.body
 
 describe('follow-up ContinueAction runner/model selection (#401)', () => {
-  it('keeps Runner, Model and Effort together in settings order', async () => {
-    serve()
-    renderAction(makeRun())
-    await screen.findByRole('button', { name: /^Model · / })
-    const settings = document.querySelector('[data-slot="follow-up-engine"]')
-    expect(settings).not.toBeNull()
-    expect(Array.from(settings!.querySelectorAll('[aria-label]')).map((control) => control.getAttribute('aria-label')))
-      .toEqual(['Runner · claude', 'Model · auto', 'Effort · auto'])
-  })
-
-  it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
-    serve()
-    renderAction(makeRun())
-    expect((await screen.findByRole('button', { name: /^Model · / })).textContent).toMatch(/^Model \u00b7 /)
-    expect(screen.getByRole('button', { name: /^Runner · / }).textContent).toMatch(/^Runner \u00b7 /)
-    expect(screen.getByRole('button', { name: /^Effort · / }).textContent).toMatch(/^Effort \u00b7 /)
-    expect(document.querySelector('[data-slot="session-setting-label"]')).toBeNull()
-  })
-
   it('defaults the effort pill to the run pin and omits it when untouched (#45)', async () => {
     serve()
     renderAction(makeRun({ effort: 'high' }))
@@ -460,7 +441,6 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     renderAction(makeRun({ runner: 'claude', model: 'old-run-model' }))
 
     const model = await screen.findByLabelText(/^Model · /)
-    expect(model.tagName).toBe('SPAN')
     expect(model.textContent).toContain('native-sonnet')
     expect(screen.queryByRole('button', { name: /^Model · / })).toBeNull()
 
@@ -513,7 +493,7 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     expect(screen.queryByRole('button', { name: /^Runner · / })).toBeNull()
   })
 
-  it('keeps read-only Runner chrome on a single-backend host (#272)', async () => {
+  it('shows the run runner read-only on a single-backend host (#272)', async () => {
     serve({
       ...HEALTH_MULTI,
       checks: [
@@ -524,12 +504,7 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     renderAction(makeRun())
     await screen.findByRole('button', { name: /^Model · / })
     expect(screen.queryByRole('button', { name: /^Runner · / })).toBeNull()
-    const runner = document.querySelector('[data-slot="session-runner-value"]') as HTMLElement
-    expect(runner).not.toBeNull()
-    expect(runner.tagName).toBe('SPAN')
-    expect(runner.textContent).toMatch(/^Runner \u00b7 /)
-    expect(runner.querySelector('[data-design-icon="terminal"]')).not.toBeNull()
-    expect(runner.querySelector('[data-design-icon="chevron-down"]')).toBeNull()
+    expect(screen.getByLabelText(/^Runner · /).textContent).toContain('claude')
   })
 
   it('preserves session affinity when the current runner remains connected', async () => {

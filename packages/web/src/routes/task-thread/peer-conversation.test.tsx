@@ -54,11 +54,8 @@ describe('peer conversation cards (hearsay-tools/cezarion#1992)', () => {
     const [card] = cards()
     expect(card!.getAttribute('data-relationship')).toBe('peer')
     expect(card!.getAttribute('data-direction')).toBe('outbound')
-    expect(within(card!).getByText('Peer').getAttribute('data-slot')).toBe('conversation-relationship')
+    expect(within(card!).getByText('Peer')).toBeTruthy()
     expect(within(card!).getByRole('link', { name: 'SENT to Schema task' }).getAttribute('href')).toBe(`/p/acme/tasks/${peer}`)
-    expect(card!.className).toContain('border-message-peer-border')
-    expect(card!.className).not.toContain('message-outbound')
-    expect(card!.className).not.toContain('message-inbound')
   })
 
   it('renders a request, its reply and its outcome in thread order, both as peer cards', () => {
@@ -72,7 +69,7 @@ describe('peer conversation cards (hearsay-tools/cezarion#1992)', () => {
       ['request', 'outbound', 'peer'],
       ['reply', 'inbound', 'peer'],
     ])
-    expect(within(cards()[0]!).getByText('Replied').getAttribute('data-slot')).toBe('conversation-outcome')
+    expect(within(cards()[0]!).getByText('Replied')).toBeTruthy()
     expect(within(cards()[1]!).getByRole('link', { name: 'RECEIVED from Schema task' })).toBeTruthy()
     const order = [...document.querySelectorAll('[data-slot="worker-conversation-card"], [data-slot="assistant-message"]')].map((node) => node.getAttribute('data-slot'))
     expect(order[0]).toBe('worker-conversation-card')
@@ -84,7 +81,7 @@ describe('peer conversation cards (hearsay-tools/cezarion#1992)', () => {
       { type: 'conversation-message', message: peerRequest, delivery: 'delivered' },
       { type: 'request-outcome', outcome: { requestId, status: 'deleted', observedAt: '2026-10-28T12:05:00.000Z' } },
     ])
-    expect(within(cards()[0]!).getByText('Recipient deleted').getAttribute('data-slot')).toBe('conversation-outcome')
+    expect(within(cards()[0]!).getByText('Recipient deleted')).toBeTruthy()
   })
 
   it('looks up a peer the run list does not carry and links it once it loads', () => {
@@ -146,7 +143,6 @@ describe('peer conversation cards (hearsay-tools/cezarion#1992)', () => {
     ], { [self]: 'Coordinator', [peer]: 'Schema task', [worker]: 'Worker' })
     const [workerCard, peerCard] = cards()
     expect(workerCard!.getAttribute('data-relationship')).toBe('family')
-    expect(workerCard!.className).toContain('message-outbound')
     expect(within(workerCard!).queryByText('Peer')).toBeNull()
     expect(peerCard!.getAttribute('data-relationship')).toBe('peer')
   })

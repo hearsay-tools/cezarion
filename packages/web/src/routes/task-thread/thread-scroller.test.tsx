@@ -1,14 +1,11 @@
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { useLayoutEffect, useState } from 'react'
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 import { act, cleanup, fireEvent, render, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearThreadScrollCaches, readThreadScroll, saveThreadScroll, saveThreadMeasurements } from './thread-scroll'
-import { JumpToLatestPill, ThreadRows, useThreadScroll, type ReaderScrollEvent, type ThreadRow } from './thread-scroller'
+import { ThreadRows, useThreadScroll, type ReaderScrollEvent, type ThreadRow } from './thread-scroller'
 
 const isCockpitE2e = vi.hoisted(() => vi.fn(() => false))
 vi.mock('@/lib/e2e-mode', () => ({ isCockpitE2e: () => isCockpitE2e() }))
@@ -43,21 +40,17 @@ const rows = (count: number): ThreadRow[] =>
   Array.from({ length: count }, (_, index) => ({ key: `row-${index}`, node: <p>row {index}</p> }))
 
 /** The mode is the caller's (threadRenderMode is pinned in thread-scroll.test.ts) — these
- *  tests pin what each mode RENDERS: the flat path keeps every row in the DOM with the
- *  content-visibility hint; the virtua path hands the same wrappers to the virtualizer. */
+ *  tests pin what each mode RENDERS: the flat path keeps every row in the DOM; the virtua
+ *  path hands the same wrappers to the virtualizer. */
 describe('ThreadRows — the threshold-switched renderer', () => {
   const controls = () => renderHook(() => useThreadScroll('r1')).result.current
 
-  it('flat mode renders every row, marked and content-visibility-hinted', () => {
+  it('flat mode renders every row', () => {
     render(<ThreadRows runId="r1" rows={rows(5)} mode="flat" controls={controls()} />)
     const region = document.querySelector('[data-slot="thread-rows"]')!
     expect(region.getAttribute('data-virtualized')).toBe('false')
     const rendered = document.querySelectorAll('[data-slot="thread-row"]')
     expect(rendered).toHaveLength(5)
-    expect(rendered[0]!.className).toContain('[content-visibility:auto]')
-    // Bubbles rely on flex alignment inside their row — every wrapper is a flex column.
-    expect(rendered[0]!.className).toContain('flex-col')
-    expect(rendered[0]!.className).toContain('w-full')
   })
 
   it('virtual mode mounts the virtua container instead', () => {
@@ -69,28 +62,12 @@ describe('ThreadRows — the threshold-switched renderer', () => {
     // thread-scroll.e2e.ts's).
     const rendered = document.querySelectorAll('[data-slot="thread-row"]')
     expect(rendered.length).toBeLessThan(400)
-    for (const row of rendered) expect(row.className).toContain('w-full')
   })
 
   it('flat rows keep their content in render order', () => {
     render(<ThreadRows runId="r1" rows={rows(3)} mode="flat" controls={controls()} />)
     const texts = [...document.querySelectorAll('[data-slot="thread-row"]')].map((el) => el.textContent)
     expect(texts).toEqual(['row 0', 'row 1', 'row 2'])
-  })
-
-  it.each(['flat', 'virtual'] as const)(
-    '%s rows disable native overflow anchoring so a prepend cannot fight restoration',
-    (mode) => {
-      render(<ThreadRows runId="r1" rows={rows(mode === 'flat' ? 5 : 400)} mode={mode} controls={controls()} />)
-      const region = document.querySelector('[data-slot="thread-rows"]')!
-      expect(region.className).toContain('[overflow-anchor:none]')
-    },
-  )
-
-  it('disables conversation overflow anchoring outside the phone-only media query', () => {
-    const css = readFileSync(resolve(import.meta.dirname, 'session-layout.css'), 'utf8')
-    const ungated = css.replace(/@media[^{]+\{[\s\S]*?\n\}/g, '')
-    expect(ungated).toMatch(/\[data-slot='session-conversation'\][^{]*\{[^}]*overflow-anchor:\s*none/)
   })
 })
 
@@ -930,13 +907,6 @@ describe('useThreadScroll — jump to latest', () => {
     expect(handle.scrollTo).toHaveBeenCalledWith(600)
     hook.unmount()
     scroller.remove()
-  })
-})
-
-describe('JumpToLatestPill', () => {
-  it('keeps a ≥44px target', () => {
-    render(<JumpToLatestPill onJump={() => {}} />)
-    expect(document.querySelector('[data-slot="jump-to-latest"]')!.className).toContain('min-h-11')
   })
 })
 

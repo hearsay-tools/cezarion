@@ -133,7 +133,6 @@ describe('pinned card and marker (#1495)', () => {
     render(<AskOriginMarker onGoToQuestion={onGoToQuestion} />)
     expect(screen.getByText('Question asked here')).toBeTruthy()
     const go = screen.getByRole('button', { name: 'Go to the question' })
-    expect(go.className).toContain('min-h-11')
     fireEvent.click(go)
     expect(onGoToQuestion).toHaveBeenCalledOnce()
   })

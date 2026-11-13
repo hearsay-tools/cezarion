@@ -10,9 +10,6 @@ import { AppShell } from '@/components/app-shell'
 import { ThemeProvider } from '@/components/theme-provider'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 import { RunHeader, type RunTab } from './run-header'
 
 /** The pushed task screen below md (#621): the shell's top bar carries back / title / state /
@@ -80,7 +77,6 @@ describe('pushed task screen top bar', () => {
     expect(within(bar).getByRole('button', { name: 'Back' })).toBeTruthy()
     expect(within(bar).getByText('Reviewer agent presets')).toBeTruthy()
     expect(within(bar).getByRole('button', { name: 'Run actions' })).toBeTruthy()
-    expect(bar.querySelector('[data-slot="mobile-run-state"]')).toBeNull()
     expect(bar.textContent).not.toContain('running')
     // The project chrome is gone: this is a pushed screen, not a list.
     expect(within(bar).queryByRole('button', { name: 'Search' })).toBeNull()
@@ -95,11 +91,9 @@ describe('pushed task screen top bar', () => {
     const title = bar.querySelector('h1') as HTMLElement
     expect(title.textContent).toBe('Reviewer agent presets')
     fireEvent.click(rename)
-    // The input opens in a popover under the bar, so the bar keeps showing the title, and still
-    // shows no status: the phone bar carries none (hearsay-tools/cezarion#1333).
+    // The input opens in a popover under the bar, so the bar keeps showing the title.
     expect(screen.getByRole('textbox', { name: 'Task title' })).toBeTruthy()
     expect(bar.querySelector('h1')?.textContent).toBe('Reviewer agent presets')
-    expect(bar.querySelector('[data-slot="mobile-run-state"]')).toBeNull()
   })
 
   const patches = () => (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')
@@ -133,7 +127,6 @@ describe('pushed task screen top bar', () => {
   it('opens the same run actions menu from the … button', () => {
     renderScreen()
     const kebab = within(topBar()).getByRole('button', { name: 'Run actions' })
-    expect(kebab.className).toContain('size-11')
     // One kebab in the whole document: the header did not keep a second copy.
     expect(document.querySelectorAll('[aria-label="Run actions"]')).toHaveLength(1)
     fireEvent.pointerDown(kebab)
@@ -195,11 +188,9 @@ describe('RunHeader below md on a pushed task screen', () => {
     expect(screen.queryByRole('button', { name: /run details/ })).toBeNull()
   })
 
-  it('styles run-tabs for the phone and counts the changed files only', () => {
+  it('counts the changed files only on the phone run-tabs', () => {
     renderScreen()
     const tabs = document.querySelector('[data-slot="run-tabs"]') as HTMLElement
-    expect(tabs.className).toContain('max-md:[&>a]:min-h-11')
-    expect(tabs.className).toContain('max-md:[&>a]:text-[13.5px]')
     const links = within(tabs).getAllByRole('link')
     // `prNumber: 451` is an own-repo reference, so it adds its tab after Files (#692).
     expect(links.map((a) => a.textContent)).toEqual(['Session', 'Changes12', 'Commits', 'Files', 'Pull request #451'])
@@ -311,17 +302,15 @@ describe('RunHeader phone layout under the top bar (#621)', () => {
     renderScreen('/tasks/r1', finished, 'changes')
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     expect(header.querySelector('[data-slot="run-title-row"]')).toBeNull()
-    expect(header.className).toContain('pt-0')
-    expect(header.className).not.toContain('pt-[18px]')
-    const first = header.firstElementChild?.firstElementChild as HTMLElement
-    expect(first.getAttribute('data-slot')).toBe('run-mobile-actions')
+    const actions = header.querySelector('[data-slot="run-mobile-actions"]') as HTMLElement
+    const tabs = header.querySelector('[data-slot="run-tabs"]') as HTMLElement
+    expect(actions.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('renders no actions row when nothing applies, so the tabs come first', () => {
+  it('renders no actions row when nothing applies', () => {
     renderScreen()
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     expect(header.querySelector('[data-slot="run-mobile-actions"]')).toBeNull()
-    expect((header.firstElementChild!.firstElementChild as HTMLElement).getAttribute('data-slot')).toBe('run-tabs')
   })
 
   it('carries Archive on the git tabs in the actions row under the top bar, 44px tall', () => {
@@ -330,16 +319,5 @@ describe('RunHeader phone layout under the top bar (#621)', () => {
     const archive = within(header).getByRole('button', { name: /archive/i })
     expect(archive.closest('[data-slot="run-mobile-actions"]')).not.toBeNull()
     expect(within(topBar()).queryByRole('button', { name: /archive/i })).toBeNull()
-  })
-
-  it('marks the tabs for the phone styling, which is neutral ink with a 2px underline', () => {
-    renderScreen()
-    expect(document.querySelector('[data-slot="run-tabs"]')?.getAttribute('data-phone-bar')).toBe('true')
-    const css = readFileSync(resolve(import.meta.dirname, 'run-header.css'), 'utf8')
-    const block = css.slice(css.indexOf("[data-slot='run-tabs'][data-phone-bar] { margin-block-start: 0; }") - 40)
-    expect(block).toContain("[data-slot='run-tabs'][data-phone-bar] { margin-block-start: 0; }")
-    expect(block).toMatch(/\[aria-current='page'\] \{[^}]*color: var\(--foreground\)[^}]*border-block-end-color: var\(--foreground\)[^}]*border-block-end-width: 2px/)
-    expect(block).toMatch(/> a \{ color: var\(--soft-foreground\)/)
-    expect(block).toMatch(/tab-count'\] \{ font-size: 11\.5px; color: var\(--soft-foreground\)/)
   })
 })

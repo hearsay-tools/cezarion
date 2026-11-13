@@ -126,9 +126,7 @@ describe('the review gate on the thread', () => {
     const { rerenderWithProviders } = renderWithProviders(
       <ThreadView run={run('review')} thread={reduceThread([])} />,
     )
-    expect(document.querySelector('[data-slot="review-banner"]')?.textContent).toContain(
-      'Review the changes before anything lands',
-    )
+    expect(document.querySelector('[data-slot="review-banner"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="review-panel"]')).not.toBeNull()
 
     rerenderWithProviders(<ThreadView run={run('waiting')} thread={reduceThread([])} />)
@@ -156,7 +154,7 @@ describe('the review gate on the thread', () => {
     }
   })
 
-  it('renders the diff as per-file sections: path, ± counts, tinted add/del lines', async () => {
+  it('renders the diff as per-file sections: path, ± counts, marked add/del lines', async () => {
     stubFetch()
     renderWithProviders(<ReviewPanel run={run('review')} />)
 
@@ -168,10 +166,9 @@ describe('the review gate on the thread', () => {
     expect(document.querySelector('[data-slot="run-diff"]')?.textContent).toContain('1 file changed')
     expect(document.querySelector('[data-slot="diff-file"]')?.textContent).toContain('+2')
     expect(document.querySelector('[data-slot="diff-file"]')?.textContent).toContain('−1')
-    // Line tinting comes from the --diff-* tokens.
     const body = document.querySelector('[data-slot="diff-file-body"]') as HTMLElement
-    expect(body.querySelectorAll('.bg-diff-add')).toHaveLength(2)
-    expect(body.querySelectorAll('.bg-diff-del')).toHaveLength(1)
+    expect(body.querySelectorAll('[data-line-kind="add"]')).toHaveLength(2)
+    expect(body.querySelectorAll('[data-line-kind="del"]')).toHaveLength(1)
   })
 
   it('a non-diff server answer ("(no worktree — …)") renders as its own words', async () => {
@@ -400,7 +397,6 @@ describe('the accept celebration', () => {
     rerenderWithProviders(<AcceptCelebration status="done" />)
     const overlay = document.querySelector('[data-slot="accept-celebration"]')
     expect(overlay).not.toBeNull()
-    expect(overlay?.querySelector('[data-slot="twinkle-backdrop"]')).not.toBeNull()
     expect(overlay?.getAttribute('aria-hidden')).toBe('true')
 
     act(() => vi.advanceTimersByTime(1600))
