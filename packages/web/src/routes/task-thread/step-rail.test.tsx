@@ -1,10 +1,10 @@
 import { STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { StepState, StepStatus } from '@open-mercato/cezar-api-client'
+import type { RunStatus, StepState, StepStatus } from '@open-mercato/cezar-api-client'
 
-import { activeStepIndex, railProgress, railVisual, StepRail, WorkflowSteps, type RailVisual } from './step-rail'
+import { activeStepIndex, railProgress, railSteps, railVisual, StepRail, type RailRun, type RailVisual } from './step-rail'
 
 afterEach(cleanup)
 
@@ -97,74 +97,52 @@ describe('StepRail', () => {
   })
 })
 
-describe('activeStepIndex — who the summary speaks for', () => {
+describe('activeStepIndex — who the Workflow row speaks for', () => {
   it('points at the first in-flight step, else the last (a finished run reads "N of N")', () => {
-    expect(activeStepIndex([step('a', 'done'), step('b', 'running'), step('c', 'pending')])).toBe(1)
-    expect(activeStepIndex([step('a', 'done'), step('b', 'done')])).toBe(1)
-    expect(activeStepIndex([step('a', 'pending'), step('b', 'pending')])).toBe(0)
+    expect(activeStepIndex(undefined, [step('a', 'done'), step('b', 'running'), step('c', 'pending')])).toBe(1)
+    expect(activeStepIndex(undefined, [step('a', 'done'), step('b', 'done')])).toBe(1)
+    expect(activeStepIndex(undefined, [step('a', 'pending'), step('b', 'pending')])).toBe(0)
     // An empty list has no index to point at; 0 keeps `steps[index]` undefined rather than
     // handing back a -1 that would silently address the wrong element.
-    expect(activeStepIndex([])).toBe(0)
+    expect(activeStepIndex(undefined, [])).toBe(0)
   })
 
   // hearsay-tools/cezarion#1478 review: a skipped step never runs, so it is not the next step.
   it('passes over a skipped step to the next one still to run', () => {
-    expect(activeStepIndex([step('a', 'done'), step('b', 'skipped'), step('c', 'pending')])).toBe(2)
+    expect(activeStepIndex(undefined, [step('a', 'done'), step('b', 'skipped'), step('c', 'pending')])).toBe(2)
+  })
+
+  // hearsay-tools/squawk#2589: a Continue step stays `waiting` while a later one runs.
+  const continued = [...Array.from({ length: 7 }, (_, i) => step(`s${i + 1}`, 'waiting')), step('s8', 'running')]
+
+  it("follows the run's current step past the earlier parked steps", () => {
+    expect(activeStepIndex('s8', continued)).toBe(7)
+  })
+
+  it('names the last active step when the run names none', () => {
+    expect(activeStepIndex(undefined, continued)).toBe(7)
+    expect(activeStepIndex('gone', continued)).toBe(7)
+  })
+
+  it('names the last step that ran when a finished run names none', () => {
+    expect(activeStepIndex(undefined, [step('a', 'done'), step('b', 'cancelled'), step('c', 'skipped')])).toBe(1)
   })
 })
 
-describe('WorkflowSteps — the collapsible header summary', () => {
-  const steps = [
-    step('implement', 'done', { name: 'Do the task' }),
-    step('verify', 'running', { name: 'Verify', kind: STEP_KIND.check }),
-    step('review', 'pending', { name: 'Review' }),
-  ]
-  /** Unique per test — the expand memory below is module-level and keyed by run id. */
-  let seq = 0
-  const freshRun = () => `run-steps-${(seq += 1)}`
+describe('railSteps — a finished run draws no live step (hearsay-tools/squawk#2589)', () => {
+  const steps = [step('a', 'done'), step('b', 'waiting'), step('c', 'running'), step('d', 'review'), step('e', 'pending')]
+  const statuses = (run: RailRun) => railSteps(run).map((s) => s.status)
 
-  it('renders nothing without steps', () => {
-    render(<WorkflowSteps runId={freshRun()} steps={[]} />)
-    expect(document.querySelector('[data-slot="workflow-steps"]')).toBeNull()
+  it.each<[RunStatus, StepStatus]>([
+    ['done', 'done'],
+    ['failed', 'failed'],
+    ['cancelled', 'cancelled'],
+  ])('a %s run settles its open steps to its outcome and its unreached steps to skipped', (status, outcome) => {
+    expect(statuses({ status, steps })).toEqual(['done', outcome, outcome, outcome, 'skipped'])
+    expect(railProgress(railSteps({ status, steps }))).toBe(1)
   })
 
-  it('collapsed by default: names the active step, one dot per step, and hides the full rows', () => {
-    render(<WorkflowSteps runId={freshRun()} steps={steps} />)
-    const summary = document.querySelector('[data-slot="workflow-steps"]')!
-    expect(summary.textContent).toContain('Verify')
-    expect(summary.textContent).toContain('step 2 of 3')
-    const dots = [...document.querySelectorAll('[data-slot="step-dot"]')]
-    expect(dots.map((dot) => dot.getAttribute('data-visual'))).toEqual(['done', 'active', 'pending'])
-    // The full rows are not mounted until the user expands.
-    expect(document.querySelector('[data-slot="step-row"]')).toBeNull()
-  })
-
-  it('expands to the full rail on click', () => {
-    render(<WorkflowSteps runId={freshRun()} steps={steps} />)
-    fireEvent.click(screen.getByRole('button'))
-    const rows = [...document.querySelectorAll('[data-slot="step-row"]')]
-    expect(rows.map((row) => row.getAttribute('data-visual'))).toEqual(['done', 'active', 'pending'])
-    expect(rows[1]!.textContent).toContain('check · step 2 of 3')
-  })
-
-  it('remembers an explicit expand per run across remounts — a tab switch must not collapse it', () => {
-    const runId = freshRun()
-    const first = render(<WorkflowSteps runId={runId} steps={steps} />)
-    fireEvent.click(screen.getByRole('button'))
-    expect(document.querySelector('[data-slot="step-row"]')).not.toBeNull()
-    first.unmount()
-
-    // Same run, remounted by another task route's RunHeader: still expanded.
-    render(<WorkflowSteps runId={runId} steps={steps} />)
-    expect(document.querySelector('[data-slot="step-row"]')).not.toBeNull()
-  })
-
-  it('does not leak that choice to a different run — a fresh run opens collapsed', () => {
-    const first = render(<WorkflowSteps runId={freshRun()} steps={steps} />)
-    fireEvent.click(screen.getByRole('button'))
-    first.unmount()
-
-    render(<WorkflowSteps runId={freshRun()} steps={steps} />)
-    expect(document.querySelector('[data-slot="step-row"]')).toBeNull()
+  it.each<RunStatus>(['queued', 'running', 'waiting', 'review'])('a %s run keeps its steps as stored', (status) => {
+    expect(railSteps({ status, steps })).toBe(steps)
   })
 })

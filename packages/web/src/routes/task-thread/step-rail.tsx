@@ -1,9 +1,7 @@
 import { LoaderCircleIcon } from 'lucide-react'
-import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon } from '@/components/design-icons'
-import { useState } from 'react'
+import { CircleCheckIcon, CircleIcon, CircleXIcon } from '@/components/design-icons'
 
-import type { StepState, StepStatus } from '@open-mercato/cezar-api-client'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import type { ApiRun, RunStatus, StepState, StepStatus } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
 
 /**
@@ -101,93 +99,37 @@ function RailIcon({ visual }: { visual: RailVisual }) {
   }
 }
 
-/** The step the summary line speaks for: the first ACTIVE step (running/waiting/review); else the
- *  next step still to run (first pending), so a not-yet-started or between-steps run reads honestly;
- *  else the last step, so a finished workflow reads "step N of N". */
-export function activeStepIndex(steps: ReadonlyArray<Pick<StepState, 'status'>>): number {
-  const active = steps.findIndex((step) => railVisual(step.status) === 'active')
+/** A run the rail reads: its steps, its status and the step it runs. */
+export type RailRun = Pick<ApiRun, 'status' | 'currentStepId' | 'steps'>
+
+/** The step status a finished run's open steps take: its own outcome. */
+const OUTCOME: Partial<Record<RunStatus, StepStatus>> = { done: 'done', failed: 'failed', cancelled: 'cancelled' }
+
+/** The steps as the rail draws them. A finished run has no live step: an open step takes the run's
+ *  outcome, and a step it never reached never runs. The server leaves open steps on finished runs
+ *  (a failed run keeps its waiting step for Continue; older records keep them all), so the cockpit
+ *  must not draw them as running (hearsay-tools/squawk#2589, hearsay-tools/squawk#2590). */
+export function railSteps(run: RailRun): StepState[] {
+  const outcome = OUTCOME[run.status]
+  if (!outcome) return run.steps
+  return run.steps.map((step) =>
+    railVisual(step.status) === 'active' ? { ...step, status: outcome }
+      : step.status === 'pending' ? { ...step, status: 'skipped' }
+        : step)
+}
+
+/** The step the Workflow row speaks for, in `steps` as `railSteps` returns them: the run's current
+ *  step; else the last ACTIVE step, as a parked step stays `waiting` while a later one runs; else the
+ *  next step still to run, so a run between steps reads honestly; else the last step that ran. */
+export function activeStepIndex(currentStepId: string | undefined, steps: ReadonlyArray<Pick<StepState, 'id' | 'status'>>): number {
+  const current = steps.findIndex((step) => step.id === currentStepId)
+  if (current >= 0) return current
+  const active = steps.reduce((last, step, index) => railVisual(step.status) === 'active' ? index : last, -1)
   if (active >= 0) return active
   // `pending` itself, not the pending VISUAL: a skipped step shares the empty circle but never
   // runs, so it is not the next step (hearsay-tools/cezarion#1478 review).
   const pending = steps.findIndex((step) => step.status === 'pending')
   if (pending >= 0) return pending
-  // `steps.length - 1` would hand an empty list back a -1 that indexes nothing; 0 keeps every
-  // caller's `steps[index]` honest (undefined for an empty list, never a silent wrong element).
-  return Math.max(0, steps.length - 1)
-}
-
-/** One status dot in the collapsed summary — the rail's four glyphs compressed to a color.
- *  Amber (`bg-pending`) stays a dot-only color per the guardian rule. */
-function StepDot({ visual }: { visual: RailVisual }) {
-  const tone =
-    visual === 'done'
-      ? 'bg-success'
-      : visual === 'failed'
-        ? 'bg-danger'
-        : visual === 'active'
-          ? 'bg-pending'
-          : 'bg-soft-foreground'
-  return (
-    <span
-      aria-hidden
-      data-slot="step-dot"
-      data-visual={visual}
-      className={cn('size-1.5 rounded-full', tone, visual === 'active' && 'animate-pulse motion-reduce:animate-none')}
-    />
-  )
-}
-
-/** Expand memory per run id — the same module-level map the Agents dock keeps (`openByRun` in
- *  agents-dock.tsx), for the same reason: `RunHeader` is rendered separately by each of the four
- *  task routes, so without it a Session → Changes → Commits hop would throw the reader's explicit
- *  expand away every time. Session-lifetime only; no server persistence invented for it. */
-const openByRun = new Map<string, boolean>()
-
-/**
- * The step rail as it sits in the run header: a ONE-LINE summary by default — a dot per step,
- * the current step's name, its position, and the progress bar — so the header stays shallow and
- * the thread gets the vertical room. Clicking it expands the full `StepRail`.
- * Collapsed by default because the summary already answers "where is this run?" at a glance;
- * an explicit expand is remembered for that run across tab switches.
- */
-export function WorkflowSteps({ runId, steps }: { runId: string; steps: StepState[] }) {
-  const [open, setOpen] = useState(() => openByRun.get(runId) ?? false)
-  if (steps.length === 0) return null
-  const toggle = (next: boolean) => {
-    openByRun.set(runId, next)
-    setOpen(next)
-  }
-  const index = activeStepIndex(steps)
-  const current = steps[index]!
-  const pct = railProgress(steps) * 100
-  return (
-    <Collapsible data-slot="workflow-steps" open={open} onOpenChange={toggle} className="min-w-0">
-      <CollapsibleTrigger
-        aria-label={`Workflow: ${current.name}, step ${index + 1} of ${steps.length}`}
-        className="group flex min-h-11 w-full items-center gap-2 text-left text-xs text-muted-foreground hover:text-foreground md:min-h-[30px] md:gap-2.5"
-      >
-        <span data-slot="step-dots" className="flex shrink-0 items-center gap-1">
-          {steps.map((step) => (
-            <StepDot key={step.id} visual={railVisual(step.status)} />
-          ))}
-        </span>
-        <span className="min-w-0 max-w-[45%] shrink truncate font-semibold text-foreground">{current.name}</span>
-        <span className="shrink-0 text-soft-foreground tabular-nums">
-          step {index + 1} of {steps.length}
-        </span>
-        <span data-slot="step-summary-progress" className="h-0.5 min-w-[36px] flex-1 overflow-hidden rounded-full bg-muted">
-          <span className="block h-full rounded-full bg-pending" style={{ width: `${pct}%` }} />
-        </span>
-        <ChevronDownIcon
-          aria-hidden
-          className="size-4 shrink-0 text-soft-foreground transition-transform group-data-[state=open]:rotate-180"
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="pt-2">
-          <StepRail steps={steps} />
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  )
+  // 0 for an empty list keeps every caller's `steps[index]` undefined, never a -1.
+  return steps.reduce((last, step, index) => step.status === 'skipped' ? last : index, 0)
 }
