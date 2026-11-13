@@ -72,3 +72,50 @@ test('manual replay accepts an inclusive single-second creation window',async()=
  assert.equal(m.complete,true);assert.equal(m.start,instant);assert.equal(m.end,instant);
  assert.ok(h.calls.length>0);
 });
+test('every GitHub quota failure is counted, even below the recurrence threshold, and none is filed',async()=>{
+ const h=harness();recurring(h);
+ // Each run's request ID differs, so each line has its own signature and no
+ // pattern recurs.
+ for(const [id,request,at] of [[10,'08C0:1C9592:4FCCB:842A3:6AF6010B','18:10:19'],[20,'1440:4495E:83B2DE:1A20552:6AF6012D','18:10:53'],[30,'D078:25955F:A505FA:204CE77:6AF6013F','18:11:11']])
+  h.state.logs.set(id,`##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID ${request} and timestamp 2026-11-12 ${at} UTC.`);
+ const m=await sweep(h);
+ assert.equal(m.complete,true);assert.equal(m.patterns,0);
+ assert.deepEqual(m.suppressed,{occurrences:3,runs:[1,2,3]});
+ assert.equal(h.state.issues.length,0);assert.equal(h.state.comments.length,0);
+});
+test('quota counts survive a failed issue read',async()=>{
+ const h=harness();recurring(h);
+ // Runs 1-3 recur and need an issue read; run 4 failed on the quota only.
+ const quotaRun=run(4);h.state.runs.push(quotaRun);h.state.attempts.set('4:1',quotaRun);h.state.jobs.set('4:1',[job(40)]);
+ h.state.logs.set(40,'##[error]API rate limit exceeded for installation.');
+ const request=h.github.request;
+ h.github.request=async(route,args)=>{if(route==='GET /repos/{owner}/{repo}/issues')throw Object.assign(new Error('read failed'),{status:500});return request(route,args);};
+ const m=await sweep(h);
+ assert.equal(m.complete,false);assert.deepEqual(m.suppressed,{occurrences:1,runs:[4]});
+});
+const QUOTA_THEN_ERROR='##[error]API rate limit exceeded for installation.\nTypeError: build failed';
+test('quota steps with another error are classified by that error, and the quota is still counted',async()=>{
+ const h=harness();recurring(h);for(const id of [10,20,30])h.state.logs.set(id,QUOTA_THEN_ERROR);
+ const m=await sweep(h);
+ assert.equal(m.complete,true);assert.equal(m.patterns,1);assert.deepEqual(m.suppressed,{occurrences:3,runs:[1,2,3]});
+ assert.equal(h.state.issues.length,1);assert.match(h.state.issues[0].body,/TypeError: build failed/);assert.doesNotMatch(h.state.issues[0].body,/rate limit/i);
+ assert.equal(m.reports.occurrences,3);
+});
+test('a step the pre-change reporter recorded under its quota cause keeps that report',async()=>{
+ const {causesForStep}=require('./failure-diagnostics.cjs');
+ const {defaultBodyFor,commentFor}=require('./failure-issue-writer.cjs');
+ const h=harness();recurring(h);for(const id of [10,20,30])h.state.logs.set(id,QUOTA_THEN_ERROR);
+ // Run 1 was reported by the pre-change reporter: main's selection, the quota line.
+ const r=run(1),j=job(10),step=j.steps[0],runUrl=`https://github.com/hearsay-tools/cezarion/actions/runs/1/attempts/1`;
+ const {independentCause,...quota}=causesForStep({run:r,job:j,step,log:QUOTA_THEN_ERROR})[0];
+ assert.ok(independentCause);
+ const signature=`<!-- cez-failure-signature:v1:${quota.signature} -->`,occurrence=`<!-- cez-failure-occurrence:v1:1:1:10:${step.number}:${quota.signature} -->`;
+ h.state.issues.push({number:1,state:'open',title:'[Task]: Investigate verification failure',body:defaultBodyFor({cause:quota,runUrl,signature,occurrence})});
+ h.state.comments.push({id:1,issue_number:1,body:commentFor({cause:quota,run:r,job:j,step,runUrl,jobUrl:'https://github.com/hearsay-tools/cezarion/actions/runs/1/job/10',occurrence})});
+ const m=await sweep(h);
+ assert.equal(m.complete,true);assert.equal(m.patterns,1);
+ // Runs 2 and 3 file the TypeError; run 1 keeps its quota report untouched.
+ assert.equal(h.state.issues.length,2);assert.match(h.state.issues[1].body,/TypeError: build failed/);
+ assert.equal(m.reports.occurrences,2);
+ assert.deepEqual(h.state.comments.filter(c=>c.issue_number===1).map(c=>c.id),[1]);
+});
