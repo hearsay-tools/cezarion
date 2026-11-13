@@ -11,6 +11,7 @@ import {
   defaultWorkspaceConfig,
   effectiveComposerDefault,
   loadWorkspaceConfig,
+  loadWorkspaceConfigSync,
   mergeWriteWorkspaceConfig,
   workspaceConfigBackupPath,
   type WorkspaceConfig,
@@ -287,6 +288,27 @@ describe('workspace config', () => {
     const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.projects.map((p) => p.id)).toEqual(['good', 'also-good']);
     expect(config.projects[1]?.source).toBe('local');
+  });
+
+  // hearsay-tools/squawk#3493: realpath on Windows answers `C:\…`, so a POSIX-only check
+  // dropped every project the Windows cockpit registered.
+  describe('project roots follow the host platform', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const onPlatform = (value: NodeJS.Platform) => Object.defineProperty(process, 'platform', { ...platform, value });
+    afterEach(() => { Object.defineProperty(process, 'platform', platform); });
+    const load = (roots: string[]) => loadWorkspaceConfigSync('config.json', undefined, () =>
+      JSON.stringify({ projects: roots.map((root, n) => ({ ...project(`p${n}`), root })) })).projects.map((p) => p.root);
+
+    it('keeps Windows absolute roots on Windows and drops a drive-relative one', () => {
+      onPlatform('win32');
+      expect(load(['C:\\Users\\dev\\repo', 'c:/Users/dev/repo', '\\\\server\\share\\repo', 'C:repo', 'repo']))
+        .toEqual(['C:\\Users\\dev\\repo', 'c:/Users/dev/repo', '\\\\server\\share\\repo']);
+    });
+
+    it('keeps only POSIX absolute roots on Linux', () => {
+      onPlatform('linux');
+      expect(load(['/srv/repo', 'C:\\Users\\dev\\repo', '\\\\server\\share\\repo'])).toEqual(['/srv/repo']);
+    });
   });
 
   it('per-project maxParallel: keeps a valid value, degrades a bad one to inherit, absent stays absent', async () => {
