@@ -184,3 +184,70 @@ test('routing failure retries without duplicating saved evidence or routing clos
  h.state.issues.find(issue=>issue.body.includes('cez-main-ci-attempt:')).state='closed';await reportFailure(h.options);
  assert.equal(h.calls.filter(([route])=>route.endsWith('/labels')).length,count);
 });
+
+test('main CI that failed only on the GitHub API rate limit files nothing and routes no summary',async()=>{
+ const h=harness();mainCi(h);
+ h.state.log='##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
+ const result=await reportFailure(h.options);
+ assert.equal(result.reported,0);assert.equal(h.state.issues.length,0);
+ assert.ok(!h.calls.some(([route])=>route.startsWith('POST ')));
+ assert.match(h.messages.at(-1),/failed only for transient causes; nothing to report\.$/);
+});
+test('the reporter reads issues updated since the failed run was created',async()=>{
+ const h=harness();await reportFailure(h.options);
+ const reads=h.calls.filter(([route])=>route==='GET /repos/{owner}/{repo}/issues').map(([,args])=>[args.state,args.since]);
+ assert.deepEqual(reads,[['open',undefined],['all',h.state.run.created_at]]);
+});
+// Replays must return what the first pass filed. Job A's step has one of four
+// log shapes; job B always fails with its own error, so every attempt has a
+// main-CI summary. The first pass is either the pre-change reporter (main's
+// selection: first error line, quota causes filed) or this reporter.
+const QUOTA='##[error]API rate limit exceeded for installation.';
+const STEP_LOGS={'quota-only':QUOTA,'quota-then-error':`${QUOTA}\nTypeError: build failed`,'error-then-quota':`TypeError: build failed\n${QUOTA}`,'error-only':'TypeError: build failed'};
+function twoFailedJobs(h,log) {
+ mainCi(h);
+ const a=h.state.jobs.find(job=>job.conclusion==='failure');
+ h.state.jobs.push({...structuredClone(a),id:a.id+1,name:'Cockpit browser E2E shard 2/8'});
+ h.state.jobLogs={[a.id]:log,[a.id+1]:'ReferenceError: other job failed'};
+}
+// What main's reporter left: one issue and comment per v1 cause (each
+// signature distinct here), then the main-CI summary over both.
+async function reportWithMainSelection(h) {
+ const {causesForStep}=require('./failure-diagnostics.cjs');
+ const {defaultBodyFor,commentFor}=require('./failure-issue-writer.cjs');
+ const {routeMainCiSummary}=require('./main-ci-summary.cjs');
+ const github=h.options.github, base={owner:'hearsay-tools',repo:'cezarion'}, run=h.state.run;
+ const runUrl=`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/attempts/${run.run_attempt}`;
+ const reports=[];
+ for(const job of h.state.jobs.filter(entry=>entry.conclusion==='failure')) {
+  const step=job.steps.find(entry=>entry.conclusion==='failure');
+  for(const {independentCause,...cause} of causesForStep({run,job,step,log:h.state.jobLogs[job.id]})) {
+   const signature=`<!-- cez-failure-signature:v1:${cause.signature} -->`;
+   const occurrence=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature} -->`;
+   const {data:issue}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:'[Task]: Investigate failure',labels:['area-ci'],body:defaultBodyFor({cause,runUrl,signature,occurrence})});
+   await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:issue.number,body:commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/job/${job.id}`,occurrence})});
+   reports.push(issue);
+  }
+ }
+ await routeMainCiSummary({github,...base,run,issues:[],reports});
+}
+const snapshot=h=>({issues:h.state.issues.length,comments:h.state.comments.length,summary:h.state.issues.find(issue=>/cez-main-ci-attempt/.test(issue.body))?.body});
+const FIRST_PASS={'reported by main':reportWithMainSelection,'not reported':h=>reportFailure(h.options)};
+const REPLAYS={'replay with logs':()=>{},'replay without logs':h=>{for(const id of Object.keys(h.state.jobLogs))h.state.jobLogs[id]=null;}};
+for(const [seedName,firstPass] of Object.entries(FIRST_PASS)) for(const [shape,log] of Object.entries(STEP_LOGS)) for(const [replayName,prepare] of Object.entries(REPLAYS)) {
+ const exception=seedName==='not reported' && shape==='quota-only' && replayName==='replay without logs';
+ test(`${seedName}, ${shape}, ${replayName}: ${exception?'known limitation: one unknown-cause report and summary drift':'issues, comments and summary unchanged'}`,async()=>{
+  const h=harness();twoFailedJobs(h,log);await firstPass(h);
+  const first=snapshot(h);assert.ok(first.summary);
+  prepare(h);
+  if(exception) {
+   // The first pass filed nothing for the quota-only step and left no marker,
+   // so with its log gone the replay cannot tell it from an unknown failure.
+   await assert.rejects(reportFailure(h.options),/Main CI summary manifest changed/);
+   assert.equal(h.state.issues.length,first.issues+1);assert.equal(h.state.comments.length,first.comments+1);
+   return;
+  }
+  await reportFailure(h.options);
+  assert.deepEqual(snapshot(h),first);
+ });
+}

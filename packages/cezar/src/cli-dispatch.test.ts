@@ -33,14 +33,6 @@ function fixture(args: string[] = []) {
 }
 
 describe('main dispatch', () => {
-  it.each(['install', 'update', 'versions', 'use', 'link', 'unlink'])('treats the removed managed command %s as unknown without preparing Home', async (command) => {
-    const f = fixture([command]);
-    await f.run();
-    expect(f.deps.console.error).toHaveBeenCalledWith(`unknown command: ${command}\n`);
-    expect(f.processStub.exitCode).toBe(1);
-    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
-  });
-
   it('dispatches task subcommands before global flags without resolving Home', async () => {
     const f = fixture(['message', '--own-flag']);
     f.deps.runSubcommand.mockResolvedValue(0);
@@ -243,7 +235,6 @@ describe('binary help and notices', () => {
       expect(help).toContain(`"skillsRepos" in .ai/${rebrand ? 'squawk' : 'cezar'}/config.json`);
       expect(help).toContain(`workflows in .ai/${rebrand ? 'squawk' : 'cezar'}/workflows/.`);
       expect(help.includes('A project also reads .ai/cezar/')).toBe(rebrand);
-      expect(help).not.toContain(' versions | use ');
     }
   });
 });

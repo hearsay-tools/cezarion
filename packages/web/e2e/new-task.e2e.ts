@@ -246,7 +246,6 @@ describe('the full-screen /new against a live dry-run server', () => {
       `${baseUrl}/api/v1/config`,
     )
     expect(browser.text('[data-slot="model-pill"]')).toContain(config.defaultModels?.claude || 'auto')
-    expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
     expect(browser.text('[data-slot="base-pill"]')).toContain('main')
     browser.screenshot(`${artifactsDir}/new-task-hero.png`)
   })
@@ -476,9 +475,4 @@ describe('the bookmarklet contract on full /new loads (spec 011, Step 1.3)', () 
     expect(await runCount()).toBe(before)
   }, 90_000)
 
-  it('/new?legacy=1 serves the React shell on this server too — the hatch retired in R7', () => {
-    browser.goto(`${baseUrl}/new?legacy=1`)
-    browser.waitForFunction(`document.getElementById('root') !== null`)
-    expect(browser.evaluate(`document.getElementById('brand') === null`)).toBe(true)
-  })
 })

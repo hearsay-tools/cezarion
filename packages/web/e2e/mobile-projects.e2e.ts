@@ -1,4 +1,3 @@
-import { productName } from './product'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -100,16 +99,14 @@ describe('mobile top bar and project drawer', () => {
         return {
           menu: [menu.width, menu.height], picker: picker ? [picker.width, picker.height] : null,
           search: [search.width, search.height],
-          wordmark: [...top.querySelectorAll('span')].some((node) => node.textContent.trim() === ${JSON.stringify(productName('Cezarion'))}),
           overflow: document.documentElement.scrollWidth - innerWidth,
         }
-      })()`) as { menu: number[]; picker: number[] | null; search: number[]; wordmark: boolean; overflow: number }
+      })()`) as { menu: number[]; picker: number[] | null; search: number[]; overflow: number }
       expect(bar.menu[0]).toBeGreaterThanOrEqual(44)
       expect(bar.menu[1]).toBeGreaterThanOrEqual(44)
       expect(bar.search[0]).toBeGreaterThanOrEqual(44)
       expect(bar.search[1]).toBeGreaterThanOrEqual(44)
       expect(bar.picker?.[1]).toBeGreaterThanOrEqual(44)
-      expect(bar.wordmark).toBe(false)
       expect(bar.overflow).toBeLessThanOrEqual(0)
 
       // The pills are the rail's.

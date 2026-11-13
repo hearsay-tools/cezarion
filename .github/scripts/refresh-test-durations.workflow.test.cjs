@@ -42,6 +42,6 @@ test('refresh artifacts carry only the manifests, and app-authored PRs receive n
   assert.equal(app.with['permission-pull-requests'], 'write');
   assert.equal(app.with['permission-contents'], undefined);
   for (const step of [...measure.steps, ...propose.steps].filter(step => step.uses)) {
-    assert.match(step.uses, /^[\w-]+\/[\w-]+@[0-9a-f]{40}$/);
+    assert.match(step.uses, /^(?:[\w-]+\/[\w-]+@[0-9a-f]{40}|\.\/\.github\/actions\/node-dist)$/);
   }
 });

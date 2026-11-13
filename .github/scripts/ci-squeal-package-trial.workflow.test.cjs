@@ -85,9 +85,10 @@ test('the trial reads only, holds no token, never fails its job, and installs th
   assert.equal(step(job, 'Set up pnpm').with.version, step(jobs['squeal-gate-trial'], 'Set up pnpm').with.version);
   assert.equal(step(job, 'Set up Squeal').uses, step(jobs.vitest, 'Set up Squeal').uses);
   assert.equal(step(job, 'gate').if,
-    "steps.commits.outcome == 'success' && steps.pnpm.outcome == 'success' && steps.node.outcome == 'success' && steps.install.outcome == 'success' && steps.squeal_setup.outcome == 'success'",
+    "steps.commits.outcome == 'success' && steps.pnpm.outcome == 'success' && (steps.node.outcome == 'success' || steps.node_fallback.outcome == 'success') && steps.install.outcome == 'success' && steps.squeal_setup.outcome == 'success'",
     'never the gate on the unchanged checkout or an unprepared environment');
-  for (const [id, name] of [['pnpm', 'Set up pnpm'], ['node', 'Set up Node.js'], ['install', 'Install pnpm dependencies'], ['squeal_setup', 'Set up Squeal']])
+  // node_fallback runs instead of node when the trial commit predates the node-dist action.
+  for (const [id, name] of [['pnpm', 'Set up pnpm'], ['node', 'Set up Node.js'], ['node_fallback', 'Set up Node.js without node-dist'], ['install', 'Install pnpm dependencies'], ['squeal_setup', 'Set up Squeal']])
     assert.equal(job.steps.find((s) => s.name === name).id, id, name);
   assert.match(step(job, 'Report the trial').env.SETUP, /steps\.pnpm\.outcome.*steps\.node\.outcome.*steps\.install\.outcome.*steps\.squeal_setup\.outcome/);
   for (const name of ['Report the trial', 'Upload the trial report']) assert.equal(step(job, name).if, 'always()', name);

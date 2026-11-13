@@ -110,10 +110,9 @@ describe('elsewhereSignal / menuButtonLabel', () => {
 })
 
 describe('mobile top bar', () => {
-  it('drops the wordmark and keeps the project button and search', () => {
+  it('keeps the project button and search in the top bar', () => {
     renderShell('/p/cezarion/', nav())
     const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
-    expect(within(bar).queryByText(`${productName("Cezarion")}`)).toBeNull()
     expect(within(bar).getByRole('button', { name: 'Search' })).toBeTruthy()
     const picker = within(bar).getByRole('button', { name: 'Switch project: cezarion' })
     expect(picker.textContent).toContain('cezarion')

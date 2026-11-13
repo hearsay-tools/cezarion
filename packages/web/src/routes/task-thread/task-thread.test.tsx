@@ -1086,7 +1086,7 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="note-line"]')?.textContent).toContain('re-queued')
   })
 
-  it('groups session activity into the dock and leaves the header rail off the session tab', () => {
+  it('groups session activity into the dock', () => {
     renderView(
       <ThreadView
         run={run('running', {
@@ -1099,9 +1099,6 @@ describe('ThreadView', () => {
       />,
     )
     expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
-    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
-    expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
     const dock = document.querySelector('[data-slot="run-activity-dock"]')!
     expect(dock.textContent).toContain('Activity')
     // The status is the same line the header pill reads (hearsay-tools/cezarion#1333).
@@ -1206,7 +1203,7 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
   })
 
-  it('a plan in the stream → the dock above the composer area + the compact header mirror', () => {
+  it('a plan in the stream → the dock above the composer area', () => {
     const withPlan: RunEvent[] = [
       ...EVENTS,
       line(8, 'plan.updated', {
@@ -1220,14 +1217,10 @@ describe('ThreadView', () => {
     renderView(<ThreadView run={run('running')} thread={reduceThread(withPlan)} />)
     expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
-    // The plan is a section of the one dock now — its own card is gone, its meter moved.
-    expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
+    // The plan is a section of the one dock now; its meter moved into it.
     expect(
       document.querySelector('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')?.textContent,
     ).toBe('1 of 3 complete')
-    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
-    // The workflow rail has moved into the session dock, so the header stays clear.
-    expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
   })
 
   it('plan-kind tool cards stay out of the thread — the dock is their surface (#382)', () => {

@@ -4,7 +4,7 @@
 // fails when package code starts reading such a path, so a new reader cannot
 // hide behind the docs-only skip. node:test entry files need no scan: the
 // unconditional unit-tests job runs every one of them, so a check on a
-// docs-only file belongs there (packages/cezar/test/unit/message-docs.test.ts).
+// docs-only file belongs there (packages/cezar/test/unit/).
 //
 // It is a text scan, not a parser. It counts a path token that names a tracked
 // docs-only file, resolved from the naming file's directory or one of its
@@ -158,9 +158,9 @@ test('the skipped node:test entries match the package node:test scripts', async 
   const scanned = trackedFiles().filter(file => packaged.test(file)).sort();
   assert.ok(selected.every(file => nodeTestEntry.test(file)));
   assert.deepEqual(selected, scanned);
-  assert.ok(nodeTestEntry.test('packages/cezar/test/unit/message-docs.test.ts'));
+  assert.ok(nodeTestEntry.test('packages/cezar/test/unit/skill-dirs.test.ts'));
   assert.ok(!nodeTestEntry.test('packages/cezar/test/unit/test-env-lease-churn.testkit.mjs'));
-  assert.ok(!nodeTestEntry.test('packages/cezar/src/delegation/message-docs.test.ts'));
+  assert.ok(!nodeTestEntry.test('packages/cezar/src/delegation/cli.test.ts'));
 });
 
 test('every test-read document is a tracked file', () => {

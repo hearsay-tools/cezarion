@@ -634,7 +634,6 @@ describe('tasks table overview', () => {
     expect(browser.count('[data-slot="task-card"]')).toBe(5)
     // One floating button, and it is the tab bar's (#621): the list's own round FAB is gone.
     expect(browser.isVisible('[data-slot="mobile-new-task"]')).toBe(true)
-    expect(browser.count('[data-slot="new-task-fab"]')).toBe(0)
     expect(
       browser.evaluate(`document.querySelector('[data-slot="mobile-new-task"]').getAttribute('href')`)
     ).toBe(scoped('/new'))

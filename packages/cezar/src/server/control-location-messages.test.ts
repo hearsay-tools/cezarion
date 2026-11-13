@@ -7,7 +7,7 @@ import { NO_WEBHOOK_ERROR } from './start-run-options.ts';
 describe('control direction message bytes', () => {
   it('preserves the webhook refusal and CLI help line', () => {
     expect(NO_WEBHOOK_ERROR).toBe('this project has no task webhook — add a webhook with Task notifications on in Settings → General → Webhooks, or start without notify');
-    expect(taskHelp().split('\n')).toContain('notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;');
+    expect(taskHelp().split('\n')).toContain('notify: start notifies the task webhook set in Settings → General only with --notify;');
   });
 
   it('preserves both provider refusals', () => {

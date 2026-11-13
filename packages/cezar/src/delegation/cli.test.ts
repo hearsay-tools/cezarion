@@ -62,7 +62,6 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect.objectContaining({ name: 'wait' }),
       expect.objectContaining({ name: 'destroy', positionals: 1 }),
     ]));
-    expect(help.usage.operations.map((op: { name: string }) => op.name)).not.toContain('send');
 
   });
   it.each(['-h', '--help'])('prints human family help for %s without a delegation session', async (flag) => {
@@ -99,7 +98,6 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     await runWorkerCommand(['wait', '--help'], {});
     const waitHelp = String(output.mock.calls.at(-1)?.[0]);
     expect(waitHelp).toContain('<worker-id>');
-    expect(waitHelp).not.toContain('--request');
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
   });

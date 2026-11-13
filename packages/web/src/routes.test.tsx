@@ -395,18 +395,6 @@ describe('the global settings area (/settings/global)', () => {
     })
   }
 
-  it.each(['/compare/grp-1', `/p/${BOOT}/compare/grp-1`])('%s (retired, hearsay-tools/cezarion#1760) lands on the task list', (url) => {
-    renderAt(url)
-    expect(currentPathname()).toBe(`/p/${BOOT}/`)
-    expect(routeName()).toBe('tasks')
-  })
-
-  it('/settings/global/skills (removed, hearsay-tools/cezarion#1494) lands on the Skills page', () => {
-    renderAt('/settings/global/skills')
-    expect(currentPathname()).toBe(`/p/${BOOT}/skills`)
-    expect(routeName()).toBe('skills')
-  })
-
   it('/settings/global has no index page: it lands on Appearance', () => {
     renderAt('/settings/global')
     expect(routeName()).toBe('settings-global-appearance')

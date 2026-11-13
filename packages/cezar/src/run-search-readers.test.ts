@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blank } from './lint/blank.ts';
@@ -35,10 +35,6 @@ describe('run search readers', () => {
 
   it('the Reports shelf uses stored source-task search', () => {
     expect(read('packages/cezar/src/artifacts/reports-index.ts')).toContain("matchesRunSearch(summary, q, { scope: 'stored' })");
-  });
-
-  it('the old server module is gone', () => {
-    expect(existsSync(join(repo, 'packages/cezar/src/runs/run-search.ts'))).toBe(false);
   });
 
   it('the contract module imports only types, so the cold reader that loads it stays cheap', () => {

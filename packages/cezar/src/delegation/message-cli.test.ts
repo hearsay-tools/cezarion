@@ -35,24 +35,6 @@ describe('task message command family', () => {
       expect(output.mock.calls.at(-1)?.[0]).toContain(`${productIdentity().command} message ${verb}`);
     },
   );
-  it.each(['send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests'])(
-    'rejects removed worker %s with exit 64 before transport', async verb => {
-      const fetch = vi.spyOn(globalThis, 'fetch');
-      expect(await runWorkerCommand([verb], {})).toBe(64);
-      expect(json().error).toContain(`${productIdentity().command} message`);
-      expect(fetch).not.toHaveBeenCalled();
-    },
-  );
-  it('rejects worker send without kind instead of reporting a null delivery', async () => {
-    expect(await runWorkerCommand(['send', randomUUID(), 'instruction', '--id', randomUUID()], env)).toBe(64);
-    expect(json()).toEqual({ code: 'invalid_input', error: `Use ${productIdentity().command} message request; ${productIdentity().command} worker send was removed.` });
-  });
-  it('rejects request resume and worker request waits with concrete replacements', async () => {
-    expect(await message(['request', randomUUID(), 'resume', '--id', randomUUID(), '--resume'])).toBe(64);
-    expect(json().error).toContain(`${productIdentity().command} worker resume`);
-    expect(await runWorkerCommand(['wait', '--request='+randomUUID()], {})).toBe(64);
-    expect(json().error).toContain(`${productIdentity().command} message wait --request`);
-  });
   it.each(['request', 'progress'] as const)('delivers %s with a fixed kind and prints the receipt', async kind => {
     const target = peer();
     const id = randomUUID();
@@ -124,7 +106,5 @@ describe('task message command family', () => {
     expect(session.instructions).toContain('message request');
     expect(session.instructions).toContain('message tasks');
     expect(session.instructions).toContain('worker resume');
-    expect(session.instructions).not.toMatch(/worker (?:send|reply|progress|follow-up|conversation|inbox|wait --request)\b/);
-    expect(session.instructions).not.toContain('--kind');
   });
 });

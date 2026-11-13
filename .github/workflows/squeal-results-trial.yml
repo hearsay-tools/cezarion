@@ -32,6 +32,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
+      # inputs.sha can predate the node-dist action, so install Node with the action from
+      # this workflow's commit. The checkout below replaces the workspace.
+      - name: Check out the Node install action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: node-dist-tooling
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/node-dist
+          sparse-checkout-cone-mode: false
+      - name: Install Node.js from nodejs.org
+        id: node
+        uses: ./node-dist-tooling/.github/actions/node-dist
+        with:
+          node-version: ${{ inputs.node }}
+
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,7 +62,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ inputs.node }}
+          node-version: ${{ steps.node.outputs.node-version }}
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

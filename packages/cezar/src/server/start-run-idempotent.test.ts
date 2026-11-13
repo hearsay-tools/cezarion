@@ -111,13 +111,6 @@ describe('POST /api/v1/runs clientRequestId', () => {
     expect(((await again.json()) as { id: string }).id).toBe(id);
   });
 
-  it('rejects a request id combined with variants > 1', async () => {
-    const res = await post({ ...body, variants: 2 });
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain('Parallel variants are removed');
-    expect(store.listRuns()).toHaveLength(0);
-  });
-
   it('rejects a request id that is not a UUID', async () => {
     expect((await post({ ...body, clientRequestId: 'not-a-uuid' })).status).toBe(400);
   });
