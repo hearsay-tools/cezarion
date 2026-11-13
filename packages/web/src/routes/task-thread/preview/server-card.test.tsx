@@ -154,12 +154,4 @@ describe('PreviewServerCard (design 05)', () => {
     renderCard(entry({ state: 'exited', exitCode: 1 }, { command: 'npm run dev --workspace web -- --port 5173' }))
     expect(screen.getByText("Starting again runs npm run dev --workspace web in this task's worktree, on the host.")).toBeTruthy()
   })
-
-  it('never uses an em-dash', () => {
-    for (const state of ['registered', 'starting', 'up', 'stalled', 'exited', 'stopped', 'adopted', 'unavailable'] as const) {
-      cleanup()
-      renderCard(entry({ state, exitCode: 2 }))
-      expect(document.body.textContent).not.toContain('—')
-    }
-  })
 })

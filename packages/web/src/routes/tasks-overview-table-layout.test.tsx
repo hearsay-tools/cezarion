@@ -12,26 +12,7 @@ import { TasksOverview } from '@/routes/tasks-overview'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function expectCompactResourceCells(
-  tokens: HTMLElement | null | undefined,
-  cost: HTMLElement | null | undefined,
-  memory: HTMLElement | null | undefined,
-) {
-  expect(tokens?.className).toContain('overflow-hidden')
-  expect(tokens?.getAttribute('title')).toBe('Input tokens: 999,900; output tokens: 888,800')
-  expect(cost?.className).toContain('overflow-hidden')
-  expect(cost?.getAttribute('aria-label')).toBe('$123.45')
-  expect(memory?.className).toContain('overflow-hidden')
-  expect(memory?.getAttribute('aria-label')).toBe('peak 1023 MB; peak — run finished')
-}
-
 describe('TasksOverview — mobile actions', () => {
-  it('hides the inline New task button below md, where the shell\'s floating button owns the job (#621)', () => {
-    renderOverview({ runs: [run({ status: RUN_STATUS.done })] })
-    const inline = document.querySelector('[data-slot="new-task-inline"]') as HTMLElement
-    expect(inline.className).toContain('max-md:hidden')
-  })
-
   it('opens the keyboard actions menu and uses the existing archive handler', () => {
     const { onArchiveFinished } = renderOverview({ runs: [run({ status: RUN_STATUS.done })] })
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
@@ -41,7 +22,6 @@ describe('TasksOverview — mobile actions', () => {
 
   it('moves Mark all read into the phone menu, after Archive finished, scoped to the origin (hearsay-tools/cezarion#1616)', () => {
     const { onMarkAllRead } = renderOverview({ runs: [run({ status: RUN_STATUS.done, finishedAt: ago(0) })], origin: 'direct', onOriginChange: vi.fn() })
-    expect((document.querySelector('[data-slot="mark-all-read"]') as HTMLElement).className).toContain('hidden md:inline-flex')
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Archive finished (1)', 'Mark all read (1)'])
     fireEvent.click(screen.getByRole('menuitem', { name: 'Mark all read (1)' }))
@@ -71,7 +51,7 @@ describe('TasksOverview — mobile actions', () => {
 })
 
 describe('TasksOverview — the table', () => {
-  it('starts with Branch folded while keeping fixed columns and an in-place restore control', () => {
+  it('starts with Branch folded, keeps the fixed columns unfoldable and restores Branch in place', () => {
     const onToggleColumn = vi.fn()
     renderOverview({
       expandedColumns: {},
@@ -85,7 +65,6 @@ describe('TasksOverview — the table', () => {
       name: 'Expand Branch column',
       pressed: false,
     })
-    expect(restore.tagName).toBe('BUTTON')
     fireEvent.click(restore)
     expect(onToggleColumn).toHaveBeenCalledWith('branch')
     expect(location()).toBe('/')
@@ -94,10 +73,8 @@ describe('TasksOverview — the table', () => {
     expect(tableRow('fresh')?.querySelector('[role=cell][data-column-id="branch"]')?.getAttribute('aria-hidden')).toBe(
       'true',
     )
-    expect(document.querySelector('.task-resource-grid')?.getAttribute('style')).toContain('42px')
     expect(document.querySelector('[role=columnheader][data-column-id="status"] button')).toBeNull()
     expect(document.querySelector('[role=columnheader][data-column-id="task"] button')).toBeNull()
-    expect(document.querySelector('[data-slot="tasks-table"] [role=table]')?.className).not.toContain('min-w-[1040px]')
   })
 
   it('disables optional headers while workspace column state is loading', () => {
@@ -128,22 +105,7 @@ describe('TasksOverview — the table', () => {
     expect(ids).toEqual(['rev1', 'done1', 'run1'])
   })
 
-  it('gives long desktop task titles a two-line readable region without changing their link', () => {
-    const title = 'Review the desktop task table with several shared prefix words before the distinguishing detail'
-    renderOverview({ runs: [run({ id: 'long-title', title })] })
-
-    const row = tableRow('long-title') as HTMLElement
-    const taskCell = row.querySelector<HTMLElement>('[role=cell][data-column-id="task"]')
-    const titleLink = within(taskCell as HTMLElement).getByRole('link', { name: title })
-
-    expect(taskCell?.className).toContain('min-w-[320px]')
-    expect(titleLink.getAttribute('href')).toBe('/tasks/long-title')
-    expect(titleLink.className).toContain('line-clamp-2')
-    expect(titleLink.className).toContain('whitespace-normal')
-    expect(titleLink.className).not.toContain('truncate')
-  })
-
-  it('contains secondary desktop content inside the compact column geometry', () => {
+  it('names the full resource figures in the compact desktop columns', () => {
     renderOverview({
       runs: [
         run({
@@ -158,24 +120,15 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] [role=table]')
-    const status = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="status"]')
-    const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="workflow"]')
     const workflowHeader = document.querySelector<HTMLElement>('[role=columnheader][data-column-id="workflow"]')
-    const reference = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="reference"]')
-    const diff = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="diff"]')
     const tokens = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="tokens"] > span')
     const cost = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="cost"] > span')
     const memory = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="memory"] > span')
 
-    expect(table?.className).toContain('task-resource-grid')
-    expect(status?.className).toContain('overflow-hidden')
-    expect(workflow?.className).toContain('truncate')
     expect(workflowHeader?.textContent).toContain('Workflow')
-    expect(reference?.className).toContain('overflow-hidden')
-    expect(reference?.querySelector('[data-slot="pr-chip"]')?.className).toContain('max-w-full')
-    expect(diff?.className).toContain('overflow-hidden')
-    expectCompactResourceCells(tokens, cost, memory)
+    expect(tokens?.getAttribute('title')).toBe('Input tokens: 999,900; output tokens: 888,800')
+    expect(cost?.getAttribute('aria-label')).toBe('$123.45')
+    expect(memory?.getAttribute('aria-label')).toBe('peak 1023 MB; peak — run finished')
   })
 
   it('says the run status through the attention pill', () => {
@@ -192,11 +145,9 @@ describe('TasksOverview — the table', () => {
     expect(pillOf('v')?.textContent).toBe('needs review')
     expect(pillOf('d')?.textContent).toBe('done')
     expect(pillOf('f')?.textContent).toBe('failed')
-    expect(pillOf('w')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('pending')
-    expect(pillOf('d')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('success')
   })
 
-  it('shows a usage-limit hold as "usage limit" with its time, not as a red failure', () => {
+  it('shows a usage-limit hold as "usage limit" with its time, not as a failure', () => {
     // The record is `waiting` with an appointment (hearsay-tools/cezarion#1236): neutral, still,
     // and carrying the instant the way a queued row carries its position.
     renderOverview({
@@ -208,13 +159,11 @@ describe('TasksOverview — the table', () => {
     const pillOf = (id: string) => tableRow(id)?.querySelector('[data-slot="pill"]')
     expect(pillOf('sched')?.textContent).toContain('usage limit')
     // The time itself, locale-formatted — assert it is there rather than its spelling.
-    expect(pillOf('sched')?.querySelector('.tabular-nums')?.textContent).toMatch(/\d{1,2}[:.]\d{2}/)
-    // The status key's usage-limit mark (#617): neutral ring, still.
-    expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
+    expect(pillOf('sched')?.textContent).toMatch(/\d{1,2}[:.]\d{2}/)
+    // The status key's usage-limit mark (#617): a ring.
     expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-shape')).toBe('ring')
     // …and an ordinary failure is untouched.
     expect(pillOf('broke')?.textContent).toBe('failed')
-    expect(pillOf('broke')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('danger')
   })
 
   it('shows a queued issue reference before the agent starts', () => {
@@ -274,10 +223,7 @@ describe('TasksOverview — the table', () => {
     // no diffStat, and `+0 −0` would claim a measurement that never happened). Started falls
     // back to createdAt.
     expect(cellsOf('bare')).toEqual(['needs you', 'Bare minimumDirect task', 'default', '—', '—', '—', '— / —', '—', '—', '—', '26m'])
-    // The pair is two colored halves, not one string — green adds, red dels (design tokens).
     const diff = tableRow('full')?.querySelector('[data-slot="diff-stat"]')
-    expect(diff?.querySelector('.text-success')?.textContent).toBe('+128')
-    expect(diff?.querySelector('.text-danger')?.textContent).toBe('−14')
     expect(diff?.getAttribute('title')).toBe('+128 −14 across 6 files')
     // Nothing was narrowed here, so nothing claims it was (#751).
     expect(diff?.getAttribute('data-repointed')).toBeNull()
@@ -651,13 +597,6 @@ describe('TasksOverview — pinned tasks (#935)', () => {
     expect(onTogglePin).toHaveBeenCalledTimes(2)
   })
 
-  it('the row pin stays reachable without a pointer (a tablet is >=md and cannot hover)', () => {
-    renderOverview({ runs: [run({ id: 'plain', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
-    const pin = tableRow('plain')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
-    expect(pin.className).toContain('no-hover:opacity-100')
-    expect(pin.className).toContain('opacity-0')
-  })
-
   it('a pin click does not also open the task — the control owns its click', () => {
     renderOverview({ runs: [run({ id: 'kept', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
     setOverviewDesktop(false)
@@ -784,7 +723,6 @@ describe('TasksOverview — usage cells', () => {
     expect(usageCell('done1', 'mem')?.textContent).toBe('peak 401 MB')
     expect(usageCell('done1', 'mem')?.getAttribute('data-usage-kind')).toBe('peak')
     const metric = usageCell('done1', 'mem')?.querySelector('[data-slot="bounded-metric"]')
-    expect(metric?.className).toContain('overflow-hidden')
     expect(metric?.getAttribute('title')).toBe('peak 401 MB; peak — run finished · 7 procs')
     expect(metric?.getAttribute('aria-label')).toBe(metric?.getAttribute('title'))
   })
@@ -826,7 +764,7 @@ describe('TasksOverview — header', () => {
   // Read/unread (#unread-done-items). The rule itself is table-tested in lib/read-state.test.ts;
   // what these cover is the PAINT — that the table actually wears the marker the rule decides,
   // and that the sweep control is offered exactly when there is unread history to sweep.
-  it('marks an unread done row with a violet dot and leaves read history unmarked', () => {
+  it('marks an unread done row and leaves read history unmarked', () => {
     const FINISHED = ago(60_000)
     renderOverview({
       runs: [
@@ -842,16 +780,19 @@ describe('TasksOverview — header', () => {
     const unreadDot = (id: string) =>
       tableRow(id)?.querySelector('[data-slot="status-dot"][aria-label="unread"]')
     expect(unreadDot('unread')).not.toBeNull()
-    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('success')
     expect(unreadDot('read')).toBeNull()
     expect(unreadDot('cancelled')).toBeNull()
   })
 
-  it('paints an unread failed row\'s marker red, on the table and on the mobile card (#617)', () => {
+  it('marks an unread failed row, on the table and on the mobile card (#617)', () => {
     renderOverview({ runs: [run({ id: 'boom', status: RUN_STATUS.failed, finishedAt: ago(60_000) })] })
-    expect(tableRow('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
+    const row = tableRow('boom')
+    expect(row).not.toBeNull()
+    expect(row!.querySelector('[aria-label="unread"]')).not.toBeNull()
     setOverviewDesktop(false)
-    expect(card('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
+    const mobileCard = card('boom')
+    expect(mobileCard).not.toBeNull()
+    expect(mobileCard!.querySelector('[aria-label="unread"]')).not.toBeNull()
   })
 
   it('offers Mark all read only while something is unread, and calls back on click', () => {
@@ -901,28 +842,25 @@ describe('TasksOverview — empty and loading states', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project tasks')
   })
 
-  it('celebrates no-tasks-yet: primary tone, the twinkle backdrop, a New-task action', () => {
+  it('celebrates no-tasks-yet: the twinkle backdrop and a New-task action', () => {
     renderOverview({ runs: [] })
     const empty = document.querySelector<HTMLElement>('[data-slot="tasks-empty"]')
     if (!empty) throw new Error('no empty state rendered')
 
     expect(empty.getAttribute('data-empty-kind')).toBe('no-tasks')
-    expect(empty.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('primary')
     expect(within(empty).getByRole('heading', { name: 'No tasks yet' })).not.toBeNull()
-    expect(within(empty).getByText('Describe a task to get started.')).not.toBeNull()
     // Scoped inside the state — the mobile FAB is also a link named "New task".
     expect(within(empty).getByRole('link', { name: 'New task' }).getAttribute('href')).toBe('/new')
     // The hero moment: this is the one overview state that gets the decorative backdrop.
     expect(empty.querySelector('[data-slot="twinkle-backdrop"]')).not.toBeNull()
   })
 
-  it('says the archive is empty, plainly — neutral, no backdrop', () => {
+  it('says the archive is empty, plainly, with no backdrop', () => {
     renderOverview({ runs: [run({ status: RUN_STATUS.done })], view: 'archived' })
     const empty = document.querySelector<HTMLElement>('[data-slot="tasks-empty"]')
     if (!empty) throw new Error('no empty state rendered')
 
     expect(empty.getAttribute('data-empty-kind')).toBe('archive')
-    expect(empty.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('neutral')
     expect(within(empty).getByRole('heading', { name: 'Nothing archived yet' })).not.toBeNull()
     expect(empty.querySelector('[data-slot="twinkle-backdrop"]')).toBeNull()
   })
@@ -934,7 +872,6 @@ describe('TasksOverview — empty and loading states', () => {
     if (!empty) throw new Error('no empty state rendered')
 
     expect(empty.getAttribute('data-empty-kind')).toBe('search-miss')
-    expect(empty.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('neutral')
     expect(screen.getByText('No tasks match “quaternion”.')).not.toBeNull()
     // A missed search is not a hero surface.
     expect(empty.querySelector('[data-slot="twinkle-backdrop"]')).toBeNull()

@@ -180,7 +180,7 @@ function SwitcherButton({ current, agentShown, ...rest }: { current: PreviewServ
 /** The switcher's entry for the page an agent drives (hearsay-tools/cezarion#784). */
 function AgentPageItem({ shown, live, onSelect }: { shown: boolean; live: boolean; onSelect: () => void }) {
   return (
-    <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" onSelect={onSelect}>
+    <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" aria-current={shown || undefined} onSelect={onSelect}>
       <StatusDot tone={live ? 'success' : 'neutral'} aria-hidden="true" />
       <span className="font-semibold">Agent's page</span>
       <span className="ml-auto text-xs text-muted-foreground">agent-browser</span>
@@ -297,7 +297,7 @@ function ToolbarSwitcher({ props, input, focusUrlAfterMenu }: { props: PreviewTo
         {servers.map(server => {
           const look = serverStatus(entryFor(server, props.serverStates))
           return (
-            <DropdownMenuItem key={server.port} className="min-h-11 gap-2.5 md:min-h-0" onSelect={() => props.onPickServer(server.port)}>
+            <DropdownMenuItem key={server.port} className="min-h-11 gap-2.5 md:min-h-0" aria-current={current?.port === server.port || undefined} onSelect={() => props.onPickServer(server.port)}>
               <StatusDot tone={look.tone} shape={look.ring ? 'ring' : 'filled'} pulse={look.pulse} aria-hidden="true" />
               <span className="font-semibold">{server.label}</span>
               <span className="font-mono text-muted-foreground">:{server.port}</span>
@@ -391,14 +391,19 @@ function ToolbarViewport({ props }: { props: PreviewToolbarProps }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
-        <DropdownMenuItem className="gap-2.5" onSelect={() => props.onViewport('fit')}>
+        <DropdownMenuItem className="gap-2.5" aria-current={viewport === 'fit' || undefined} onSelect={() => props.onViewport('fit')}>
           <MaximizeIcon aria-hidden="true" />
           Fit
           <span className="ml-auto text-xs text-muted-foreground">pane size</span>
           {viewport === 'fit' ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
         </DropdownMenuItem>
         {VIEWPORT_PRESETS.map(({ w, h, icon: Icon }) => (
-          <DropdownMenuItem key={`${w}x${h}`} className="gap-2.5 font-mono" onSelect={() => props.onViewport({ w, h })}>
+          <DropdownMenuItem
+            key={`${w}x${h}`}
+            className="gap-2.5 font-mono"
+            aria-current={(viewport !== 'fit' && viewport.w === w && viewport.h === h) || undefined}
+            onSelect={() => props.onViewport({ w, h })}
+          >
             <Icon aria-hidden="true" />
             {w} × {h}
             {viewport !== 'fit' && viewport.w === w && viewport.h === h ? <CheckIcon className="ml-auto size-4" aria-hidden="true" /> : null}

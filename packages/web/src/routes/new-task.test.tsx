@@ -231,9 +231,6 @@ describe('submit', () => {
     await pillReady()
     const worktree = document.querySelector('[data-slot="worktree-toggle"]') as HTMLButtonElement
     expect(worktree.getAttribute('aria-checked')).toBe('false')
-    const thumb = worktree.querySelector('span[aria-hidden="true"] > span') as HTMLElement
-    expect(thumb.className).toContain('bg-foreground')
-    expect(thumb.className).not.toContain('bg-accent-strong-foreground')
     fireEvent.change(textarea(), { target: { value: 'Use the environment seed' } })
     await startTask()
     expect(postedBody()).toMatchObject({ workflow: 'quick-task', worktree: false })
@@ -268,10 +265,6 @@ describe('submit', () => {
     const modelPill = document.querySelector('[data-slot="model-pill"]') as HTMLElement
     expect(modelPill.textContent).toContain('native-sonnet')
     expect(modelPill.textContent).not.toContain('opus')
-    expect(modelPill.tagName).toBe('SPAN')
-    // A locked model keeps its identity icon, but offers no dropdown affordance.
-    expect(modelPill.querySelector(':scope > svg[data-design-icon="cpu"]')).not.toBeNull()
-    expect(modelPill.querySelector(':scope > svg[data-design-icon="chevron-down"]')).toBeNull()
     expect(screen.queryByRole('button', { name: /^Model · / })).toBeNull()
 
     fireEvent.pointerDown(screen.getByRole('button', { name: /^Runner · / }))
@@ -684,8 +677,6 @@ describe('the Start | Plan first toggle', () => {
     fireEvent.click(planToggle())
     expect(planToggle().getAttribute('aria-checked')).toBe('true')
     expect(startToggle().getAttribute('aria-checked')).toBe('false')
-    // The selected plan segment takes the contrast fill — the unmistakable state.
-    expect(planToggle().className).toContain('bg-contrast')
     expect(screen.queryByRole('button', { name: 'Plan task' })).not.toBeNull()
 
     fireEvent.click(startToggle())

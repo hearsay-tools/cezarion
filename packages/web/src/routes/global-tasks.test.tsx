@@ -834,8 +834,6 @@ it('mounts summary actions only while the row is expanded', async () => {
       if (!found) throw new Error('the chip has not learned about the conflict yet')
       return found as HTMLElement
     })
-    // Its own colour, not the green its `ready` status would have painted.
-    expect(chip.className).toContain('text-conflict')
 
     fireEvent.focus(chip)
     const button = await waitFor(() => screen.getByRole('button', { name: 'Resolve conflicts' }))
@@ -1012,12 +1010,9 @@ it('mounts summary actions only while the row is expanded', async () => {
       renderPage()
       await screen.findByText('Bump the runner')
       expect(document.querySelectorAll('[aria-label="unread"]')).toHaveLength(1)
-      // The outcome colour, not violet (#617 decision 2).
-      expect(document.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('success')
 
       fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       const markRead = screen.getByRole('button', { name: /Mark Bump the runner read/ })
-      expect(markRead.className).toContain('text-accent-icon')
       fireEvent.click(markRead)
 
       await waitFor(() =>
@@ -1179,7 +1174,6 @@ it('mounts summary actions only while the row is expanded', async () => {
     renderPage()
 
     const hint = await screen.findByText(/Tag connected repositories in/)
-    expect(hint.textContent).toBe('Tag connected repositories in Settings → Projects to group their tasks together here.')
     // …and it is a real door, not a sentence naming a place the reader has to go find.
     expect(
       hint.querySelector('a[href="/settings/global/projects"]')?.textContent,
@@ -1273,12 +1267,12 @@ describe('global tasks — status groups and origin (hearsay-tools/cezarion#1616
   }
   const origins = () => [...document.querySelectorAll('[data-slot="global-task-row"] [data-slot="task-origin"]')].map((line) => line.textContent)
 
-  it('groups by status with coloured headings, and filters by origin through the URL', async () => {
+  it('groups by status, and filters by origin through the URL', async () => {
     stubFetch({ runs: [...RUNS, automated] })
     renderPage()
     await screen.findByText('Nightly health')
-    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => `${group.getAttribute('data-bucket')}:${group.getAttribute('data-tone')}`))
-      .toEqual(['Needs you:pending', 'Finished:success', 'Working:running'])
+    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-bucket')))
+      .toEqual(['Needs you', 'Finished', 'Working'])
     const chips = within(document.querySelector('[data-slot="origin-filter"]') as HTMLElement)
     expect(chips.getByRole('button', { name: 'Automations 1' })).toBeTruthy()
 

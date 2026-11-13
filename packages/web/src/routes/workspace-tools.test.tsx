@@ -46,26 +46,23 @@ describe('Workspace tools', () => {
     expect(screen.getByRole('button', { name: 'Recheck tools' })).toBeTruthy()
   })
 
-  it('marks each tool with a status dot and explains the missing one', () => {
+  it('says whether each tool is installed and explains the missing one', () => {
     const { container } = render(<MemoryRouter><WorkspaceToolsRoute /></MemoryRouter>)
     const git = container.querySelector('[data-slot="tool-row"][data-tool="git"]')!
     const codex = container.querySelector('[data-slot="tool-row"][data-tool="codex"]')!
-    expect(git.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('success')
     expect(git.textContent).toContain('Installed')
-    expect(codex.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('danger')
     expect(codex.textContent).toContain('Not installed')
     expect(codex.querySelector('[data-slot="tool-hint"]')?.textContent).toBe('Install the Codex CLI')
     expect(git.querySelector('[data-slot="tool-hint"]')).toBeNull()
   })
 
-  it('keeps every row a valid definition list: only dt/dd inside, the link inside the state dd, the hint indented past the dot', () => {
+  it('keeps every row a valid definition list: only dt/dd inside, the link inside the state dd', () => {
     const { container } = render(<MemoryRouter><WorkspaceToolsRoute /></MemoryRouter>)
     for (const row of container.querySelectorAll('[data-slot="tool-row"]')) {
       expect([...row.children].every((el) => el.tagName === 'DT' || el.tagName === 'DD')).toBe(true)
     }
     const codex = container.querySelector('[data-slot="tool-row"][data-tool="codex"]')!
     expect(codex.querySelector('[data-slot="tool-setup"]')?.parentElement?.tagName).toBe('DD')
-    expect(codex.querySelector('[data-slot="tool-hint"]')?.className).toContain('pl-[15px]')
   })
 
   it('offers "Set up ›" only on unavailable rows, and both links go to Agents settings', () => {

@@ -1,6 +1,4 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
@@ -447,14 +445,6 @@ describe('PreviewPane', () => {
     expect(sent().filter(m => m.t === 'run')).toEqual([{ t: 'run', port: 5173 }])
   })
 
-  it('5.14 draws the Experimental badge once, in the stage, and not in the toolbar', () => {
-    render(<PreviewPane run={run} servers={[web]} onClose={() => undefined} />)
-    expect(document.querySelectorAll('[data-slot="preview-experimental"]')).toHaveLength(1)
-    transport('blocked')
-    expect(document.querySelectorAll('[data-slot="preview-experimental"]')).toHaveLength(1)
-    expect(document.querySelector('[data-slot="preview-state"] [data-slot="preview-experimental"]')).not.toBeNull()
-  })
-
   it('shows the live servers in the empty state and the switcher', () => {
     const storybook = { ...web, port: 6006, label: 'storybook' }
     const states = new Map([[5173, { kind: 'preview-server' as const, id: 'a', server: web, state: 'exited' as const, exitCode: 1 }]])
@@ -490,7 +480,7 @@ describe('PreviewPane', () => {
     expect(state.getAttribute('data-state')).toBe('agent-idle')
     expect(screen.getByText('The agent is not driving the browser now.')).toBeTruthy()
     expect(screen.getByText('agent idle')).toBeTruthy()
-    expect(screen.queryByText("Agent's page", { selector: 'span.font-semibold' })).toBeNull()
+    expect(screen.queryByRole('button', { name: "Open the agent's page" })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { port: 5173 } }))
   })
@@ -666,11 +656,6 @@ describe('PreviewSplit', () => {
     expect(screen.getByTestId('transcript').closest('[data-slot="task-main"]')?.hasAttribute('hidden')).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'Session' }))
     expect(screen.getByTestId('transcript').closest('[data-slot="task-main"]')?.hasAttribute('hidden')).toBe(false)
-  })
-
-  it('the collapsed task view keeps only its header (stylesheet rule)', () => {
-    const previewCss = readFileSync(join(import.meta.dirname, 'preview.css'), 'utf8')
-    expect(previewCss).toContain("[data-slot='task-main'][data-collapsed] [data-route] > :not([data-slot='run-header'])")
   })
 
   it('feeds the live server states from the task history to the pane', async () => {

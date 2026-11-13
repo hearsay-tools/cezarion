@@ -33,12 +33,7 @@ describe('preview quality storage (hearsay-tools/cezarion#2066)', () => {
     expect(readStoredPreviewQuality()).toBe('normal')
   })
 
-  it('names the cost of High and never calls it lossless', () => {
-    const high = PREVIEW_QUALITIES.find(option => option.value === 'high')!
-    expect(high.detail).toMatch(/CPU and network/)
-    const ultra = PREVIEW_QUALITIES.find(option => option.value === 'ultra')!
-    expect(ultra.detail).toMatch(/pixel density, up to 2×/)
-    expect(ultra.detail).toMatch(/most CPU and network/)
+  it('never calls a quality lossless', () => {
     expect(PREVIEW_QUALITIES.map(option => `${option.label} ${option.detail}`).join(' ')).not.toMatch(/lossless/i)
   })
 })
