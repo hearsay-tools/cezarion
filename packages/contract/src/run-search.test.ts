@@ -2,7 +2,7 @@ import { RUN_STATUS } from './test-factories.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import {
   RUN_SEARCH_FIELDS, matchesRunSearch, refNumberFromUrl, searchTokens, sqlPrefilterTokens,
-  type RunSearchExtras, type RunSearchField, type RunSearchFieldId,
+  type RunSearchExtras, type RunSearchField,
 } from './run-search.ts';
 import type { RunSummary } from './runs.ts';
 
@@ -67,9 +67,8 @@ describe('matchesRunSearch (stored scope)', () => {
     expect(matchesRunSearch(summary({ title: 'Zażółć gęślą' }), 'zażółć')).toBe(true);
   });
 
-  it('matches nothing for a blank query, in either mode', () => {
+  it('matches nothing for a blank query', () => {
     expect(matchesRunSearch(summary(), '   ')).toBe(false);
-    expect(matchesRunSearch(summary(), '   ', { mode: 'phrase' })).toBe(false);
   });
 
   it('matches an automation by its name, or its id when unnamed, only when given the names (hearsay-tools/cezarion#1616)', () => {
@@ -95,8 +94,7 @@ describe('matchesRunSearch (stored scope)', () => {
 });
 
 describe('matchesRunSearch (shown scope)', () => {
-  const shown = (extras: RunSearchExtras = {}, omit?: readonly RunSearchFieldId[]) =>
-    ({ scope: 'shown' as const, extras, ...(omit ? { omit } : {}) });
+  const shown = (extras: RunSearchExtras = {}) => ({ scope: 'shown' as const, extras });
 
   it('searches the title the row prints, never the raw title or the summary it hides', () => {
     const run = summary({ title: 'plz fix', titleSummary: 'Repair the thing' });
@@ -140,28 +138,8 @@ describe('matchesRunSearch (shown scope)', () => {
     expect(references).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves out a field the reader omits, and no other', () => {
-    const run = summary({ workflowLabel: 'om-fix', workflow: 'inbox' });
-    expect(matchesRunSearch(run, 'om-fix', shown({ displayTitle: 'T' }))).toBe(true);
-    expect(matchesRunSearch(run, 'om-fix', shown({ displayTitle: 'T' }, ['workflowLabel']))).toBe(false);
-    expect(matchesRunSearch(run, 'inbox', shown({ displayTitle: 'T' }, ['workflowLabel']))).toBe(true);
-  });
-
-  it('matches the query as one phrase in phrase mode, and per token otherwise', () => {
-    const run = summary();
-    const extras = { displayTitle: 'Fix the login bug' };
-    expect(matchesRunSearch(run, 'the login', { ...shown(extras), mode: 'phrase' })).toBe(true);
-    expect(matchesRunSearch(run, 'login fix', { ...shown(extras), mode: 'phrase' })).toBe(false);
-    // Only the ends are trimmed: a double space inside the phrase is part of it.
-    expect(matchesRunSearch(run, ' the  login ', { ...shown(extras), mode: 'phrase' })).toBe(false);
-    expect(matchesRunSearch(run, 'login fix', shown(extras))).toBe(true);
-  });
-
-  it('matches a number typed alone as a reference in phrase mode, not one inside a longer phrase', () => {
-    const run = summary();
-    const references = () => [12];
-    expect(matchesRunSearch(run, ' #12 ', { ...shown({ references }), mode: 'phrase' })).toBe(true);
-    expect(matchesRunSearch(run, 'fix 12', { ...shown({ displayTitle: 'T', references }), mode: 'phrase' })).toBe(false);
+  it('matches every token on its own, in any order (hearsay-tools/squawk#1884)', () => {
+    expect(matchesRunSearch(summary(), 'login fix', shown({ displayTitle: 'Fix the login bug' }))).toBe(true);
   });
 });
 
@@ -219,8 +197,8 @@ describe('searchTokens / sqlPrefilterTokens', () => {
     expect(sqlPrefilterTokens('# fix')).toEqual(['fix']);
   });
 
-  it('prefilters the whole phrase in phrase mode', () => {
-    expect(sqlPrefilterTokens(' Fix the ', { mode: 'phrase' })).toEqual(['fix the']);
+  it('leaves out a number whose canonical spelling differs, which the predicate matches by value', () => {
+    expect(sqlPrefilterTokens('#007 #7 0 fix')).toEqual(['7', '0', 'fix']);
   });
 });
 

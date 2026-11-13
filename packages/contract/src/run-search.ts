@@ -3,8 +3,8 @@ import type { RunSummary } from './runs.ts';
 /**
  * The one rule for "does this run match what was typed" (hearsay-tools/cezarion#1807). The project
  * list, All tasks, the archived pages, the ⌘K palette and the SQL prefilter under the last two all
- * ask it, so a run found in one place is found in the others unless a reader says why not, in an
- * option of the call. A new searchable field is one entry in `RUN_SEARCH_FIELDS`.
+ * ask it, so a run found in one place is found in the others; only the scope below differs. A new
+ * searchable field is one entry in `RUN_SEARCH_FIELDS`.
  *
  * Every whitespace-separated token must match. A token matches a substring of a text field. A
  * number, with a leading `#` stripped, also matches a reference number EXACTLY and an id as a
@@ -29,9 +29,6 @@ export type RunSearchRun = Pick<RunSummary,
  */
 export type RunSearchScope = 'stored' | 'shown';
 
-/** `tokens`: every token must match, in any field. `phrase`: the trimmed query is one token. */
-export type RunSearchMode = 'tokens' | 'phrase';
-
 /**
  * Automation display names by automation id, for a search whose list shows each task's origin line
  * (hearsay-tools/cezarion#1616). With a lookup, a task an automation launched also matches by that
@@ -53,22 +50,16 @@ export interface RunSearchExtras {
   references?: (() => readonly number[]) | undefined;
 }
 
-interface SearchOptionsBase {
-  mode?: RunSearchMode;
-}
-
 /** The server's reach. Without `automationNames` the automation is not searched. */
-export interface StoredRunSearch extends SearchOptionsBase {
+export interface StoredRunSearch {
   scope?: 'stored';
   automationNames?: AutomationNames | undefined;
 }
 
 /** A list's reach: what it prints, from `extras`. */
-export interface ShownRunSearch extends SearchOptionsBase {
+export interface ShownRunSearch {
   scope: 'shown';
   extras: RunSearchExtras;
-  /** Fields this reader's rows do not print. A field added later is searched unless listed here. */
-  omit?: readonly RunSearchFieldId[];
 }
 
 export type RunSearchOptions = StoredRunSearch | ShownRunSearch;
@@ -117,9 +108,9 @@ function heldReferences(run: RunSearchRun): number[] {
 }
 
 /**
- * THE list of searchable fields. Add a field here and every reader searches it. A reader that
- * must not says so in `omit`, in its own call. The summary-sourced entries are what `runs.db`
- * stores, which is the only thing the SQL prefilter sees (`sqlPrefilterTokens`).
+ * THE list of searchable fields. Add a field here and every reader of its scopes searches it. The
+ * summary-sourced entries are what `runs.db` stores, which is the only thing the SQL prefilter
+ * sees (`sqlPrefilterTokens`).
  */
 export const RUN_SEARCH_FIELDS = [
   { id: 'title', kind: 'text', scopes: ['stored'], source: 'summary', texts: (run) => [run.title] },
@@ -144,21 +135,12 @@ export const RUN_SEARCH_FIELDS = [
   { id: 'shownReferences', kind: 'reference', scopes: ['shown'], source: 'reader', numbers: (_run, extras) => extras.references?.() ?? [] },
 ] as const satisfies readonly RunSearchField[];
 
-export type RunSearchFieldId = (typeof RUN_SEARCH_FIELDS)[number]['id'];
-
 /** The same list, typed by what a field is rather than by which fields there are. */
 const FIELDS: readonly RunSearchField[] = RUN_SEARCH_FIELDS;
 
 /** The query as lowercased, whitespace-split tokens, empties dropped. */
 export function searchTokens(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter((token) => token !== '');
-}
-
-/** What each token is matched as: the whitespace-split tokens, or the whole trimmed query. */
-function queryTokens(query: string, mode: RunSearchMode | undefined): string[] {
-  if (mode !== 'phrase') return searchTokens(query);
-  const phrase = query.trim().toLowerCase();
-  return phrase === '' ? [] : [phrase];
 }
 
 /** The origin a row prints for an automation task: its name, else its recorded id. */
@@ -180,7 +162,6 @@ interface SearchText {
 
 function searchText(run: RunSearchRun, options: RunSearchOptions): SearchText {
   const scope = options.scope ?? 'stored';
-  const omit: readonly string[] = options.scope === 'shown' ? options.omit ?? [] : [];
   const extras: RunSearchExtras = options.scope === 'shown'
     ? options.extras : { automation: storedOrigin(run, options.automationNames) };
   const prose: string[] = [];
@@ -189,7 +170,7 @@ function searchText(run: RunSearchRun, options: RunSearchOptions): SearchText {
   const buckets = { text: prose, identifier: ids, link: links };
   const numberSources: Array<() => readonly number[]> = [];
   for (const field of FIELDS) {
-    if (!field.scopes.includes(scope) || omit.includes(field.id)) continue;
+    if (!field.scopes.includes(scope)) continue;
     if (field.kind === 'reference') {
       numberSources.push(() => field.numbers(run, extras));
       continue;
@@ -206,12 +187,12 @@ function searchText(run: RunSearchRun, options: RunSearchOptions): SearchText {
 }
 
 /**
- * Whether every token of `query` matches `run`, under `options` (stored scope, every-token mode
- * and no automation names when omitted). A blank query matches nothing: a list that shows every
- * row for a blank query decides that itself.
+ * Whether every token of `query` matches `run`, under `options` (stored scope and no automation
+ * names when omitted). A blank query matches nothing: a list that shows every row for a blank
+ * query decides that itself.
  */
 export function matchesRunSearch(run: RunSearchRun, query: string, options: RunSearchOptions = {}): boolean {
-  const tokens = queryTokens(query, options.mode);
+  const tokens = searchTokens(query);
   if (tokens.length === 0) return false;
   const { prose, ids, links, references } = searchText(run, options);
   return tokens.every((token) => {
@@ -228,8 +209,14 @@ export function matchesRunSearch(run: RunSearchRun, query: string, options: RunS
 /**
  * The tokens SQL may narrow rows with, as `instr(lower(summary), ?) > 0` over the stored summary
  * JSON. Only tokens that read the same there: ASCII, since SQLite's `lower()` folds ASCII alone,
- * and without `"` or `\`, which JSON escapes. Leaving a token out only widens the prefilter;
- * `matchesRunSearch` still checks it.
+ * and without `"` or `\`, which JSON escapes. A number whose canonical spelling differs (`007`)
+ * is left out too: the predicate matches it by value, as PR 7, and the summary holds `7`. Leaving a
+ * token out only widens the prefilter; `matchesRunSearch` still checks it.
+ *
+ * A known gap stays: JavaScript `toLowerCase()` folds U+212A (Kelvin sign) to `k` and U+0130 to
+ * `i` plus a combining dot, and SQLite `lower()` folds ASCII only, so a run whose only match runs
+ * through one of them is dropped here. Closing it would change case folding for every reader, or
+ * leave the ASCII tokens `k` and `i` out of the prefilter (hearsay-tools/squawk#1884).
  *
  * A token inside a text a `reader` field could hold is left out too (today, an automation's name):
  * the summary holds the automation's id, not its name, so the row it should find would never
@@ -240,8 +227,9 @@ export function sqlPrefilterTokens(query: string, options: StoredRunSearch = {})
     .filter((field) => field.scopes.includes('stored') && field.source === 'reader')
     .flatMap((field) => field.universe?.(options) ?? [])
     .map((text) => text.toLowerCase());
-  return queryTokens(query, options.mode)
+  return searchTokens(query)
     .map((token) => token.replace(/^#/, ''))
     .filter((token) => token !== '' && /^[\x20-\x7e]+$/.test(token) && !/["\\]/.test(token))
+    .filter((token) => !/^\d+$/.test(token) || String(Number(token)) === token)
     .filter((token) => !outside.some((text) => text.includes(token)));
 }
