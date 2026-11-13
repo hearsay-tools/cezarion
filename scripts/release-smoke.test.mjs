@@ -3,7 +3,10 @@ import test from 'node:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { INSTALL_WAIT_MS, PUBLISH_WAIT_MS, bootEnv, cockpitAsset, parseArgs, registryInstall, run } from './release-smoke.mjs';
+import { createRequire } from 'node:module';
+import { INSTALL_WAIT_MS, PUBLISH_WAIT_MS, bootEnv, cockpitAsset, failureLine, parseArgs, registryInstall, run } from './release-smoke.mjs';
+
+const { causesForStep } = createRequire(import.meta.url)('../.github/scripts/failure-diagnostics.cjs');
 
 test('the smoke takes a package, an exact version and an optional upgrade source', () => {
   assert.deepEqual(parseArgs(['--package', '@hearsay-tools/squawk', '--version', '1.2.1-rc.1']),
@@ -65,7 +68,7 @@ test('the smoke install waits until the registry serves a version npm is still p
   assert.ok(installs[0].at >= 372_000);
   assert.ok(installs[0].args.includes('--prefer-online') && installs[0].args.includes('fake@1.2.1'));
   assert.ok(registry.calls.filter(call => call.command === 'view').every(call => call.args.includes('--prefer-online')));
-  assert.match(registry.logs[0], /fake@1\.2\.1 is not on the registry \(attempt 1, 0 s elapsed\): npm error 404 No match found/);
+  assert.match(registry.logs[0], /fake@1\.2\.1 is not on the registry \(attempt 1, 0 s elapsed\): 404 No match found/);
   assert.match(registry.logs.at(-1), /the registry serves fake@1\.2\.1/);
 });
 
@@ -134,6 +137,17 @@ test('an npm attempt that takes time before it fails still gets only what is lef
   assert.ok(pauses.every(p => p.at + p.ms <= PUBLISH_WAIT_MS), 'no pause runs past the bound');
   assert.deepEqual(pauses.at(-1), { at: 895_000, ms: 5_000 }, 'the last pause is cut to what is left');
   assert.deepEqual(views.at(-1), { at: PUBLISH_WAIT_MS, timeout: 15_000 }, 'the attempt at the bound gets one poll interval');
+});
+
+test('the CI failure filer reads the failure the smoke ends on, not a wait line before it', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const registry = fakeRegistry({ visibleAt: 30_000 });
+  await registryInstall(prefix, 'fake@1.2.1', registry.options());
+  const failure = failureLine(new Error('The booted server registered no project'));
+  const log = [...registry.logs, failure, '##[error]Process completed with exit code 1.'].join('\n');
+  const causes = causesForStep({ run: { id: 1, run_attempt: 1 }, job: { id: 2 }, step: { number: 5, name: 'Clean install, boot and cockpit' }, log });
+  assert.deepEqual(causes.map(cause => cause.title), [failure]);
 });
 
 // A package whose binary is a tiny server with the routes the smoke reads. Its project

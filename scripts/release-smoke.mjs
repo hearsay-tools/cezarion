@@ -74,9 +74,16 @@ function runNpm(args, { quiet = false, timeout } = {}) {
   });
 }
 
+// npm's own wording, without its `npm error` prefix: a progress line must not read as the
+// failure to .github/scripts/failure-diagnostics.cjs, which files the first such line.
 function reason(error) {
   const line = `${error.stderr ?? ''}`.split(/\r?\n/).find(text => /\S/.test(text) && !text.startsWith('npm error code '));
-  return (line ?? error.message.split('\n')[0]).trim();
+  return (line ?? error.message.split('\n')[0]).trim().replace(/^npm (?:error|ERR!) /, '');
+}
+
+// The line a failed smoke ends on, in the `Error:` form the CI failure filer reads as the cause.
+export function failureLine(error) {
+  return `release-smoke: Error: ${error.message}`;
 }
 
 // Each attempt may run for what is left of `waitMs`, and at least one poll interval, so a
@@ -244,7 +251,7 @@ export async function run({ name, version, upgradeFrom }, { install = registryIn
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   run(parseArgs(process.argv.slice(2))).catch(error => {
-    console.error(`release-smoke: ${error.message}`);
+    console.error(failureLine(error));
     process.exitCode = 1;
   });
 }
