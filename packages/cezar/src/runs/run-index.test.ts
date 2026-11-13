@@ -229,6 +229,9 @@ describe('the cold reader and the store read every repaired row alike', () => {
       referencedIssueUrl: 'https://github.com/local/repo/issues/1216',
       referencedIssueCandidates: ['https://github.com/local/repo/issues/1200', 'https://github.com/local/repo/issues/1216'] }),
     // Rule 6: a foreign reference the prompt does not corroborate is dropped once the handle is known.
+    // A declared foreign PR the task does not corroborate goes too, beside a local reference or alone.
+    base('declared-pr', { referencedPullRequestUrl: localPr, referencedPrCandidates: [localPr], pullRequests: [{ number: 812, url: 'https://github.com/foreign/repo/pull/812', source: 'declared' }] }),
+    base('declared-only', { pullRequests: [{ number: 813, url: 'https://github.com/foreign/repo/pull/813', source: 'declared' }] }),
     base('foreign', { referencedPullRequestUrl: foreignPr, referencedPrCandidates: [foreignPr], referencedIssueUrl: localPr.replace('pull/44', 'issues/45') }),
     // Rule 7: schema-3 wait fields are read into the wait list, finished or parked.
     base('monitoring', { activity: 'monitoring', monitoringWakeAt: '2026-10-06T00:00:00.000Z' }),

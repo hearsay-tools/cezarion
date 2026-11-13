@@ -1069,7 +1069,7 @@ export class RunStore extends EventEmitter {
     // `touch` per healed run: the cockpit is already live when the handle lands, so a corrected
     // chip has to reach the open page over SSE, not just the next `runs.json` write.
     let healed = false;
-    const stored = this.db?.listWhere(REFERENCED_RUN_RULE.sql).filter((row) => {
+    const stored = this.db?.listWhere(`${REFERENCED_RUN_RULE.sql} OR json_extract(summary, '$.pullRequests') IS NOT NULL`).filter((row) => {
       if (this.held.has(row.id) || this.deleted.has(row.id)) return false;
       const summary = parseStoredSummary(row.summary);
       return !summary || namesForeignReference(summary, handle);
@@ -1100,7 +1100,7 @@ export class RunStore extends EventEmitter {
   private storedScopeDiffers(row: RunRow, run: RunRecord): boolean {
     const summary = parseStoredSummary(row.summary);
     return summary?.referencedPullRequestUrl !== run.referencedPullRequestUrl ||
-      summary?.referencedIssueUrl !== run.referencedIssueUrl || summary?.issueNumber !== run.issueNumber;
+      summary?.referencedIssueUrl !== run.referencedIssueUrl || summary?.issueNumber !== run.issueNumber || !isDeepStrictEqual(summary?.pullRequests, run.pullRequests);
   }
 
   /**
