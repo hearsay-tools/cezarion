@@ -97,9 +97,28 @@ describe('destroy backoff holder', { timeout: 30_000 }, () => {
     const other = scratchDir();
     const { workspace } = await settled(false);
     renameSync(workspace.path, `${workspace.path}.moved`); symlinkSync(other, workspace.path);
-    useTeardown('touch ran');
-    expect(await runWorktreeTeardown({ root: f.root, home: testHome() }, workspace)).toBeUndefined();
+    expect(await runWorktreeTeardown(f.root, { commands: ['touch ran'] }, workspace)).toBeUndefined();
     expect(existsSync(join(other, 'ran'))).toBe(false);
+  });
+
+  // An earlier command that replaces the worker path never sends the later ones to the replacement.
+  it.runIf(linux)('proves the worktree again before each worktreeTeardown command', async () => {
+    const other = scratchDir();
+    const { workspace } = await settled(false);
+    const replace = `mv '${workspace.path}' '${workspace.path}.moved' && ln -s '${other}' '${workspace.path}'`;
+    expect(await runWorktreeTeardown(f.root, { commands: [replace, 'touch ran'] }, workspace)).toMatch(/^the worktree's ownership is no longer proven before `touch ran`$/);
+    expect(existsSync(join(other, 'ran'))).toBe(false);
+  });
+
+  // A hook added after an attempt without one is a change: the next tick runs in full, not skipped.
+  it.runIf(linux)('a worktreeTeardown added while scheduled retries skip a live holder ends the skipping', async () => {
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    const service = await worktreeService(workspace.path);
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    useTeardown(stop(service.pid!));
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
   });
 
   it.runIf(linux)('a holder that moves out of the worktree ends the skipping', async () => {

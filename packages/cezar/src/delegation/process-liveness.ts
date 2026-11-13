@@ -130,8 +130,29 @@ export function processCwdUnder(pid: number, dirs: readonly string[], platform: 
   return found !== 'unknown' && found.length > 0;
 }
 
-/** One process's command line, its program named by base name and cut to 160 characters; undefined
- * when it cannot be read. For a refusal a human reads, never for a decision. */
+/** A flag whose value may be a credential: the refusal drops it and every argument after it. */
+const SECRET_FLAG = /pass|token|secret|key|auth|cred|cookie/i;
+
+/** A command line as a refusal may show it: the program by its base name, `name=value` arguments by
+ * their name only, nothing from a flag that may carry a credential on, and at most 160 characters.
+ * Destroy errors are persisted and returned by the API, so no argument value that may be a secret
+ * reaches them. */
+export function redactedCommand(args: readonly string[]): string | undefined {
+  const [program = '', ...rest] = args.filter(Boolean);
+  // A process title (`tool <repo> daemon …`) is one argument with spaces, not a program path.
+  const [name = '', ...words] = program.includes(' ') ? program.split(/\s+/) : [basename(program)];
+  const shown: string[] = [name];
+  for (const arg of [...words, ...rest]) {
+    const eq = arg.indexOf('=');
+    shown.push(eq > 0 ? `${arg.slice(0, eq + 1)}…` : arg);
+    if (arg.startsWith('-') && SECRET_FLAG.test(arg)) { if (eq < 0) shown.push('…'); break; }
+  }
+  const command = shown.join(' ').replace(/\s+/g, ' ').trim();
+  return !command ? undefined : command.length > 160 ? `${command.slice(0, 159)}…` : command;
+}
+
+/** One process's command line for a refusal a human reads, never for a decision; undefined when it
+ * cannot be read. */
 function processCommand(pid: number): string | undefined {
   let args: string[] | undefined;
   if (process.platform === 'linux') {
@@ -140,10 +161,7 @@ function processCommand(pid: number): string | undefined {
     const ps = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
     args = ps.status === 0 ? ps.stdout.trim().split(' ') : undefined;
   }
-  const [program = '', ...rest] = args?.filter(Boolean) ?? [];
-  // A process title (`tool <repo> daemon …`) is one argument with spaces, not a program path.
-  const command = [program.includes(' ') ? program : basename(program), ...rest].join(' ').replace(/\s+/g, ' ').trim();
-  return !command ? undefined : command.length > 160 ? `${command.slice(0, 159)}…` : command;
+  return args && redactedCommand(args);
 }
 
 /** Holder pids with their commands, `123 (sleep 30), 456`, so a refusal tells a test server from an
