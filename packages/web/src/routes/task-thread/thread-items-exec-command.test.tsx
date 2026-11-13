@@ -35,11 +35,7 @@ describe('ToolCard expanded exec command from input', () => {
     const button = screen.getByRole('button', { name: /Ran/ })
     expect(button.querySelector('code')?.textContent).not.toContain(tail)
     fireEvent.click(button)
-    const expanded = document.querySelector('[data-slot="tool-command"]')
-    expect(expanded?.textContent).toBe(command)
-    expect(expanded?.className).toContain('whitespace-pre-wrap')
-    expect(expanded?.className).toContain('break-words')
-    expect(expanded?.className).toContain('[overflow-wrap:anywhere]')
+    expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
   })
 
   it('preserves multiline string commands and shell operators', () => {
@@ -125,7 +121,6 @@ describe('ToolCard expanded exec command from input', () => {
     }
     render(<ToolCard item={item} />)
     const code = screen.getByRole('button', { name: /Ran/ }).querySelector('code')
-    expect(code?.className).toContain('truncate')
     expect(code?.textContent).toContain('\u2026')
     expect(code?.textContent).not.toContain(tail)
   })

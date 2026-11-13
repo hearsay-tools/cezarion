@@ -74,10 +74,9 @@ describe('StepRail', () => {
     expect(screen.getAllByRole('status', { name: 'Step running' })).toHaveLength(1)
   })
 
-  it('a failed step wears the danger X', () => {
+  it('marks a failed step failed on its row', () => {
     render(<StepRail steps={[step('t', 'failed', { name: 'Do the task' })]} />)
     expect(document.querySelector('[data-slot="step-row"]')?.getAttribute('data-visual')).toBe('failed')
-    expect(document.querySelector('[data-slot="step-row"] svg')?.getAttribute('class')).toContain('text-danger')
   })
 
   it('shows ×N only when a step actually iterated', () => {

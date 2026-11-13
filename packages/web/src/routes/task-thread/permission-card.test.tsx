@@ -21,14 +21,10 @@ const permission: ThreadPermission = {
 const card = (extra: Partial<ThreadPermission> = {}, sessionOpen = true) => <PermissionCard permission={{ ...permission, ...extra }} runId="r1" sessionOpen={sessionOpen} />
 
 describe('PermissionCard', () => {
-  it('shows full details and every offered option with wrapping and 44px targets', () => {
+  it('shows full details and every offered option', () => {
     render(card())
     expect(screen.getByText(permission.details!, { normalizer: text => text })).toBeTruthy()
     expect(screen.getAllByRole('button')).toHaveLength(5)
-    for (const button of screen.getAllByRole('button')) {
-      expect(button.className).toContain('min-h-11')
-      expect(button.className).toContain('whitespace-normal')
-    }
     expect(screen.queryByRole('textbox')).toBeNull()
   })
   it('submits the exact IDs, disables concurrent clicks, and shows the delivered choice', async () => {

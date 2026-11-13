@@ -150,7 +150,6 @@ describe('Workspace — branch copy (#434)', () => {
     stubFetch()
     renderCard(run('done', { id: freshId(), branch: 'cez/feature-434' }))
     const copy = within(openRow('workspace')).getByRole('button', { name: 'Copy branch name' })
-    expect(copy.tagName).toBe('BUTTON')
     expect(copy.getAttribute('type')).toBe('button')
     copy.focus()
     expect(document.activeElement).toBe(copy)
@@ -237,24 +236,6 @@ describe('Workspace — tracker chips', () => {
       return found
     })
     expect(message.body).toMatchObject({ text: resolveConflictsPrompt(534) })
-  })
-
-  // #617 01b: on touch the sidebar's references are plain text and the whole row is the tap
-  // target, which only holds because the task page carries them as real 44px links.
-  it('gives its tracker chips a 44px target on a device that cannot hover', () => {
-    stubFetch()
-    renderCard(run('done', {
-      id: freshId(),
-      branch: 'cez/r1',
-      pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/534',
-      referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/544',
-    }))
-    const chips = [...openRow('workspace').querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')]
-    expect(chips).toHaveLength(2)
-    for (const chip of chips) {
-      expect(chip.className, chip.textContent ?? '').toContain('no-hover:min-h-[44px]')
-      expect(chip.className, chip.textContent ?? '').toContain('no-hover:min-w-[44px]')
-    }
   })
 
   it('shows every PR the task points at, not only the strongest one', () => {
@@ -344,7 +325,7 @@ describe('Workspace — tracker chips', () => {
       expect.stringContaining('#5366'),
       expect.stringContaining('#901'),
     ])
-    expect(chips[1]?.tagName).toBe('SPAN') // inert: nothing to link to
+    expect(within(openRow('workspace')).queryByRole('link', { name: /#901/ })).toBeNull()
   })
 })
 

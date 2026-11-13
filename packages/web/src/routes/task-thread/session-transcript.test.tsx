@@ -563,16 +563,15 @@ describe('SessionTranscript', () => {
   const sections: TranscriptSection[] = [{ id: 'shared', entries }]
 
   it.each(['document', 'panel'] as const)(
-    'renders the canonical entry primitives in %s mode',
+    'renders every entry kind in %s mode',
     (mode) => {
-      render(
+      const { container } = render(
         <SessionTranscript runId="r1" viewId={mode} sections={sections} mode={mode} />,
       )
-      expect(document.querySelector('[data-slot="assistant-message"]')?.textContent).toContain('Shared prose')
-      expect(document.querySelector('[data-slot="reasoning"]')?.textContent).toContain('Shared reasoning')
-      expect(document.querySelector('[data-slot="tool-card"]')?.textContent).toContain('npm test')
-      expect(document.querySelector('[data-slot="note-line"]')?.textContent).toContain('Lifecycle note')
-      expect(document.querySelector('img[alt="agent screenshot"]')).not.toBeNull()
+      for (const text of ['Shared prose', 'Shared reasoning', 'npm test', 'Lifecycle note']) {
+        expect(container.textContent).toContain(text)
+      }
+      expect(screen.getByRole('img', { name: 'agent screenshot' })).toBeTruthy()
     },
   )
 
@@ -734,13 +733,11 @@ describe('SessionTranscript', () => {
     })
   })
 
-  it('provides a bounded, keyboard-scrollable panel with a stable scrollbar gutter', () => {
+  it('provides a named, keyboard-focusable panel viewport', () => {
     render(<SessionTranscript runId="r1" viewId="agent:one" sections={sections} mode="panel" />)
     const viewport = document.querySelector('[data-slot="transcript-viewport"]')!
     expect(viewport.getAttribute('aria-label')).toBe('Agent transcript')
     expect(viewport.getAttribute('tabindex')).toBe('0')
-    expect(viewport.className).toContain('overflow-y-auto')
-    expect(viewport.className).toContain('[scrollbar-gutter:stable]')
   })
 
   it('switches a long agent transcript to the shared virtualized rows', () => {

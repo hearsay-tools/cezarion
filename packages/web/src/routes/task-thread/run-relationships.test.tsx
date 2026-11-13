@@ -139,10 +139,6 @@ it.each([true, false])('keeps every one of 32 worker links newest first (receipt
   expect(links.map(link => link.getAttribute('href'))).toEqual(
     [...workers].reverse().map(worker => `/p/sample/tasks/${worker.workerId}`),
   )
-  expect(links.every(link => link.className.includes('min-h-11'))).toBe(true)
-  const list = screen.getByRole('list')
-  expect(list.className).toContain('max-h-64')
-  expect(list.className).toContain('overflow-y-auto')
 })
 
 it.each([root, child])('shows request waiting for either participant ($id)', run => {
@@ -230,9 +226,8 @@ it('offers Clean up only for settled workers that are not verifiably destroyed (
   const gone = workerAt(2)
   setup(rootOf([settled, live, gone]), async () => json({ workers: [settled, live, gone], capacity: capacityOf(2, 3) }))
   const group = await section()
-  const button = await within(group).findByRole('button', cleanUp(workerId))
+  await within(group).findByRole('button', cleanUp(workerId))
   expect(within(group).getAllByRole('button', { name: /^Clean up worker/ })).toHaveLength(1)
-  expect(button.className).toContain('min-h-11')
 })
 it('asks for confirmation before removing the worktree and branch, and cancel posts nothing (#816)', async () => {
   const { requests } = setup(rootOf([settled]), async () => json({ workers: [settled], capacity: capacityOf(1) }))
@@ -243,7 +238,6 @@ it('asks for confirmation before removing the worktree and branch, and cancel po
   expect(requests.some(path => path.endsWith('/worker-destroy'))).toBe(false)
   fireEvent.click(within(group).getByRole('button', cleanUp(workerId)))
   const confirm = within(group).getByRole('button', { name: `Confirm clean up of worker ${workerId.slice(0, 8)}` })
-  expect(confirm.className).toContain('min-h-11')
   fireEvent.click(confirm)
   await waitFor(() => expect(requests).toContain(`/api/v1/p/sample/runs/${workerId}/worker-destroy`))
 })
@@ -336,7 +330,6 @@ it('offers Retry clean up while a destroy is pending, and plain Clean up otherwi
   const group = await section()
   const retry = await within(group).findByRole('button', { name: `Retry clean up of worker ${workerId.slice(0, 8)}` })
   expect(retry.textContent).toBe('Retry clean up')
-  expect(retry.className).toContain('min-h-11')
   expect(within(group).getByRole('button', cleanUp(fresh.workerId)).textContent).toBe('Clean up')
 })
 

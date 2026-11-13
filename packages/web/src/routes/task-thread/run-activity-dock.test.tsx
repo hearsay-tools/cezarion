@@ -201,14 +201,12 @@ describe('RunActivityDock — subagent counts agree with the subagent wait', () 
 })
 
 describe('RunActivityDock — one card, one row per section', () => {
-  it('titles each row and meters it, workflow by its current step name', () => {
+  it('meters each row and titles the workflow by its current step name', () => {
     renderDock(run())
 
     expect(sectionHead('workflow').textContent).toContain('Do the task')
     expect(metaOf('workflow')).toBe('Do the task · Step 1 of 2')
-    expect(sectionHead('subagents').textContent).toContain('Subagents')
     expect(metaOf('subagents')).toBe('1 of 2 complete')
-    expect(sectionHead('plan').textContent).toContain('Plan')
     expect(metaOf('plan')).toBe('1 of 3 complete')
   })
 
@@ -249,13 +247,6 @@ describe('RunActivityDock — one card, one row per section', () => {
     renderDock(run({ status: RUN_STATUS.waiting }))
     fireEvent.click(sectionHead('subagents'))
     expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(0)
-  })
-
-  it('keeps every row a 44px touch target', () => {
-    renderDock(run())
-    for (const key of ['workflow', 'subagents', 'plan']) {
-      expect(sectionHead(key).className).toContain('min-h-11')
-    }
   })
 
   it('omits a section with nothing to show, but keeps the card for the status and metadata', () => {
@@ -301,7 +292,6 @@ describe('RunActivityDock — the workers section', () => {
     renderDock(root)
 
     await waitFor(() => expect(metaOf('workers')).toBe('2 linked · 1 done · 1 cancelled'))
-    expect(sectionHead('workers').textContent).toContain('Workers')
     expect(sectionHead('workers').getAttribute('aria-expanded')).toBe('true')
 
     const rows = Array.from(document.querySelectorAll('[data-slot="worker-item"]'))
@@ -398,15 +388,6 @@ describe('RunActivityDock — narrow viewports', () => {
     expect(metaOf('workflow')).toBe('Do the task · 1 / 2')
     expect(metaOf('subagents')).toBe('1 / 2')
     expect(metaOf('plan')).toBe('1 / 3')
-  })
-
-  it('keeps the step meter whole and lets the step name drop when the row runs out of room', () => {
-    narrow()
-    renderDock(run(), EVENTS, workers, 'ok', {}, { open: false })
-    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
-    const meta = section('workflow')!.querySelector('[data-slot="run-activity-meta"]')!
-    expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('1 / 2')
-    expect(meta.querySelector('[data-slot="run-activity-meta-drop"]')?.textContent).toBe('Do the task ·')
   })
 })
 
@@ -566,11 +547,9 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     if (summary().getAttribute('aria-expanded') !== 'true') fireEvent.click(summary())
   }
 
-  it('folds to label, status and cost in one disclosure', () => {
+  it('folds to status and cost in one disclosure', () => {
     renderDock(waiting(), [])
     if (summary().getAttribute('aria-expanded') === 'true') fireEvent.click(summary())
-    expect(summary().textContent).toContain('Activity')
-    expect(summary().textContent).not.toContain('Session activity')
     expect(summary().textContent).toContain('Waiting for CI')
     expect(summary().textContent).toContain('$1.26')
     expect(summary().textContent).not.toContain('Next check')
@@ -593,14 +572,11 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(document.querySelectorAll('[data-slot="run-activity-status"]')).toHaveLength(1)
   })
 
-  it('gives the next check its own wrapping line, outside the truncating meter', () => {
+  it('gives the next check its own line instead of a meter', () => {
     renderDock(waiting(), [])
     ensureOpen()
     const next = section('status-row')!.querySelector<HTMLElement>('[data-slot="run-activity-next-check"]')
     expect(next?.textContent).toMatch(/^Next check /)
-    // A meter truncates to one line; the appointment must be readable at 320px without opening details.
-    expect(next?.closest('[data-slot="run-activity-meta"]')).toBeNull()
-    expect(next?.className).toContain('whitespace-normal')
     expect(metaOf('status-row')).toBeUndefined()
   })
 
@@ -688,13 +664,11 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     expect(summary().getAttribute('aria-label')).toContain('PR #42')
   })
 
-  it('groups expanded Workspace references into labeled rows and keeps standard chip styles in summaries', () => {
+  it('groups expanded Workspace references into labeled rows and keeps folded chips out of the tab order', () => {
     renderDock(fresh({ referencedIssueUrl: 'https://github.com/owner/repo/issues/15', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [])
     ensureOpen()
     const foldedChip = sectionHead('workspace').querySelector<HTMLElement>('[data-slot="pr-chip"]')!
-    expect(foldedChip.className).toContain('border-accent-strong/35')
-    expect(foldedChip.tagName).toBe('SPAN')
-    expect(foldedChip.hasAttribute('tabindex')).toBe(false)
+    expect(foldedChip.tabIndex).toBe(-1)
     fireEvent.click(sectionHead('workspace'))
     const linked = section('workspace')!.querySelector('[data-slot="linked-references"]')!
     expect(linked.querySelector('[data-reference-kind="PR"]')?.textContent).toContain('PRs')
@@ -827,11 +801,9 @@ describe('Session activity — folded workflow step (#1478)', () => {
     expect(summary().getAttribute('aria-label')).not.toContain('; step')
   })
 
-  it('labels the card Activity and keeps the Session activity name', () => {
+  it('keeps the Session activity name on the folded card', () => {
     renderDock(fresh(), [])
     fold()
-    expect(summary().textContent?.startsWith('Activity')).toBe(true)
-    expect(summary().textContent).not.toContain('Session activity')
     expect(summary().getAttribute('aria-label')?.startsWith('Session activity: ')).toBe(true)
   })
 

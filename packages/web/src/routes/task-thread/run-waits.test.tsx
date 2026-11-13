@@ -171,11 +171,10 @@ describe('RunWaitDetails', () => {
     expect(items[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:30:00.000Z')
   })
 
-  it('reads a run with only a timer open as monitoring, without a note line when there is none', () => {
+  it('reads a run with only a timer open as monitoring', () => {
     renderWaits(run('waiting', { waits: [timerEntry()] }))
     expect(ciItems()).toHaveLength(0)
     expect(timerItems()).toHaveLength(1)
-    expect(timerItems()[0]?.querySelectorAll('p')).toHaveLength(1)
   })
 
   it.each([

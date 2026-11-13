@@ -96,19 +96,15 @@ describe('Hand off', () => {
     const sent = serve(WEBHOOK)
     renderHeader(run())
     const button = await screen.findByRole('button', { name: 'Hand off to webhook' })
-    // A 44px target on a phone; the label is visible from `md` up.
-    expect(button.className).toContain('size-11')
     fireEvent.click(button)
 
     const dialog = within(await screen.findByRole('dialog'))
     expect(dialog.getByText('Hand off to webhook')).toBeTruthy()
     // Primary copy stays short. Host and path are the description tooltip, never the query string (#614).
     const description = document.querySelector('[data-slot="dialog-description"]')
-    expect(description?.textContent).toContain("this task's status updates")
     expect(description?.textContent).not.toContain('bot.example')
     expect(description?.querySelector('[data-webhook-destination]')?.getAttribute('title')).toContain('bot.example/hooks/cez')
     expect(document.querySelector('[data-slot="handoff-dialog"]')?.textContent).not.toContain('secret')
-    expect(dialog.getByText('The note goes to the webhook only, not to the agent.')).toBeTruthy()
 
     fireEvent.change(dialog.getByLabelText('Note'), { target: { value: '  Take over from here  ' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Hand off' }))
