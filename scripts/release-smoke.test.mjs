@@ -176,6 +176,32 @@ test("npm's own output from a failed install attempt cannot become the filed cau
   assert.deepEqual(filed([...registry.logs, failure]), [sanitize(failure)]);
 });
 
+test('no quoted child output matches a filer selector anywhere in its line', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const hostile = [
+    'npm error npm error notarget missing',
+    '\x1b[31mnpm error\x1b[39m notarget missing',
+    'see npm error code E404 and npm ERR! here',
+    'npm error Error: EPERM: operation not permitted',
+    'TypeError: x is not a function',
+    'note ##[error]injected annotation',
+    ' FAIL  src/a.test.ts > works',
+  ];
+  const registry = fakeRegistry();
+  const options = registry.options();
+  let installs = 0;
+  const exec = (args, more) => {
+    if (args[0] !== 'install') return options.exec(args, more);
+    if (++installs > 1) return 'added 1 package in 1s\n';
+    throw Object.assign(new Error('Command failed: npm install'), { status: 1, signal: null, stderr: hostile.join('\n') });
+  };
+  await registryInstall(prefix, 'fake@1.2.1', { ...options, exec });
+  assert.ok(registry.logs.includes('release-smoke: npm: notarget missing'), 'nested and coloured npm prefixes are dropped');
+  const failure = failureLine(new Error('The booted server registered no project'));
+  assert.deepEqual(filed([...registry.logs, failure]), [sanitize(failure)]);
+});
+
 test('a child process failure ends on a line the filer reads, not on its `Command failed` wrapper', async t => {
   const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
   t.after(() => rmSync(prefix, { recursive: true, force: true }));

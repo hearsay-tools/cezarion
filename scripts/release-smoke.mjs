@@ -81,10 +81,19 @@ function reason(error) {
   return quoted(line ?? describe(error));
 }
 
-// Child output the smoke logs, in a form the CI failure filer does not take as the cause:
-// without npm's level prefix, and with `<Name>Error:` written as `<Name>Error -`.
+// The CI failure filer (.github/scripts/failure-diagnostics.cjs) strips ANSI codes, then files
+// the first `FAIL <test file>`, `<Name>Error:`, `npm error `/`npm ERR! ` or `##[error]` line.
+const ANSI = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g;
+
+// Child output the smoke logs, written so that none of those selectors matches it anywhere in
+// the line: npm's leading level prefixes dropped, and each remaining trigger defused.
 function quoted(text) {
-  return text.trim().replace(/^npm (?:error|ERR!|warn|notice) /, '').replace(/\b(\w*Error):/g, '$1 -');
+  return `${text}`.replace(ANSI, '').trim()
+    .replace(/^(?:npm (?:error|ERR!|warn|notice) +)+/, '')
+    .replace(/npm (error|ERR!) /g, 'npm $1: ')
+    .replace(/\b(\w*Error):/g, '$1 -')
+    .replace(/##\[/g, '## [')
+    .replace(/\bFAIL\b/g, 'Fail');
 }
 
 function relay(output, log) {
