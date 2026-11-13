@@ -207,21 +207,21 @@ test('the daily digest checks whether each merged fix made its signal go quiet b
   assert.equal(INBOX.fixQuietDays, 14);
   for (const text of [
     'fix check',
-    `closed in the last ${INBOX.fixQuietDays} days`,
-    'every issue that the previous digest\'s fix check results carry',
-    `findings dated within ${INBOX.fixQuietDays} days after the merge`,
-    'a later finding never counts against it',
+    `closed in the last ${INBOX.watchDays} days`,
+    'that no finalized digest has marked "came back"',
+    `dated within ${INBOX.fixQuietDays} days after the merge`,
+    'the inbox issues dated in that window, reviewed ones included',
     'comes from a mechanism that pull request added',
-    '"came back"',
     '"quiet since <merge date>"',
     'code from before the merge does not count',
-    `at the first digest that runs after the day ${INBOX.fixQuietDays} days after its merge, with no counted finding`,
   ]) assert.ok(prompt.includes(text), text);
   assert.ok(prompt.indexOf('Then run the fix check') < prompt.indexOf('4. Give each group one verdict'), 'the fix check runs before the verdicts');
   assert.ok(prompt.includes('or it holds a "came back" finding'), 'a recurrence of a merged fix always ranks as act');
-  assert.ok(prompt.includes('read the watch list, the act groups it carried forward and its fix check results'), 'fix check results carry across digests');
-  assert.ok(prompt.includes('A fix marked "came back" stays so'), 'a later quiet day cannot clear a recurrence');
   assert.ok(prompt.includes('never a group that holds a "came back" finding'), 'a closed issue does not drop its recurrence');
+  // The window is fixed per merge, so the check is safe to repeat and keeps no state between digests.
+  for (const stateful of ['fix check results carry', 'Carry every other result forward', 'leaves the fix check']) {
+    assert.ok(!prompt.includes(stateful), stateful);
+  }
 });
 
 test('inbox labels stay out of the routing labels the intake applicator manages', () => {
