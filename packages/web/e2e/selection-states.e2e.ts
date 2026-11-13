@@ -165,15 +165,18 @@ function checkNavBody(variant: ContrastQaVariant, { base, container, navSelector
 
   const skills = `${nav} a[href$="/skills"]`
 
-  // Hover, any nav item: a hover fill distinct from the selected fill.
-  hoverVisiblePoint(browser, skills)
   type Surface = { bg: string }
   const surface = (selector: string) => `(() => {
     const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null
     return { bg: getComputedStyle(el).backgroundColor }
   })()`
+  const resting = waitForSettledSample(browser, surface(skills)) as Surface
+
+  // Hover, any nav item: a hover fill distinct from the resting and the selected fill.
+  hoverVisiblePoint(browser, skills)
   const hovered = waitForSettledSample(browser, surface(skills)) as Surface
   expect(hovered.bg).not.toBe(TRANSPARENT)
+  expect(hovered.bg).not.toBe(resting.bg)
   expect(hovered.bg).not.toBe(selectedFill)
   record(skills, 'hover nav label', 4.5)
   record(`${skills} svg`, 'hover nav icon', 3)

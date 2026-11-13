@@ -193,7 +193,12 @@ describe('task thread', () => {
     expect(settledVisibility('[data-slot="run-header"] [data-slot="pill"]')).toBe(true)
     expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
     browser.evaluate(`(() => { const main = document.querySelector('[data-slot="main"]'); main.scrollTop = main.scrollHeight })()`)
-    expect(waitForSettledSample(browser, `document.querySelector('[data-slot="run-header"]').getBoundingClientRect().top >= document.querySelector('[data-slot="main"]').getBoundingClientRect().top - 1`)).toBe(true)
+    const headerInMain = waitForSettledSample(browser, `(() => {
+      const header = document.querySelector('[data-slot="run-header"]').getBoundingClientRect();
+      const main = document.querySelector('[data-slot="main"]').getBoundingClientRect();
+      return { top: header.top >= main.top - 1, bottom: header.bottom <= main.bottom + 1 };
+    })()`)
+    expect(headerInMain).toEqual({ top: true, bottom: true })
     browser.setViewport(360, 640)
     expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\nsecond line\nthird line')
