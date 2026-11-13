@@ -1,3 +1,4 @@
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -14,14 +15,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { executionAccount } from './execution-account.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWork } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from './fixture-manager.testkit.ts';
 import type { RunManager } from './run.ts';
 
 const runnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
-vi.mock('../core/runner-factory.ts', async original => ({
-  ...await original<typeof import('../core/runner-factory.ts')>(),
-  createRunner: () => runnerHook.runner!,
-}));
+useRunners(() => runnerHook.runner!);
 
 function initRepo(root: string) {
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });

@@ -1,5 +1,7 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-manager.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,8 +34,7 @@ const launched = vi.hoisted(() => ({
 
 // What is under test is the system prompt RunManager composes at both session construction
 // sites (`runAgentStep` and `runContinuation`), before the runner seam.
-vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: (backend: string) => ({
+useRunners(fakeRunnerFactory((backend: string) => ({
     backend,
     systemPromptOnResume: launched.resume,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -50,8 +51,7 @@ vi.mock('../core/runner-factory.ts', () => ({
       };
     },
     interrupt: async () => {},
-  }),
-}));
+  })));
 
 const DIVIDER = '\n\n---\n\n';
 const SKILL = { name: 'pin', description: 'Pins the composed system prompt.', body: 'Follow the pinned playbook.' };

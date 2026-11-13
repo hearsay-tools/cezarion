@@ -1,3 +1,5 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from './run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -11,7 +13,7 @@ import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } 
 import { historyPaths, readHistoryText } from './history-file.ts';
 import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
 import { RunStore } from './store.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-manager.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -23,8 +25,7 @@ const captured = vi.hoisted(() => ({
   specs: [] as AgentRunSpec[],
   release: undefined as (() => void) | undefined,
 }));
-vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: () => ({
+useRunners(fakeRunnerFactory(() => ({
     backend: 'claude',
     interrupt: async () => {},
     startSession: (spec: AgentRunSpec) => {
@@ -40,8 +41,7 @@ vi.mock('../core/runner-factory.ts', () => ({
         open: true,
       };
     },
-  }),
-}));
+  })));
 
 const dirs: string[] = [];
 const stores: RunStore[] = [];

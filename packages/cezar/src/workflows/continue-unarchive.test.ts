@@ -1,7 +1,9 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-manager.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,14 +15,14 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
-vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
+useRunners(fakeRunnerFactory(() => ({
   backend: 'claude', systemPromptOnResume: 'resent' as const, interrupt: async () => {},
   startSession: (spec: AgentRunSpec) => {
     captured.specs.push(spec);
     return { result: new Promise(resolve => { captured.release = () => resolve({ text: 'ok', toolCalls: [], tokensUsed: 0 }); }),
       sendMessage: () => true, discardQueuedMessages: () => {}, holdsHumanInput: () => false, end: () => {}, interrupt: () => {}, open: true };
   },
-}) }));
+})));
 
 const roots: string[] = [];
 const managers: RunManager[] = [];

@@ -1,6 +1,8 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-manager.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,8 +24,7 @@ const captured = vi.hoisted(() => ({ specs: [] as Array<{ backend: string; spec:
 // What is under test is what RunManager puts INTO the spec before the runner seam, at both
 // session construction sites (`execute` and `runContinuation`). The stub reports whichever
 // backend it was asked for, so every runner id walks the same path.
-vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: (backend: string) => ({
+useRunners(fakeRunnerFactory((backend: string) => ({
     backend,
     systemPromptOnResume: 'resent' as const,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -39,8 +40,7 @@ vi.mock('../core/runner-factory.ts', () => ({
       };
     },
     interrupt: async () => {},
-  }),
-}));
+  })));
 
 const ADDRESS = { origin: 'http://127.0.0.1:5555', projectId: 'proj-1' };
 const PROMPT_HEADING = '## Automations';

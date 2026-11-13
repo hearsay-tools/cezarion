@@ -27,7 +27,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { runnerHook, waitForProduct } from './run-fixture.testkit.ts';
-import * as runnerFactories from '../core/runner-factory.ts';
+import * as runnerFactories from '../core/runners-under-test.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork } from './fixture-cleanup.testkit.ts';
 import type { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
@@ -152,8 +152,8 @@ it('P6-04 P6-12 P6-20 P6-24 P6-28 P6-32 P6-36 live input keeps the open session 
     inFlight.push(observed);
     return observed;
   });
-  const runnerFactory = runnerFactories.createRunner;
-  vi.spyOn(runnerFactories, 'createRunner').mockImplementation((...args) => {
+  const runnerFactory = runnerFactories.runnersUnderTest();
+  vi.spyOn(runnerFactories, 'runnersUnderTest').mockReturnValue((...args) => {
     const value = runnerFactory(...args); reads.runner++; return value;
   });
   const loadConfig = configuration.loadConfig;
@@ -302,7 +302,8 @@ function localSkill(body: string): void {
 }
 
 it('P6-03 P6-07 P6-11 P6-19 P6-23 P6-31 queued Continue keeps owning recipe and reads amended text and effort', async () => {
-  const factories = vi.spyOn(runnerFactories, 'createRunner');
+  const factories = vi.fn(runnerFactories.runnersUnderTest());
+  vi.spyOn(runnerFactories, 'runnersUnderTest').mockReturnValue(factories);
   const target = manager.startRun(acceptedWorkflow, { task: 'accepted task', effort: 'low', systemPrompt: 'accepted prompt', worktree: false });
   await waitForOpen(target.id, 1);
   await finishInitial(target.id);

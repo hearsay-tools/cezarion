@@ -1,6 +1,8 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-manager.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,8 +23,7 @@ const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[] }));
 // The seam under test is what `runContinuation` puts INTO the spec, so the runner is a
 // capture stub: the spec→argv mapping below it is `claude-cli-runner.test.ts`'s business
 // (`buildAllowedTools`), and the resume mechanics around it are `auto-resume.test.ts`'s.
-vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: () => ({
+useRunners(fakeRunnerFactory(() => ({
     backend: 'claude' as const,
     systemPromptOnResume: 'resent' as const,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -38,8 +39,7 @@ vi.mock('../core/runner-factory.ts', () => ({
       };
     },
     interrupt: async () => {},
-  }),
-}));
+  })));
 
 /**
  * A rebuilt session keeps its workflow step's tools.
