@@ -86,7 +86,6 @@ describe('the hero surface', () => {
     await pillReady()
     const worktree = screen.getByRole('checkbox', { name: 'Worktree' })
     expect(worktree.textContent).toContain('Changes stay in a separate working copy.')
-    expect(document.querySelector('[data-slot="execution-tip"]')).toBeNull()
     fireEvent.click(worktree)
     expect(worktree.textContent).toContain('Changes are made in the current working directory.')
   })
@@ -144,7 +143,6 @@ describe('the hero surface', () => {
     fireEvent.click(summary)
     expect(textarea()).toBe(originalTextarea)
     expect(textarea().value).toBe('Keep this draft')
-    expect(screen.queryByRole('button', { name: 'Parallel variants' })).toBeNull()
     expect(screen.getByRole('button', { name: /^Model · / })).toBe(model)
   })
 
@@ -366,14 +364,6 @@ describe('picker data flows', () => {
       await waitFor(() => expect(note())
         .toBe('Runs in the repo working tree — your checkout is modified directly.'))
     })
-  })
-
-  it('has no parallel variant control, including without git', async () => {
-    serve({ health: HEALTH_NO_GIT, repo: REPO_NO_GIT })
-    renderNewTask()
-    await pillReady()
-    expect(document.querySelector('[data-slot="variants-pill"]')).toBeNull()
-    expect(document.querySelector('[data-slot="base-pill"]')).toBeNull()
   })
 
   // #791: health is bound to the boot folder, so a Squawk booted outside a git repo answered

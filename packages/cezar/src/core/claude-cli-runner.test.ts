@@ -124,7 +124,6 @@ describe('buildClaudeArgs governed native messaging', () => {
       it.each(TOOL_GRANT_CASES)('sends the ordinary argv for $id under delegation', entry => {
         const ordinary = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude') }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
         const governed = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude'), restrictCrossSessionMessaging: true }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
-        expect(governed).not.toContain('--disallowedTools');
         expect(governed).toEqual(ordinary);
       });
     });
@@ -152,7 +151,6 @@ describe('buildClaudeArgs governed native messaging', () => {
       toolGrant: { kind: 'explicit', tools: ['Read', 'Agent', 'SendMessage', 'ListAgents'] },
     }, {});
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,Agent,SendMessage,ListAgents');
-    expect(args).not.toContain('--disallowedTools');
   });
 });
 

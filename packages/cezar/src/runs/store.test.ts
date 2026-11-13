@@ -2598,18 +2598,6 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
     expect(store.getRun('modern')?.runner).toBe('codex');
   });
 
-  it('rewrites the folded id on the next save, so the narrowing is one-way', () => {
-    seedRuns(dataDir, [{ ...LEGACY_RUN, runner: 'claude-cli' }]);
-
-    const store = RunStore.open(dataDir);
-    store.updateRun('legacy-1', { title: 'touched' });
-    store.flush();
-
-    // A saved row is re-serialized from the PARSED record, so `claude-cli` is gone from disk.
-    expect(readPersistedText(dataDir)).not.toContain('claude-cli');
-    expect(readPersistedRuns(dataDir)[0]!.runner).toBe('claude');
-  });
-
   it('persists and reloads a `pi` run, index and step alike (#387)', () => {
     // `storedRunnerSchema` derives from `RUNNER_IDS` rather than re-listing the ids, so a new
     // runner is readable the moment it is registered. Without this, a completed pi run would

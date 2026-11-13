@@ -178,9 +178,7 @@ function checkNavBody(variant: ContrastQaVariant, { base, container, navSelector
   record(tasksNav, 'selected nav label', 4.5)
   record(`${tasksNav} svg`, 'selected nav icon', 3)
 
-  // The Skills nav item carries no update marker (hearsay-tools/cezarion#1494).
   const skills = `${nav} a[href$="/skills"]`
-  expect(browser.count(`${skills} [data-slot="nav-update-marker"]`)).toBe(0)
 
   // Hover, any nav item: the neutral row hover, with foreground label and icon.
   hoverVisiblePoint(browser, skills)

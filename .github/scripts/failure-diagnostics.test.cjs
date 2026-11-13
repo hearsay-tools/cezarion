@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fixture = require('./fixtures/release-failure.json');
-const { causesForStep, sanitize } = require('./failure-diagnostics.cjs');
+const { causesForStep, sanitize, isQuotaCause } = require('./failure-diagnostics.cjs');
 const release = () => ({run: fixture.run, job: fixture.jobs[0], step: fixture.jobs[0].steps.find(s => s.conclusion === 'failure'), log: fixture.log});
 
 test('real Release test failure matches Nightly despite different job and step names', () => {
@@ -117,4 +117,31 @@ test('multiline and camelCase credential assignments are redacted',()=>{
 test('excerpt boundaries cannot expose private key tails',()=>{
  const a=release();a.log='-----BEGIN PRIVATE KEY-----\n'+'a'.repeat(64)+'\n'+('b'.repeat(64)+'\n').repeat(40)+'short-private-fragment\n-----END PRIVATE KEY-----';
  assert.doesNotMatch(causesForStep(a)[0].excerpt,/short-private-fragment/);
+});
+
+test('timestamps in test names still identify tests',()=>{
+ const log='FAIL src/a.test.ts > formats 2026-11-12T18:10:53Z\nAssertionError: expected format\nFAIL src/a.test.ts > formats 2026-11-13T18:10:53Z\nAssertionError: expected format';
+ const causes=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Run unit tests'},log});
+ assert.equal(causes.length,2);assert.notEqual(causes[0].signature,causes[1].signature);
+});
+test('a step that chose a GitHub quota error carries its first other error for the writer',()=>{
+ const step={number:5,name:'Build application'};
+ const quota='##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
+ // The v1 selection (first error) is unchanged, so its signature matches main.
+ const [cause,...rest]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:`${quota}\nTypeError: build failed`});
+ assert.equal(rest.length,0);assert.equal(isQuotaCause(cause),true);
+ assert.equal(cause.signature,causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:quota})[0].signature);
+ assert.equal(cause.independentCause.failureIdentity,'TypeError: build failed');assert.equal(isQuotaCause(cause.independentCause),false);
+ assert.equal(causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:quota})[0].independentCause,undefined);
+ const [first]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:`TypeError: build failed\n${quota}`});
+ assert.equal(first.failureIdentity,'TypeError: build failed');assert.equal(first.independentCause,undefined);
+});
+test('non-quota signatures stay exactly as before quota filtering, so replays find existing reports',()=>{
+ // Golden values computed on main before this change; a different value
+ // would make every reporter replay miss its existing issue.
+ const step={number:5,name:'Publish'};
+ const [error]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:'##[error]Resource not accessible by integration. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.'});
+ assert.equal(error.signature,'74547ae640086bd81b68b625b1ac1e1a06c5923b9e435d627424f0bfa3d83c06');
+ const [testCause]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:8,name:'Run unit tests'},log:'FAIL src/a.test.ts > formats 2026-11-12T18:10:53Z\nAssertionError: expected 0x1f after 12ms'});
+ assert.equal(testCause.signature,'64a6c7691f8b8ac74558237bf32bf2a7a924d6f1a013cfe27fc55a4cdea0753e');
 });

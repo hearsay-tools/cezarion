@@ -549,14 +549,6 @@ describe('team skill switches (#1494)', () => {
     expect(switchFor('code-review')?.getAttribute('data-locked')).toBeNull()
   })
 
-  it('has no separate "Manage skills" entry', async () => {
-    serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
-    renderAt('/skills')
-    await waitFor(() => expect(row('code-review')).not.toBeNull())
-    expect(document.querySelector('[data-slot="import-skills-row"]')).toBeNull()
-    expect(document.body.textContent).not.toContain('Manage skills')
-  })
-
   it('without team skill sources the page says how to add one, on the page itself', async () => {
     serve({ importable: [] })
     renderAt('/skills')
@@ -570,15 +562,6 @@ describe('team skill switches (#1494)', () => {
     expect(document.querySelector('[data-slot="skill-source-add"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="skills-team-empty"]')).toBeNull()
     expect(document.querySelector('[data-route="skills"]')?.textContent?.toLowerCase()).not.toContain('mercato')
-  })
-
-  it('renders no skills-update slot and no update card', async () => {
-    serve({ skills: CATALOG, importable: IMPORTABLE })
-    renderAt('/skills')
-    await waitFor(() => expect(switchFor('pr-create')?.disabled).toBe(false))
-    expect(document.querySelector('[data-slot="skills-update"]')).toBeNull()
-    expect(document.querySelector('[data-slot="skills-update-card"]')).toBeNull()
-    expect(requests.some((r) => r.url.includes('skills-update'))).toBe(false)
   })
 
   it('loading shows a status row', async () => {

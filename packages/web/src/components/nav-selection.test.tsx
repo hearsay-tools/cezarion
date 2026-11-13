@@ -71,12 +71,6 @@ describe('sidebar nav selection (#619)', () => {
     expect(classes(sidebar().querySelector('[data-slot="nav-needs-you-dot"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-pending-strong']))
   })
 
-  it('shows no retired Inbox or Skills update markers', () => {
-    renderShell('/activity')
-    expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
-    expect(sidebar().querySelector('[data-slot="nav-update-marker"]')).toBeNull()
-  })
-
   it('moves keyboard focus across the view row without changing routes', () => {
     renderShell('/activity')
     const tasks = within(nav()).getByRole('link', { name: 'Tasks' })

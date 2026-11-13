@@ -40,6 +40,10 @@ function stepLines(log, step) {
     return inStep;
   }).map(line => line.replace(/^\d{4}-\d\d-\d\dT\S+ /, '').trimEnd());
 }
+// GitHub quota exhaustion: the failure is the shared API budget, not the workflow.
+const QUOTA_ERROR = /\bAPI rate limit exceeded\b|\bsecondary rate limit\b/i;
+// Only plain error causes qualify; a test whose diagnostic names the quota still reports.
+const isQuotaCause = cause => cause?.kind === 'error' && QUOTA_ERROR.test(cause.failureIdentity || '');
 function normalizeIdentity(text) {
   // Hash full diagnostic identity; display redaction is deliberately lossy and
   // must never collapse distinct test paths into one cause.
@@ -71,17 +75,26 @@ function causesForStep({run, job, step, log}) {
     if (diagnostic) tests[i].key += ':' + normalizeIdentity(diagnostic);
     tests[i].hasDiagnostic = Boolean(diagnostic);
   }
-  const errors = tests.length ? [] : lines.flatMap((line, index) => {
+  const candidates = tests.length ? [] : lines.flatMap((line, index) => {
     if (!/(?:\b\w*Error:|npm (?:ERR!|error) |##\[error\])/.test(line)) return [];
     if (/Process completed with exit code|command failed|exit status/i.test(line)) return [];
     const normalized = normalizeIdentity(line);
     // Generic error code lines alone cannot distinguish unrelated causes.
     if (/^(?:npm (?:ERR!|error) code \w+|\[REDACTED.*\])$/.test(normalized)) return [];
     return [{key:`${stage}:${normalizeIdentity(step.name)}:${normalized}`,title:normalized,index,kind:'error',failureIdentity:normalized}];
-  }).slice(0, 1);
+  });
+  const errors = candidates.slice(0, 1);
   const found = tests.length ? tests.filter(item => item.hasDiagnostic || !tests.some(other => other.testKey === item.testKey && other.hasDiagnostic)) : errors;
   if (!found.length) return [{signature:hash(`unknown:${run.id}:${run.run_attempt}:${job.id}:${step.number}`),title:`${stage} failure in ${sanitize(step.name)}`,stage,kind:'unknown',excerpt:sanitize('Logs unavailable or no recognizable failure diagnostic. Inspect the linked job and failed step.\n'+safeLines.slice(-30).join('\n'))}];
   const unique = [...new Map(found.map(item => [item.key,item])).values()];
-  return unique.map(item => ({signature:hash(item.key),title:sanitize(item.title).slice(0,180),stage,kind:item.kind,...(item.testIdentity ? {testIdentity:item.testIdentity,testFile:item.testFile,hasTestName:item.hasTestName,hasDiagnostic:item.hasDiagnostic} : {}),failureIdentity:item.failureIdentity||item.key,excerpt:sanitize(safeLines.slice(item.index,Math.min(item.index+30,found.find(next=>next.index>item.index)?.index??Infinity)).join('\n'))}));
+  const toCause = (item, selected) => ({signature:hash(item.key),title:sanitize(item.title).slice(0,180),stage,kind:item.kind,...(item.testIdentity ? {testIdentity:item.testIdentity,testFile:item.testFile,hasTestName:item.hasTestName,hasDiagnostic:item.hasDiagnostic} : {}),failureIdentity:item.failureIdentity||item.key,excerpt:sanitize(safeLines.slice(item.index,Math.min(item.index+30,selected.find(next=>next.index>item.index)?.index??Infinity)).join('\n'))});
+  // The selection above is the v1 rule and decides every signature. When it
+  // chose a GitHub quota error, the step's first other error rides along; the
+  // writer decides which of the two a step reports.
+  const independent = candidates.find(item => !QUOTA_ERROR.test(item.failureIdentity));
+  return unique.map(item => {
+    const cause = toCause(item, found);
+    return QUOTA_ERROR.test(item.failureIdentity || '') && independent ? {...cause, independentCause:toCause(independent, [independent])} : cause;
+  });
 }
-module.exports = {causesForStep, sanitize, hash};
+module.exports = {causesForStep, sanitize, hash, isQuotaCause};

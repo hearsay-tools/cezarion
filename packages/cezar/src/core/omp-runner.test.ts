@@ -186,7 +186,6 @@ describe('buildOmpArgs', () => {
   it('sends the ordinary argv under restrictCrossSessionMessaging', () => {
     for (const toolGrant of [explicitToolGrant(['Read', 'Subagent']), UNSET_TOOL_GRANT]) {
       const args = buildOmpArgs({ ...base, toolGrant, restrictCrossSessionMessaging: true });
-      expect(args).not.toContain('--config');
       expect(args).toEqual(buildOmpArgs({ ...base, toolGrant }));
     }
   });

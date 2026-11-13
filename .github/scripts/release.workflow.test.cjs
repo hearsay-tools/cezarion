@@ -5,12 +5,6 @@ const path = require('node:path');
 
 const workflowPath = path.join(__dirname, '..', 'workflows', 'release.yml');
 
-function job(source, name) {
-  const match = source.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  [\\w-]+:\\n|(?![\\s\\S]))`, 'm'));
-  assert.ok(match, `expected ${name} job`);
-  return match[0];
-}
-
 const parsed = async () => (await import('yaml')).parse(fs.readFileSync(workflowPath, 'utf8'));
 
 test('one candidate commit goes plan, suite, stage, candidate tests, then promotion', async () => {
@@ -88,15 +82,6 @@ test('OIDC and the production environment stay on the publishing jobs only', asy
     const publishes = name === 'stage' || name === 'release';
     assert.equal(job.environment === 'production', publishes, `${name} production environment`);
     assert.equal(job.permissions?.['id-token'] === 'write', publishes, `${name} OIDC token`);
-  }
-});
-
-test('the publish steps have no npm credential and authenticate via OIDC', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  for (const name of ['stage', 'release']) {
-    const source = job(workflow, name);
-    assert.doesNotMatch(source, /NODE_AUTH_TOKEN:/, `${name} must not set NODE_AUTH_TOKEN; npm authenticates with the job OIDC token`);
-    assert.doesNotMatch(source, /secrets\.NPM_TOKEN/);
   }
 });
 

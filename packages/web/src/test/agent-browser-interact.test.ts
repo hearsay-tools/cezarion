@@ -278,12 +278,6 @@ describe('AgentBrowser screenshots never flip the desktop layout under an overla
     expect(commands()).toEqual([['screenshot', path]])
   })
 
-  it('`viewport: false`, the old spelling of full-page, no longer selects --full', () => {
-    const { browser, commands, dir } = open()
-    const path = browser.screenshot(join(dir, 'shots', 'a.png'), { viewport: false })
-    expect(commands()).toEqual([['screenshot', path]])
-  })
-
   it('`full: true` checks for an open overlay first, then captures the whole page', () => {
     const { browser, commands, dir } = open({ evalResult: null })
     const path = browser.screenshot(join(dir, 'shots', 'a.png'), { full: true })

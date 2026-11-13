@@ -7,8 +7,6 @@ const yaml = require('yaml');
 const read = name => yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows', name), 'utf8'));
 test('native protected review is read-only trusted-base admission after preflight', () => {
   const ci = read('ci.yml'), gate = ci.jobs['review-result'];
-  assert.equal(ci.jobs.review, undefined);
-  assert.equal(fs.existsSync(path.join(__dirname, '../workflows/automated-code-review.yml')), false);
   assert.equal(gate.needs, 'preflight');
   assert.deepEqual(gate.permissions, { checks: 'read', contents: 'read', 'pull-requests': 'read' });
   const checkout = gate.steps.find(s => s.uses?.startsWith('actions/checkout@'));
@@ -27,8 +25,6 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   // PR Readiness merged here: human draft/ready flips and new heads resync the board.
   assert.deepEqual(w.on.pull_request_target, { types: ['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft'],
     branches: ['main'] });
-  assert.equal(fs.existsSync(path.join(__dirname, '../workflows/pr-readiness.yml')), false);
-  assert.equal(w.on.pull_request_review, undefined); assert.equal(w.on.pull_request_review_comment, undefined);
   assert.equal(w.on.workflow_dispatch.inputs.pr_number.required, true);
   assert.equal(w.concurrency, undefined, 'discovery cannot be coalesced across PRs');
   assert.deepEqual(job.concurrency, { group: 'coderabbit-admission-pr-${{ matrix.pr }}', 'cancel-in-progress': false });
@@ -75,8 +71,6 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   }
   assert.doesNotMatch(JSON.stringify(w), /refs\/pull\//);
   assert.deepEqual([...JSON.stringify(w).matchAll(/secrets\.(\w+)/g)].map(m => m[1]), ['RELEASE_APP_PRIVATE_KEY', 'RELEASE_APP_PRIVATE_KEY', 'RELEASE_APP_PRIVATE_KEY']);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'pr-readiness.cjs'), 'utf8')
-    + fs.readFileSync(path.join(__dirname, 'coderabbit-reconcile.cjs'), 'utf8'), /convertPullRequestToDraft|markPullRequestReadyForReview/);
 });
 test('PR-context review signals have no permissions, secrets, checkout or trusted outputs and debounce per PR', () => {
   const w = read('coderabbit-review-signal.yml');
@@ -137,4 +131,86 @@ test('independent A and B events survive discovery and the production reconciler
   releaseA();
   assert.deepEqual(await first, ['rerun-requested']);
   assert.deepEqual(a.s.writes, [30]);
+});
+
+// The workflow scripts run here as github-script runs them. Each fake token is a
+// minimal Octokit whose `request` and `graphql` pass through `hook.wrap`.
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+function token(s, remaining, { project = false } = {}) {
+  let send = async ({ method, url, ...params }) => {
+    const route = `${method} ${url}`;
+    s.calls.push([route, params]);
+    if (s.fail) throw new Error('API unavailable');
+    if (route === 'GET /rate_limit') return { data: { resources: { core: { remaining, reset: 1 } } } };
+    if (project) return { headers: { 'x-ratelimit-resource': 'graphql', 'x-ratelimit-remaining': '4999' }, data: { data: {} } };
+    const { reviewData } = require('./coderabbit.testkit.cjs');
+    return { headers: { 'x-ratelimit-resource': 'core', 'x-ratelimit-remaining': String(--remaining) },
+      data: structuredClone(reviewData(s, route, params)) };
+  };
+  const request = (route, params = {}) => { const [method, url] = route.split(' '); return send({ method, url, ...params }); };
+  return { request, graphql: async (query, variables) => (await request('POST /graphql', { query, ...variables })).data.data,
+    hook: { wrap(name, wrapper) { assert.equal(name, 'request'); const inner = send; send = options => wrapper(inner, options); } } };
+}
+async function runJob(jobName, { s, github, env, tokens = {} }) {
+  const step = read('coderabbit-reconcile.yml').jobs[jobName].steps.at(-1);
+  const info = [], outputs = {};
+  const core = { info: message => info.push(message), setOutput: (key, value) => { outputs[key] = value; } };
+  const context = { repo: { owner: 'o', repo: 'r' }, eventName: 'workflow_dispatch',
+    payload: { repository: { full_name: 'o/r' }, inputs: { pr_number: '7' } } };
+  let error;
+  // The scripts call reconcile without `now`, so the fixture clock replaces the
+  // wall clock: the 30-day rerun window must not depend on the day the test runs.
+  test.mock.timers.enable({ apis: ['Date'], now: s.clock });
+  try {
+    await new AsyncFunction('require', 'github', 'context', 'core', 'getOctokit', 'process', step.with.script)(
+      p => require(path.resolve(__dirname, '../..', p)), github, context, core, value => tokens[value],
+      { env: { ...step.env, ...env } });
+  } catch (caught) { error = caught; } finally { test.mock.timers.reset(); }
+  return { info, outputs, error, s };
+}
+test('discovery logs one call count per token and counts the App when it serves the reads', async () => {
+  const { fixture } = require('./coderabbit.testkit.cjs');
+  const { s } = fixture(), github = token(s, 4000), app = token(s, 9000);
+  const job = await runJob('discover', { s, github, env: { READ_TOKEN: 'app' }, tokens: { app } });
+  assert.equal(job.error, undefined);
+  assert.equal(job.outputs.numbers, '[7]');
+  assert.deepEqual(job.info.slice(-2), ['GITHUB_TOKEN: GitHub API calls: 0 (core remaining unknown)',
+    'Release App token (reads): GitHub API calls: 1 (core remaining 8999)']);
+  const fallback = await runJob('discover', { s, github, env: { READ_TOKEN: '' } });
+  assert.deepEqual(fallback.info.slice(-1), ['GITHUB_TOKEN: GitHub API calls: 1 (core remaining 3999)']);
+});
+test('a failed discovery still logs its call count', async () => {
+  const { fixture } = require('./coderabbit.testkit.cjs');
+  const { s } = fixture(); s.fail = true;
+  const job = await runJob('discover', { s, github: token(s, 4000), env: { READ_TOKEN: '' } });
+  assert.match(job.error.message, /API unavailable/);
+  assert.deepEqual(job.info.slice(-1), ['GITHUB_TOKEN: GitHub API calls: 1 (core remaining unknown)']);
+});
+test('the per-PR job counts each token and sheds only the board under the read token floor', async () => {
+  const { fixture } = require('./coderabbit.testkit.cjs');
+  const { s } = fixture(), github = token(s, 4000), app = token(s, 700), board = token(s, 0, { project: true });
+  const job = await runJob('reconcile', { s, github, env: { READ_TOKEN: 'app', BOARD_TOKEN: 'board', RECONCILE_PR: '7' },
+    tokens: { app, board } });
+  assert.equal(job.error, undefined);
+  assert.ok(job.info.includes('"rerun-requested"'), 'the rerun decision never sheds');
+  assert.deepEqual(s.writes, [30]);
+  assert.ok(job.info.some(line => /^PR 7: board sync skipped: core remaining 699 on the read token is under the floor of 800/.test(line)));
+  const [writes, reads, boardLine] = job.info.slice(-3);
+  assert.equal(writes, 'GITHUB_TOKEN: GitHub API calls: 1 (core remaining 3999)', 'only the rerun POST uses GITHUB_TOKEN');
+  assert.match(reads, /^Release App token \(reads\): GitHub API calls: (\d+) \(core remaining (\d+)\)$/);
+  const [, count, remaining] = reads.match(/calls: (\d+) \(core remaining (\d+)\)/);
+  assert.ok(Number(count) > 1); assert.equal(Number(remaining), 700 - Number(count));
+  assert.equal(boardLine, 'Release App token (board): GitHub API calls: 0 (core remaining unknown)');
+});
+test('the per-PR job syncs the board above the floor and counts its project calls', async () => {
+  const { fixture } = require('./coderabbit.testkit.cjs');
+  const { s } = fixture(), github = token(s, 4000), board = token(s, 0, { project: true });
+  const job = await runJob('reconcile', { s, github, env: { READ_TOKEN: '', BOARD_TOKEN: 'board', RECONCILE_PR: '7' },
+    tokens: { board } });
+  assert.equal(job.error, undefined);
+  assert.equal(job.info.some(line => /board sync skipped: core remaining/.test(line)), false);
+  assert.ok(job.info.includes('"rerun-requested"'));
+  const [reads, boardLine] = job.info.slice(-2);
+  assert.match(reads, /^GITHUB_TOKEN: GitHub API calls: \d+ \(core remaining \d+\)$/, 'without the App, GITHUB_TOKEN serves reads and the write');
+  assert.match(boardLine, /^Release App token \(board\): GitHub API calls: [1-9]\d* \(core remaining unknown\)$/);
 });

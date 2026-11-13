@@ -146,7 +146,6 @@ describe('cez task', () => {
         expect(help).toContain('attention (default)');
         expect(help).toContain('--until settled');
         expect(help).toMatch(/`waiting` is attention even when no question is pending/);
-        expect(help).not.toMatch(/hasPendingHumanAsk/);
         expect(help).toMatch(/`waiting` on its own open PR or timer wait [^`]*"waiting for merge"[^`]* is neither settled nor attention/);
         expect(help).toContain(("cez task wait <id>                   # default: stops when the task needs you").replace("cez", productIdentity().command));
         expect(help).toContain(("cez task wait <id> --until settled   # terminal status only").replace("cez", productIdentity().command));

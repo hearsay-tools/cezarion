@@ -66,9 +66,11 @@ function evaluateChecks({ required, checkRuns, statuses = [] }) {
 }
 
 // Three reads: the branch rules, the head's check runs and its commit statuses.
+// The head's check runs alone: reconciliation needs them even when the board is skipped.
+const readHeadCheckRuns = (read, sha) => pages(read, 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs', { ref: sha }, 'check_runs');
 async function readHeadChecks(read, sha) {
   const required = await requiredCheckNames(read, 'main');
-  const checkRuns = await pages(read, 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs', { ref: sha }, 'check_runs');
+  const checkRuns = await readHeadCheckRuns(read, sha);
   const combined = await read('GET /repos/{owner}/{repo}/commits/{ref}/status', { ref: sha, per_page: 100 });
   return { checkRuns, ...evaluateChecks({ required, checkRuns, statuses: combined?.statuses || [] }) };
 }
@@ -180,6 +182,7 @@ module.exports = {
   latestByName,
   evaluateChecks,
   readHeadChecks,
+  readHeadCheckRuns,
   reviewCheckCompleted,
   boardMoves,
   boardStatus,
