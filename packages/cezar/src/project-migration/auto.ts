@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 import { productIdentity } from '../home/identity.ts';
 import { markFreshProject } from './fresh.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import type { Home } from '../home/home.ts';
 import { noticeLegacyProject, pathPresent, projectMoveMarked, projectPaths } from '../project-paths.ts';
 import { CockpitOwnership, migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -14,7 +13,7 @@ import { automationLeaseHeld } from '../automations/store.ts';
 import type { MigrationFault } from './steps.ts';
 
 /**
- * The cockpit's automatic project move (hearsay-tools/cezarion#3089), only with `REBRAND_SWITCH`:
+ * The cockpit's automatic project move (hearsay-tools/cezarion#3089):
  * at cockpit start for the boot project and, right after the listener starts, every other registered
  * project (or earlier, when a request reaches it first), and a project added later when it is added;
  * after journal recovery and before any ordinary read or task start. It moves the legacy state under
@@ -32,7 +31,7 @@ import type { MigrationFault } from './steps.ts';
  */
 
 export type AutomaticMove =
-  | { status: 'off' | 'nothing' }
+  | { status: 'nothing' }
   | { status: 'moved'; gitMv: string[]; leftovers: string[] }
   | { status: 'blocked'; reason: string };
 
@@ -103,10 +102,9 @@ export function movedNotice(root: string, leftovers: readonly string[]): string 
  * attempt per project per cockpit run: a later or concurrent call gets that attempt's promise.
  */
 export function moveProjectWhenIdle(root: string, options: {
-  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; rebrand?: boolean; self?: number; fault?: MigrationFault;
+  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; self?: number; fault?: MigrationFault;
   log?: (line: string) => void;
 }): Promise<AutomaticMove> {
-  if (!(options.rebrand ?? REBRAND_SWITCH)) return Promise.resolve({ status: 'off' });
   if (!options.ownership) return attempt(root, options);
   const runs = attempts.get(options.ownership) ?? new Map<string, Promise<AutomaticMove>>();
   attempts.set(options.ownership, runs);
@@ -119,14 +117,14 @@ export function moveProjectWhenIdle(root: string, options: {
 }
 
 async function attempt(root: string, options: Parameters<typeof moveProjectWhenIdle>[1]): Promise<AutomaticMove> {
-  markFreshProject(root, options.rebrand ?? REBRAND_SWITCH);
+  markFreshProject(root);
   // A completed move marked the project (hearsay-tools/cezarion#3150): `.ai/cezar/` is its fallback
   // now, and holds nothing more to move once only the ownership claims are left in it. An unmarked
   // project still needs the move that marks it, even when its `.ai/cezar/` is empty or tracked only.
   if (projectMoveMarked(root) && !legacyStateLeft(join(root, ...LEGACY_PROJECT_DIR.split('/')), join(root, ...MIGRATED_PROJECT_DIR.split('/')))) return { status: 'nothing' };
   const log = options.log ?? ((line: string) => console.warn(line));
   const blocked = (reason: string): AutomaticMove => {
-    noticeLegacyProject(root, { releaseEnabled: options.rebrand ?? REBRAND_SWITCH, reason, warn: log });
+    noticeLegacyProject(root, { reason, warn: log });
     return { status: 'blocked', reason };
   };
   const check = await precheck(root, options.homes, options.self ?? process.pid);
@@ -136,7 +134,7 @@ async function attempt(root: string, options: Parameters<typeof moveProjectWhenI
   try {
     const result = await move(root, ownership, options.fault);
     if ('reason' in result) return blocked(result.reason);
-    log(`[${productIdentity(options.rebrand ?? REBRAND_SWITCH).command}] ${movedNotice(root, result.leftovers)}${result.gitMv.length
+    log(`[${productIdentity().command}] ${movedNotice(root, result.leftovers)}${result.gitMv.length
       ? ` Tracked files stay; run these and commit:\n${result.gitMv.map(line => `  ${line}`).join('\n')}` : ''}`);
     return { status: 'moved', gitMv: result.gitMv, leftovers: result.leftovers };
   } finally {
@@ -151,23 +149,23 @@ async function attempt(root: string, options: Parameters<typeof moveProjectWhenI
  * ticks and the cold run index. Concurrent callers share the recovery and the move attempt.
  */
 export async function prepareProject(root: string, options: {
-  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; rebrand?: boolean | undefined; keep?: boolean;
+  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; keep?: boolean;
 }): Promise<void> {
   await recoverProjectMigration(root, { ownership: options.ownership, keep: options.keep ?? false });
-  await moveProjectWhenIdle(root, { ownership: options.ownership, homes: options.homes, ...(options.rebrand === undefined ? {} : { rebrand: options.rebrand }) });
+  await moveProjectWhenIdle(root, { ownership: options.ownership, homes: options.homes });
 }
 
 /** Prepare `projects` one after another; a project whose recovery fails or whose move fails after
  *  its journal exists is logged and stays refused by admission, and never stops the others. Once
  *  `stopped` answers true (the cockpit is closing), no further project is prepared. */
 export async function prepareProjects<T extends { root: string; status?: string }>(projects: T[], options: {
-  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; rebrand?: boolean | undefined; stopped?: () => boolean;
+  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; stopped?: () => boolean;
 }): Promise<T[]> {
   for (const project of projects) {
     if (options.stopped?.()) break;
     if (project.status === 'missing') continue;
     await prepareProject(project.root, options).catch((error: unknown) => {
-      console.warn(`[${productIdentity(options.rebrand ?? REBRAND_SWITCH).command}] ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[${productIdentity().command}] ${error instanceof Error ? error.message : String(error)}`);
     });
   }
   return projects;

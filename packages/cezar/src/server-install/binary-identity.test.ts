@@ -109,37 +109,40 @@ describe('exact npm launch ownership', () => {
   });
 });
 
+/** A plist as an install made before the rename wrote it: the old label. */
+const legacyLabel = (xml: string) => xml.replaceAll('tools.hearsay.squawk.', 'ai.cezar.');
+
 describe('launchd ownership and selected command generation', () => {
   it('accepts new and old package forms while rejecting unrelated launchers', () => {
     const ctx = context();
     const artifact = { kind: 'owned', type: 'launchd', name: 'ai.cezar.cockpit', path: '/tmp/cockpit.plist' } as const;
     for (const pkg of [...NPM_LAUNCH_PACKAGES, 'cez', 'cezar-cli', 'foreign-cezarion']) {
-      const xml = squawkLaunchdPlist('/repo', 4321, ['/usr/bin/npx', '--yes', pkg], false);
+      const xml = legacyLabel(squawkLaunchdPlist('/repo', 4321, ['/usr/bin/npx', '--yes', pkg]));
       expect(ownsLaunchdPlist(ctx, artifact, xml)).toBe((NPM_LAUNCH_PACKAGES as readonly string[]).includes(pkg));
     }
     for (const [argv, owned] of [[['/usr/bin/npx', '--yes', '-p', '@hearsay-tools/squawk', 'hsq'], true],
       [['/usr/bin/npx', '--yes', '-p', '@hearsay-tools/squawk', 'foreign'], false], [['/usr/bin/npx', '--yes', '-p', 'foreign', 'hsq'], false],
       [['/usr/bin/npx', '--yes', 'hsq'], false]] as const) {
-      expect(ownsLaunchdPlist(ctx, artifact, squawkLaunchdPlist('/repo', 4321, [...argv], false))).toBe(owned);
+      expect(ownsLaunchdPlist(ctx, artifact, legacyLabel(squawkLaunchdPlist('/repo', 4321, [...argv])))).toBe(owned);
     }
     const entry = fileURLToPath(new URL('../../dist/hsq.js', import.meta.url));
     for (const script of [entry, '/usr/local/bin/hsq', '/usr/local/bin/cez', '/usr/local/bin/cezarion', '/foreign/dist/hsq.js', '/usr/local/bin/cezar-cli']) {
-      const xml = squawkLaunchdPlist('/repo', 4321, ['/usr/bin/node', script], false);
+      const xml = legacyLabel(squawkLaunchdPlist('/repo', 4321, ['/usr/bin/node', script]));
       expect(ownsLaunchdPlist(ctx, artifact, xml)).toBe(!script.includes('/foreign/') && !script.endsWith('cezar-cli'));
     }
   });
-  it.each([false, true])('selects the service entry and alias (switch %s)', async rebrand => {
+  it('selects the service entry and package', async () => {
     const ctx = context();
     ctx.dryRun = true;
-    const argv = await resolveSquawkArgv(ctx, rebrand);
-    expect(argv[1]).toMatch(rebrand ? /[\\/]dist[\\/]hsq\.js$/ : /[\\/]dist[\\/]index\.js$/);
+    const argv = await resolveSquawkArgv(ctx);
+    expect(argv[1]).toMatch(/[\\/]dist[\\/]hsq\.js$/);
     const opts = { node: '/bin/node', pkgRoot: '/pkg', entry: join('/pkg/dist', 'index.js'), entryExists: true, npxPath: '/bin/npx' };
-    const selected = serviceExecStart(opts, rebrand);
-    expect(selected).toBe(`/bin/node ${join('/pkg/dist', rebrand ? 'hsq.js' : 'index.js')}`);
-    const npx = serviceExecStart({ ...opts, pkgRoot: '/cache/_npx/abc/node_modules/cezarion' }, rebrand);
-    expect(npx).toBe(`/bin/npx --yes ${rebrand ? '-p @hearsay-tools/squawk hsq' : 'cezarion'}`);
-    expect(ownedNpxPackage(`${npx} serve --no-open`)).toBe(rebrand ? '@hearsay-tools/squawk' : 'cezarion');
-    const unit = systemdUnit('/repo', 4321, 'user', selected, undefined, rebrand);
+    const selected = serviceExecStart(opts);
+    expect(selected).toBe(`/bin/node ${join('/pkg/dist', 'hsq.js')}`);
+    const npx = serviceExecStart({ ...opts, pkgRoot: '/cache/_npx/abc/node_modules/cezarion' });
+    expect(npx).toBe('/bin/npx --yes -p @hearsay-tools/squawk hsq');
+    expect(ownedNpxPackage(`${npx} serve --no-open`)).toBe('@hearsay-tools/squawk');
+    const unit = systemdUnit('/repo', 4321, 'user', selected);
     expect(unit).toContain(`ExecStart=${selected} serve --no-open --port 4321`);
     expect(unit).toContain('Environment=CEZ_REMOTE=1\nEnvironment=HSQ_REMOTE=1');
   });

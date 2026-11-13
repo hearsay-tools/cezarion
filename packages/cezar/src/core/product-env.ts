@@ -1,5 +1,3 @@
-import { REBRAND_SWITCH } from '../home/switch.ts';
-
 /** Product settings accept the new name immediately, including an explicitly empty value.
  * HOME is special: resolution uses the two home accessors below, never ordinary fallback.
  * Generated child names remain controller-owned; reading a setting grants no child authority.
@@ -12,7 +10,7 @@ export function productEnv(suffix: string, env: NodeJS.ProcessEnv = process.env,
   return read(`HSQ_${suffix}`) ?? read(`CEZ_${suffix}`);
 }
 
-/** The migration source and switch-off layout always select the legacy locator alone. */
+/** The migration source always selects the legacy locator alone. */
 export function legacyHomeEnv(env: NodeJS.ProcessEnv): string | undefined { return env.CEZ_HOME; }
 
 /** Split layout handles empty locators and the legacy-default exception itself. */
@@ -25,8 +23,8 @@ export function legacyEnvNames(env: NodeJS.ProcessEnv): string[] {
 
 /** Controller-generated entries keep legacy children working during the rename window.
  * Both names carry the exact value, including intentional clears. */
-export function productEnvEntries(suffix: string, value: string, rebrand = REBRAND_SWITCH): Record<string, string> {
-  return rebrand ? { [`HSQ_${suffix}`]: value, [`CEZ_${suffix}`]: value } : { [`CEZ_${suffix}`]: value };
+export function productEnvEntries(suffix: string, value: string): Record<string, string> {
+  return { [`HSQ_${suffix}`]: value, [`CEZ_${suffix}`]: value };
 }
 
 /** Hosted mode fails closed across old service files and inherited preferred names.

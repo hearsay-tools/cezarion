@@ -128,8 +128,8 @@ Rust and the platform's Tauri build prerequisites are required to compile. They
 are not required to run an installed app. The desktop package intentionally sits
 outside the pnpm workspaces so normal CLI builds do not require Rust.
 
-For an isolated macOS smoke test of a development build with the release switch
-off, launch its old-identity executable directly so it receives the test environment:
+For an isolated macOS smoke test of an old-identity development build
+(`--rebrand off`), launch its executable directly so it receives the test environment:
 
 Before running the test, check that your login shell startup files do not
 change or unset `CEZ_HOME` or `HSQ_DRY_RUN`. The sidecar uses a login shell.
@@ -141,9 +141,9 @@ HSQ_DESKTOP_CWD="$PWD" HSQ_DESKTOP_NO_UPDATE=1 \
 "$PWD/packages/desktop/src-tauri/target/debug/bundle/macos/Cezarion.app/Contents/MacOS/cezar-desktop"
 ```
 
-With the release switch off, the native home resolver reads only `CEZ_HOME`,
+An old-identity build's native home resolver reads only `CEZ_HOME`,
 else `~/.cezar`; it ignores `HSQ_HOME`. The command pins `CEZ_HOME` to isolate
-the registry and desktop state. With the switch on, `HSQ_HOME` selects the split
+the registry and desktop state. In a new-identity build, `HSQ_HOME` selects the split
 roots; see [custom homes](migration.md#custom-homes-and-containers) for `CEZ_HOME` rules.
 The other native development settings use `HSQ_DRY_RUN` (`CEZ_DRY_RUN` fallback),
 `HSQ_DESKTOP_ENTRY` (`CEZ_DESKTOP_ENTRY` fallback),
@@ -194,7 +194,7 @@ installer would end the process), and it does not relaunch itself after the inst
 
 The release identity is Squawk, `tools.hearsay.squawk`. It has separate feeds
 and artifacts from the old Cezarion app. See the [migration guide](migration.md#desktop-and-mobile).
-Development builds with the release switch off keep the old identity. Native environment readers accept `HSQ_*` first and
+Development builds with `--rebrand off` keep the old identity. Native environment readers accept `HSQ_*` first and
 `CEZ_*` as fallback now. Presence wins, including empty values. The shell pins
 both aliases for every generated sidecar control, even in an old-ID build.
 
@@ -213,8 +213,7 @@ updater feed. A bridge build keeps the old identity and old feed.
 The owner can build a bridge in the Desktop release workflow with `bridge`
 selected. Dry run is still the default. The workflow first builds the new app,
 embeds it in the old-ID updater, and signs the outer bundle. Development runs
-publish no release, tag or feed. Public bridge generation refuses while the
-release switch is off. Only the owner publishes the final bridge to the old
+publish no release, tag or feed. Only the owner publishes the final bridge to the old
 feed.
 
 The bridge supports macOS `.app`, Windows per-user NSIS and Linux AppImage

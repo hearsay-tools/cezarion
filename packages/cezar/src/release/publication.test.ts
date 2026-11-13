@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { withPublicationPackage } from './publication.ts';
 
 describe('publication staging', () => {
-  it.each([false, true])('leaves source bytes intact after a failing pack/publish (rebrand %s)', rebrand => {
+  it.each([false, true])('leaves source bytes intact after a failing pack/publish (renamed %s)', renamed => {
     const dir = mkdtempSync(join(tmpdir(), 'publication-test-'));
     const bytes = '{"name":"@wjarka/cezarion", "version":"1.2.3"}\n';
     writeFileSync(join(dir, 'package.json'), bytes);
@@ -15,11 +15,11 @@ describe('publication staging', () => {
     writeFileSync(join(dir, 'node_modules', 'skip'), 'dependency');
     let staged = '';
     try {
-      const manifest = { name: rebrand ? '@hearsay-tools/squawk' : '@wjarka/cezarion', version: '1.2.3' };
+      const manifest = { name: renamed ? '@hearsay-tools/squawk' : '@wjarka/cezarion', version: '1.2.3' };
       expect(() => withPublicationPackage(dir, manifest, cwd => {
         staged = cwd;
         expect(readFileSync(join(cwd, 'entry.js'), 'utf8')).toBe('implementation');
-        if (rebrand) {
+        if (renamed) {
           expect(cwd).not.toBe(dir);
           expect(JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'))).toMatchObject(manifest);
           expect(existsSync(join(cwd, 'node_modules'))).toBe(false);
@@ -30,7 +30,7 @@ describe('publication staging', () => {
         throw new Error('npm failure');
       })).toThrow('npm failure');
       expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(bytes);
-      expect(existsSync(staged)).toBe(!rebrand);
+      expect(existsSync(staged)).toBe(!renamed);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   it('retains the source gitHead outside Git so a stable release retry can verify its source', () => {

@@ -16,7 +16,7 @@ import { cleanStoreRoots } from './store.testkit.ts';
 import { useTestHome } from './test-home.testkit.ts';
 import { installInstance, serverFixture, serverMigrate, sharedHome } from '../server-install/server-migrate.testkit.ts';
 
-afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); vi.doUnmock('./switch.ts'); vi.resetModules(); });
+afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 
 function rolledBackHome() {
   const f = migrationFixture();
@@ -38,10 +38,10 @@ it('a rolled-back group serves legacy through both serve preparations, with one 
   const legacyBytes = readFileSync(f.legacy.workspaceConfig);
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   // index.ts selects the Home that startServer then passes to prepareHomeLifecycle.
-  const served = prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy });
+  const served = prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy });
   expect(served).toBe(f.legacy);
   const server = createServer();
-  prepareHomeLifecycle(served, 'shop', { rebrand: true })(server);
+  prepareHomeLifecycle(served, 'shop')(server);
   server.listen(0, '127.0.0.1');
   try {
     await once(server, 'listening');
@@ -68,7 +68,7 @@ it('direct server preparation refuses a rolled-back target before its consumers 
   useTestHome(f.legacy);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   // startServer calls this synchronously before constructing consumers of deps.home.
-  expect(() => prepareHomeLifecycle(f.target, undefined, { rebrand: true })).toThrow(
+  expect(() => prepareHomeLifecycle(f.target, undefined)).toThrow(
     `[hsq] refusing to serve home ${f.target.root}: preparation selected ${f.legacy.root}. Prepare the home before starting the server.`,
   );
   expect(targetSnapshot(f.target)).toEqual(before);
@@ -83,7 +83,7 @@ it.each(['default', 'shop'])('recognizes a completed %s server record after roll
   migrateLegacyHome(f.legacy, f.target, { commit: false });
   rollbackLegacyMigration(f.target);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  expect(prepareMigrationHome(f.target, f.env, { enabled: true, legacy: f.legacy }))
+  expect(prepareMigrationHome(f.target, f.env, { legacy: f.legacy }))
     .toEqual({ kind: 'legacy', home: f.legacy });
 });
 
@@ -92,14 +92,14 @@ it('server-migrate after rollback and boot recopies the current legacy data and 
   f.host.unhealthy.add('hearsay-squawk.service');
   await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'rolled-back' });
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.legacy);
+  expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.legacy);
   Home.seed(f.legacy, f.legacy.workspaceConfig, { projects: [], saved: 'after rollback' });
   rawJson(f.target.workspaceConfig, { saved: 'failed target' });
   f.host.unhealthy.clear();
   await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
   expect(json(f.target.workspaceConfig).saved).toBe('after rollback');
   expect(readInstallMarker(f.target.config)?.state).toBe('committed');
-  expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.target);
+  expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.target);
 });
 
 it('explicit migrate recopies legacy and clears the skip without removing the failure evidence', async () => {
@@ -112,12 +112,12 @@ it('explicit migrate recopies legacy and clears the skip without removing the fa
   const before = targetSnapshot(f.target);
   expect(await runMigrationCommand(['--dry-run'], f.env, f.target, f.legacy)).toBe(0);
   expect(targetSnapshot(f.target)).toEqual(before);
-  expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.legacy);
+  expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.legacy);
   Home.seed(f.legacy, f.legacy.workspaceConfig, { projects: [], saved: 'explicit retry' });
   expect(await runMigrationCommand([], f.env, f.target, f.legacy)).toBe(0);
   expect(json(f.target.workspaceConfig).saved).toBe('explicit retry');
   warn.mockClear();
-  expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.target);
+  expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.target);
   expect(readInstallMarker(f.target.config)?.state).toBe('committed');
   expect(existsSync(join(f.target.config, 'install.json.failed'))).toBe(true);
   expect(warn).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ it.each(['desktop', 'incomplete server', 'dry-run server'])('%s keeps the curren
     schema: 1, installed: kind === 'dry-run server', dryRun: kind === 'dry-run server', steps: {},
   });
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.target);
+  expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.target);
   expect(readInstallMarker(f.target.config)?.state).toBe('committed');
   expect(json(f.target.workspaceConfig).saved).toBe('original');
   expect(warn).not.toHaveBeenCalled();
@@ -142,21 +142,8 @@ it('a staged retry stays on the pending target even while the prior failed marke
   rollbackLegacyMigration(f.target);
   migrateLegacyHome(f.legacy, f.target, { commit: false });
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.target);
+  expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.target);
   expect(readInstallMarker(f.target.config)?.state).toBe('pending');
-  expect(warn).not.toHaveBeenCalled();
-});
-
-it('switch off leaves the legacy serve path and failed target unchanged', () => {
-  const f = serverFixture();
-  installInstance(f, { instance: 'default', port: 4321, externalProxy: true });
-  migrateLegacyHome(f.legacy, f.target, { commit: false });
-  rollbackLegacyMigration(f.target);
-  const before = targetSnapshot(f.target);
-  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  expect(prepareMigrationHome(f.target, f.env, { enabled: false, legacy: f.legacy })).toEqual({ kind: 'ready' });
-  expect(prepareOperatorHome(f.legacy, 'serve', f.env, { enabled: false, legacy: f.legacy })).toBe(f.legacy);
-  expect(targetSnapshot(f.target)).toEqual(before);
   expect(warn).not.toHaveBeenCalled();
 });
 
@@ -176,7 +163,7 @@ describe('a legacy home that records an installed server migrates only through s
   it('an ordinary CLI command keeps the legacy home and prints one notice to run server-migrate', () => {
     const f = unmigratedServer();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareOperatorHome(f.target, 'projects', f.env, { enabled: true, legacy: f.legacy })).toBe(f.legacy);
+    expect(prepareOperatorHome(f.target, 'projects', f.env, { legacy: f.legacy })).toBe(f.legacy);
     notMigrated(f);
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Run hsq server-migrate.'));
     expect(json(f.legacy.workspaceConfig).saved).toBe('original');
@@ -185,10 +172,10 @@ describe('a legacy home that records an installed server migrates only through s
   it('the cockpit boot serves the legacy home and refuses a direct serve of the target', async () => {
     const f = unmigratedServer();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const served = prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy });
+    const served = prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy });
     expect(served).toBe(f.legacy);
     const server = createServer();
-    prepareHomeLifecycle(served, 'shop', { rebrand: true })(server);
+    prepareHomeLifecycle(served, 'shop')(server);
     server.listen(0, '127.0.0.1');
     try {
       await once(server, 'listening');
@@ -200,64 +187,46 @@ describe('a legacy home that records an installed server migrates only through s
     }
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('hsq server-migrate'));
     useTestHome(f.legacy);
-    expect(() => prepareHomeLifecycle(f.target, undefined, { rebrand: true })).toThrow(`preparation selected ${f.legacy.root}`);
+    expect(() => prepareHomeLifecycle(f.target, undefined)).toThrow(`preparation selected ${f.legacy.root}`);
     notMigrated(f);
   });
 
   it('server-migrate still migrates the group, and the next boot uses the committed target without a notice', async () => {
     const f = unmigratedServer();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareOperatorHome(f.target, 'projects', f.env, { enabled: true, legacy: f.legacy })).toBe(f.legacy);
+    expect(prepareOperatorHome(f.target, 'projects', f.env, { legacy: f.legacy })).toBe(f.legacy);
     await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
     warn.mockClear();
-    expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.target);
+    expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.target);
     expect(readInstallMarker(f.target.config)?.state).toBe('committed');
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it('switch off keeps the legacy home with no notice and no target', () => {
-    const f = unmigratedServer();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareMigrationHome(f.target, f.env, { enabled: false, legacy: f.legacy })).toEqual({ kind: 'ready' });
-    expect(prepareOperatorHome(f.legacy, 'projects', f.env, { enabled: false, legacy: f.legacy })).toBe(f.legacy);
-    notMigrated(f);
     expect(warn).not.toHaveBeenCalled();
   });
 });
 
-it.each(['projects', 'serve'])('%s keeps an installed default server home and prints one notice', async command => {
-  vi.resetModules();
-  vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: true }));
-  const { prepareOperatorHome: prepareSwitchedHome } = await import('./entry.ts');
+it.each(['projects', 'serve'])('%s keeps an installed default server home and prints one notice', command => {
   const f = serverFixture();
   try {
     installInstance(f, { instance: 'default', port: 4321 });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareSwitchedHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.legacy);
+    expect(prepareOperatorHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.legacy);
     expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Run hsq server-migrate.'));
   } finally { cleanStoreRoots(); }
 });
 
-it.each([{ installed: false }, { installed: true, dryRun: true }])('does migrate a home with only an incomplete server record %j', async record => {
-  vi.resetModules();
-  vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: true }));
-  const { prepareOperatorHome: prepareSwitchedHome } = await import('./entry.ts');
+it.each([{ installed: false }, { installed: true, dryRun: true }])('does migrate a home with only an incomplete server record %j', record => {
   const f = serverFixture();
   try {
     Home.seed(f.legacy, f.legacy.serverState(), { schema: 1, primaryPort: 4321, steps: {}, ...record });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareSwitchedHome(f.target, 'projects', f.env, { legacy: f.legacy })).toBe(f.target);
+    expect(prepareOperatorHome(f.target, 'projects', f.env, { legacy: f.legacy })).toBe(f.target);
     expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(true);
     expect(warn).not.toHaveBeenCalled();
   } finally { cleanStoreRoots(); }
 });
 
 
-it.each(['projects', 'serve'])('%s keeps an installed macOS server home and prints one server-migrate notice', async command => {
-  vi.resetModules();
-  vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: true }));
-  const { prepareOperatorHome: prepareSwitchedHome } = await import('./entry.ts');
+it.each(['projects', 'serve'])('%s keeps an installed macOS server home and prints one server-migrate notice', command => {
   const f = serverFixture();
   try {
     Home.seed(f.legacy, f.legacy.serverState(), {
@@ -265,7 +234,7 @@ it.each(['projects', 'serve'])('%s keeps an installed macOS server home and prin
     });
     const before = targetSnapshot(f.target);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareSwitchedHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.legacy);
+    expect(prepareOperatorHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.legacy);
     expect(targetSnapshot(f.target)).toEqual(before);
     expect(readInstallMarker(f.target.config)?.state).toBeUndefined();
     expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);

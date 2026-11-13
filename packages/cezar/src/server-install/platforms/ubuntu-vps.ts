@@ -14,7 +14,6 @@ import { isForeignNpxExecStart, isNpxExecStart, npxLaunchArgs, refreshNpxCacheFo
 import { failedRestart, freshRestartOrFail, readExecStart, resolveRedeployScope, restartSystemService, restartUserService, serviceDiagnostics, serviceSnapshot } from './ubuntu-vps-redeploy.ts';
 import { recordedSite, recordedUnit, sitePathsToRemove, unitHint } from './ubuntu-vps-names.ts';
 import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuService } from './ubuntu-vps-migration.ts';
-import { REBRAND_SWITCH } from '../../home/switch.ts';
 export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
 /**
  * The `ubuntu-vps` strategy: stand up an authenticated, proxied Squawk on a bare
@@ -182,13 +181,13 @@ ${http2}
 `;
 }
 
-const nginxProxyStep = (rebrand: boolean): InstallStep => ({
+const nginxProxyStep = (): InstallStep => ({
   id: 'nginx-proxy',
   title: 'Reverse proxy (nginx + htpasswd)',
   async check(ctx) {
     if (ctx.dryRun) return false;
     const nginxOk = await verifyCommand(ctx, 'nginx', ['-v']);
-    const vhostOk = await verifyCommand(ctx, 'test', ['-f', recordedSite(ctx, rebrand).vhostEnabled]);
+    const vhostOk = await verifyCommand(ctx, 'test', ['-f', recordedSite(ctx).vhostEnabled]);
     return nginxOk && vhostOk;
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
@@ -197,7 +196,7 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
     //    claiming a pre-existing nginx.
     const nginxWasPresent = await verifyCommand(ctx, 'nginx', ['-v']);
     await sudoStep(ctx, {
-      description: `Install nginx (the public TLS + auth front for ${productName('cezar', rebrand)}).`,
+      description: `Install nginx (the public TLS + auth front for ${productName('cezar')}).`,
       command: 'apt-get update && apt-get install -y nginx',
       verify: (c) => verifyCommand(c, 'nginx', ['-v']),
     });
@@ -246,7 +245,7 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
       if (how === 'generate') {
         password = generatePassword();
         ctx.ui.note(
-          `Username: ${user}\nPassword: ${password}\n\nSave these now — this is your cockpit login. ${productName('cezar', rebrand)} stores only a hash; the plaintext is not written anywhere and cannot be recovered.`,
+          `Username: ${user}\nPassword: ${password}\n\nSave these now — this is your cockpit login. ${productName('cezar')} stores only a hash; the plaintext is not written anywhere and cannot be recovered.`,
           'Generated cockpit credentials',
         );
       } else {
@@ -283,7 +282,7 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
     // every request 500. 0640 root:www-data: readable by nginx, not by others.
     // The credential line travels on STDIN (`cat > file`), never in argv — the
     // apr1 hash is offline-crackable, and argv is world-readable via `ps`.
-    const { htpasswd, vhostAvailable: vhostAvail, vhostEnabled: vhostEnbl } = recordedSite(ctx, rebrand);
+    const { htpasswd, vhostAvailable: vhostAvail, vhostEnabled: vhostEnbl } = recordedSite(ctx);
     await sudoStep(ctx, {
       description: 'Write the htpasswd identity file that nginx checks on every request.',
       note: `${htpasswd}\n\n${user}:<apr1 hash of your password>`,
@@ -304,7 +303,7 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
     const nginxVersion = await installedNginxVersion(ctx);
     const vhost = nginxVhost(ctx.state.primaryPort, ctx.state.domain ?? '_', htpasswd, nginxVersion);
     await writeFileStep(ctx, {
-      description: `Write the ${productName('cezar', rebrand)} nginx site, enable it, and reload nginx.`,
+      description: `Write the ${productName('cezar')} nginx site, enable it, and reload nginx.`,
       path: vhostAvail,
       content: vhost,
       extra: `ln -sf ${vhostAvail} ${vhostEnbl} && rm -f /etc/nginx/sites-enabled/default && nginx -t && systemctl reload nginx`,
@@ -376,15 +375,15 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
     if (sharedPkgs.length > 0) {
       ctx.ui.note(
         sharedPkgs.map((a) => a.removeHint ?? a.name ?? '').filter(Boolean).join('\n'),
-        `Installed for ${productName('cezar', rebrand)} but possibly used elsewhere — remove manually if unwanted`,
+        `Installed for ${productName('cezar')} but possibly used elsewhere — remove manually if unwanted`,
       );
     }
     // rmdir only succeeds when empty, so removing one instance's
     // htpasswd never nukes another instance's credentials in the same dir.
-    const { files, dirs } = sitePathsToRemove(ctx, rebrand);
+    const { files, dirs } = sitePathsToRemove(ctx);
     const vhostEnbl = files[0]!;
     await sudoStep(ctx, {
-      description: `Remove the ${productName('cezar', rebrand)} nginx site + htpasswd, reload nginx.`,
+      description: `Remove the ${productName('cezar')} nginx site + htpasswd, reload nginx.`,
       command:
         `rm -f ${files.join(' ')}` +
         restoreClause +
@@ -398,7 +397,7 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
 const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9](-?[a-z0-9])*\.)+[a-z]{2,}$/i;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-const sslStep = (rebrand: boolean): InstallStep => ({
+const sslStep = (): InstallStep => ({
   id: 'ssl',
   title: 'Domain + SSL (Let’s Encrypt)',
   optional: true,
@@ -449,7 +448,7 @@ const sslStep = (rebrand: boolean): InstallStep => ({
     // (and the nginx server_name) all agree on it, even for the default instance
     // that entered its domain here rather than up front.
     ctx.state.domain = trimmedDomain;
-    const { vhostAvailable: vhostAvail, vhostEnabled: vhostEnbl, htpasswd } = recordedSite(ctx, rebrand);
+    const { vhostAvailable: vhostAvail, vhostEnabled: vhostEnbl, htpasswd } = recordedSite(ctx);
     const vhostHasTls = await verifyCommand(ctx, 'sh', ['-c', `grep -qs ssl_certificate ${vhostAvail}`]);
     const nginxVersion = await installedNginxVersion(ctx);
     if (vhostHasTls) {
@@ -540,7 +539,7 @@ const sslStep = (rebrand: boolean): InstallStep => ({
     if (pkgs.length > 0) {
       ctx.ui.note(
         pkgs.map((a) => a.removeHint ?? a.name ?? '').filter(Boolean).join('\n'),
-        `Installed for ${productName('cezar', rebrand)} but possibly used elsewhere — remove manually if unwanted`,
+        `Installed for ${productName('cezar')} but possibly used elsewhere — remove manually if unwanted`,
       );
     }
     // The vhost (with certbot’s edits) is removed by the nginx-proxy step’s undo.
@@ -563,7 +562,6 @@ export function systemdUnit(
   scope: 'user' | 'system',
   execStart: string,
   bindHost?: string,
-  _rebrand = REBRAND_SWITCH,
 ): string {
   const userLine = scope === 'system' ? `User=${userInfo().username}\n` : '';
   const installTarget = scope === 'system' ? 'multi-user.target' : 'default.target';
@@ -588,7 +586,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ${userLine}WorkingDirectory=${repoRoot}
-${Object.entries(productEnvEntries('REMOTE', '1', true)).reverse().map(([key, value]) => `Environment=${key}=${value}`).join('\n')}
+${Object.entries(productEnvEntries('REMOTE', '1')).reverse().map(([key, value]) => `Environment=${key}=${value}`).join('\n')}
 Environment=PATH=${sysd(pathDirs.join(':'))}
 ExecStart=${sysd(execStart)} serve --no-open --port ${port}${sysd(bind)}
 Restart=on-failure
@@ -604,12 +602,10 @@ WantedBy=${installTarget}
  *
  *  - Launched via npx (the CLI package lives in npm's ephemeral `_npx` cache,
  *    which gets cleaned): the service can't point there, so it reinstalls-and-runs
- *    the same way — `<abs npx> --yes cezarion`, or with the switch on
- *    `<abs npx> --yes -p @hearsay-tools/squawk hsq` (bare `npx` would 203/EXEC,
- *    so npx is made absolute).
- *  - A stable install (a checkout, or a global `cezarion`/`cez`): run the
- *    CLI's own built entry `<node> <pkg>/dist/index.js`, or a resolved global
- *    bin. Absolute node + absolute script → systemd never resolves off PATH.
+ *    the same way — `<abs npx> --yes -p @hearsay-tools/squawk hsq` (bare `npx`
+ *    would 203/EXEC, so npx is made absolute).
+ *  - A stable install (a checkout, or a global `hsq`): run the CLI's own built
+ *    entry `<node> <pkg>/dist/hsq.js`, or a resolved global bin. Absolute node + absolute script → systemd never resolves off PATH.
  */
 export function serviceExecStart(opts: {
   node: string;
@@ -618,23 +614,23 @@ export function serviceExecStart(opts: {
   entryExists: boolean;
   npxPath: string;
   globalBin?: string | undefined;
-}, rebrand = REBRAND_SWITCH): string {
-  const entry = rebrand ? join(dirname(opts.entry), `${productIdentity(rebrand).command}.js`) : opts.entry;
-  if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return [opts.npxPath, ...npxLaunchArgs(rebrand)].join(' ');
+}): string {
+  const entry = join(dirname(opts.entry), `${productIdentity().command}.js`);
+  if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return [opts.npxPath, ...npxLaunchArgs()].join(' ');
   if (opts.entryExists) return `${opts.node} ${entry}`;
   if (opts.globalBin) return `${opts.node} ${opts.globalBin}`;
   return `${opts.node} ${entry}`;
 }
 
-async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<string> {
-  const identity = productIdentity(rebrand);
+async function resolveExecStart(ctx: InstallContext): Promise<string> {
+  const identity = productIdentity();
   const node = process.execPath; // absolute node running this installer
   // The CLI's OWN package root (…/dist/server-install/platforms/ → up 3), NOT the
   // repo being operated on — `--repo` / cwd can differ from where Squawk lives.
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const entry = join(pkgRoot, 'dist', 'index.js');
   let npxPath = join(dirname(node), 'npx');
-  if (ctx.dryRun) return serviceExecStart({ node, pkgRoot, entry, entryExists: true, npxPath }, rebrand);
+  if (ctx.dryRun) return serviceExecStart({ node, pkgRoot, entry, entryExists: true, npxPath });
   // A standalone node binary has no adjacent npx — fall back to the login
   // shell's, or ExecStart would 203/EXEC (the exact bug 9fea263 fixed).
   if (!existsSync(npxPath)) {
@@ -644,30 +640,30 @@ async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<
 
   let globalBin: string | undefined;
   if (!existsSync(entry) && !/[/\\]_npx[/\\]/.test(pkgRoot)) {
-    const out = (await ctx.runner.capture('bash', ['-lc', identity.rebrand ? `command -v ${identity.command}` : `command -v ${identity.npmAlias} || command -v cez`])).stdout.trim();
+    const out = (await ctx.runner.capture('bash', ['-lc', `command -v ${identity.command}`])).stdout.trim();
     globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
     if (!globalBin) {
       ctx.ui.warn(
-        `Could not locate a built ${productName('cezar', rebrand)} to run (${entry} missing, no global ${identity.npmAlias ?? identity.command}).\n` +
-          `Install it (npm i -g ${identity.npmAlias ?? identity.npmPackage}) or build the checkout, then re-run with --reconfigure autostart.`,
+        `Could not locate a built ${productName('cezar')} to run (${entry} missing, no global ${identity.command}).\n` +
+          `Install it (npm i -g ${identity.npmPackage}) or build the checkout, then re-run with --reconfigure autostart.`,
       );
     }
   }
-  return serviceExecStart({ node, pkgRoot, entry, entryExists: existsSync(entry), npxPath, globalBin }, rebrand);
+  return serviceExecStart({ node, pkgRoot, entry, entryExists: existsSync(entry), npxPath, globalBin });
 }
 
-const autostartStep = (rebrand: boolean): InstallStep => ({
+const autostartStep = (): InstallStep => ({
   id: 'autostart',
   // Required: after install the cockpit must actually be serving, so Squawk runs
   // as a systemd service — started now AND enabled on boot. (id kept as
   // `autostart` for state compatibility.)
-  title: `Run ${productName('cezar', rebrand)} as a service (systemd — starts now + on boot)`,
+  title: `Run ${productName('cezar')} as a service (systemd — starts now + on boot)`,
   async check() {
     return false; // always (re)assert the service is installed and running
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    const UNIT_NAME = recordedUnit(ctx, rebrand).name, hint = unitHint(ctx, rebrand);
-    const execStart = await resolveExecStart(ctx, rebrand);
+    const UNIT_NAME = recordedUnit(ctx).name, hint = unitHint(ctx);
+    const execStart = await resolveExecStart(ctx);
     // Prefer a rootless `systemd --user` service + linger; fall back to a system
     // unit (via sudoStep) when the user bus is not reachable. `show-environment`
     // exits 0 iff the user manager is up — on a headless SSH box with no session
@@ -682,7 +678,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
         mkdirSync(join(homedir(), '.config', 'systemd', 'user'), { recursive: true });
         writeFileSync(
           unitPath,
-          systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'user', execStart, ctx.state.bindHost, rebrand),
+          systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'user', execStart, ctx.state.bindHost),
           'utf8',
         );
         await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
@@ -715,9 +711,9 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
 
     // System unit fallback.
     await writeFileStep(ctx, {
-      description: `Install the ${productName('cezar', rebrand)} systemd unit, start it now, and enable it at boot.`,
+      description: `Install the ${productName('cezar')} systemd unit, start it now, and enable it at boot.`,
       path: `/etc/systemd/system/${UNIT_NAME}`,
-      content: systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'system', execStart, ctx.state.bindHost, rebrand),
+      content: systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'system', execStart, ctx.state.bindHost),
       extra: `systemctl daemon-reload && systemctl enable --now ${UNIT_NAME}`,
       verify: (c) => verifyCommand(c, 'systemctl', ['is-enabled', UNIT_NAME]),
     });
@@ -726,7 +722,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
   },
   async undo(ctx, created) {
     const svc = (created?.artifacts ?? []).find((a) => a.type === 'service');
-    const UNIT_NAME = recordedUnit(ctx, rebrand).name;
+    const UNIT_NAME = recordedUnit(ctx).name;
     // Reverse linger only when install recorded that it enabled it.
     const linger = (created?.artifacts ?? []).find((a) => a.type === 'linger');
     if (svc?.scope === 'user') {
@@ -739,7 +735,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
       }
     } else if (svc) {
       await sudoStep(ctx, {
-        description: `Disable and remove the ${productName('cezar', rebrand)} systemd unit.`,
+        description: `Disable and remove the ${productName('cezar')} systemd unit.`,
         command: `systemctl disable --now ${UNIT_NAME}; rm -f /etc/systemd/system/${UNIT_NAME} && systemctl daemon-reload`,
         verify: (c) => verifyCommand(c, 'sh', ['-c', `! systemctl is-enabled ${UNIT_NAME}`]),
       });
@@ -822,9 +818,9 @@ async function verifyBehindExternalProxy(ctx: InstallContext, unit: string): Pro
   return { artifacts: [] };
 }
 
-const identityStep = (rebrand: boolean): InstallStep => ({
+const identityStep = (): InstallStep => ({
   id: 'identity',
-  title: `Verify the cockpit end-to-end (auth + HTTPS reach ${productName('cezar', rebrand)})`,
+  title: `Verify the cockpit end-to-end (auth + HTTPS reach ${productName('cezar')})`,
   async check() {
     return false; // always re-verify; it creates nothing
   },
@@ -832,9 +828,9 @@ const identityStep = (rebrand: boolean): InstallStep => ({
     // External proxy: Squawk installed no nginx, so there is no auth challenge of
     // ours to probe. All we can (and should) verify is that the cockpit is
     // actually listening where the operator's proxy will look for it.
-    if (ctx.state.externalProxy) return verifyBehindExternalProxy(ctx, recordedUnit(ctx, rebrand).name);
+    if (ctx.state.externalProxy) return verifyBehindExternalProxy(ctx, recordedUnit(ctx).name);
     if (ctx.dryRun) {
-      ctx.ui.info(`DRY RUN — would verify auth (401 for anon) AND that an authenticated request reaches ${productName('cezar', rebrand)}.`);
+      ctx.ui.info(`DRY RUN — would verify auth (401 for anon) AND that an authenticated request reaches ${productName('cezar')}.`);
       return { artifacts: [] };
     }
     const port = ctx.state.primaryPort;
@@ -876,27 +872,27 @@ const identityStep = (rebrand: boolean): InstallStep => ({
     const coreOk = upstreamUp && authEnforced && authedOk !== false;
     if (coreOk) {
       ctx.ui.success(
-        `Cockpit is live at ${url} — ${authedOk ? `an authenticated request reached ${productName('cezar', rebrand)}` : `auth is enforced and ${productName('cezar', rebrand)} is up`}. ` +
+        `Cockpit is live at ${url} — ${authedOk ? `an authenticated request reached ${productName('cezar')}` : `auth is enforced and ${productName('cezar')} is up`}. ` +
           'Log in with the username and password you set.',
       );
       if (!https) {
         ctx.ui.warn(
           'This cockpit is HTTP-only (no domain/SSL configured). To serve it over HTTPS with this same auth, ' +
-            commandText('re-run: cez server-install --platform ubuntu-vps --reconfigure ssl', undefined, rebrand),
+            commandText('re-run: cez server-install --platform ubuntu-vps --reconfigure ssl'),
         );
       }
       return { artifacts: [] };
     }
 
     const problems: string[] = [];
-    if (!upstreamUp) problems.push(`${productName('cezar', rebrand)} is not listening on 127.0.0.1:${port} — the service is down, so nginx returns 502`);
+    if (!upstreamUp) problems.push(`${productName('cezar')} is not listening on 127.0.0.1:${port} — the service is down, so nginx returns 502`);
     if (!authEnforced) problems.push(`nginx did not challenge an anonymous request (got "${anonCode}") — basic auth may not be active`);
-    if (authedOk === false) problems.push(`an authenticated request did not reach ${productName('cezar', rebrand)} (bad credentials, or the upstream is down)`);
+    if (authedOk === false) problems.push(`an authenticated request did not reach ${productName('cezar')} (bad credentials, or the upstream is down)`);
     ctx.ui.error(
       `The cockpit is NOT fully working yet:\n` +
         problems.map((p) => `  • ${p}`).join('\n') +
         `\n\nDiagnostics on the server:\n` +
-        `  • systemctl --user status ${unitHint(ctx, rebrand)}   (or: sudo systemctl status ${unitHint(ctx, rebrand)})\n` +
+        `  • systemctl --user status ${unitHint(ctx)}   (or: sudo systemctl status ${unitHint(ctx)})\n` +
         `  • sudo systemctl status nginx && sudo nginx -t\n` +
         `  • sudo ss -ltnp | grep -E ':80|:443|:${port}'\n` +
         `  • ports 80/443 open in ufw AND any cloud firewall (Hetzner/AWS)`,
@@ -911,8 +907,8 @@ const identityStep = (rebrand: boolean): InstallStep => ({
   },
 });
 
-export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStrategy {
-  const steps = { proxy: nginxProxyStep(rebrand), ssl: sslStep(rebrand), autostart: autostartStep(rebrand), identity: identityStep(rebrand) };
+export function createUbuntuVps(): PlatformStrategy {
+  const steps = { proxy: nginxProxyStep(), ssl: sslStep(), autostart: autostartStep(), identity: identityStep() };
   const health = { identity: steps.identity, waitForSquawk };
   return {
     id: 'ubuntu-vps',
@@ -941,10 +937,10 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
         if (holder && !/nginx/i.test(holder)) {
           ctx.ui.warn(
             `Port 80 is already served by "${holder}" on this host.\n` +
-              `${productName('cezar', rebrand)}'s ubuntu-vps install wants :80/:443 for its own nginx, so these will collide.\n\n` +
+              `${productName('cezar')}'s ubuntu-vps install wants :80/:443 for its own nginx, so these will collide.\n\n` +
               `If that is a reverse proxy you rely on (Dokploy/Traefik, Coolify, Caddy), re-run with:\n` +
-              commandText(`  cez server-install --platform ubuntu-vps --external-proxy${ctx.state.domain ? ` --domain ${ctx.state.domain}` : ''} [--bind-host 172.17.0.1]\n`, undefined, rebrand) +
-              `That installs the ${productName('cezar', rebrand)} service only and lets your proxy front it.`,
+              commandText(`  cez server-install --platform ubuntu-vps --external-proxy${ctx.state.domain ? ` --domain ${ctx.state.domain}` : ''} [--bind-host 172.17.0.1]\n`) +
+              `That installs the ${productName('cezar')} service only and lets your proxy front it.`,
           );
         }
       }
@@ -959,7 +955,7 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
       return [depCheckStep(), steps.proxy, steps.ssl, steps.autostart, steps.identity];
     },
     async redeploy(ctx: InstallContext) {
-      const UNIT_NAME = recordedUnit(ctx, rebrand).name;
+      const UNIT_NAME = recordedUnit(ctx).name;
       // Restart the systemd service so it picks up the new Squawk (a fresh local
       // build the unit runs from, or a newly published cezarion via npx), then
       // re-run the same end-to-end verify install uses.
@@ -976,14 +972,14 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
       // launch form); a checkout / global unit is left alone.
       refreshNpxCacheForRedeploy(ctx, await readExecStart(ctx, scope, UNIT_NAME));
       if (ctx.dryRun) {
-        ctx.ui.info(`DRY RUN — would reload+restart the ${productName('cezar', rebrand)} ${scope} service and re-verify the cockpit.`);
+        ctx.ui.info(`DRY RUN — would reload+restart the ${productName('cezar')} ${scope} service and re-verify the cockpit.`);
         return;
       }
-      await repairUnitEnv(ctx, scope, recordedUnit(ctx, rebrand).path ?? (scope === 'user' ? userUnitPath : `/etc/systemd/system/${UNIT_NAME}`));
+      await repairUnitEnv(ctx, scope, recordedUnit(ctx).path ?? (scope === 'user' ? userUnitPath : `/etc/systemd/system/${UNIT_NAME}`));
       const before = await serviceSnapshot(ctx, scope, UNIT_NAME);
       const sudo = { used: false };
       const fail = (reason: string): Promise<never> => failedRestart(ctx, scope, UNIT_NAME, reason, sudo.used);
-      ctx.ui.info(`Redeploying — restarting the ${productName('cezar', rebrand)} ${scope} service to pick up the new version.`);
+      ctx.ui.info(`Redeploying — restarting the ${productName('cezar')} ${scope} service to pick up the new version.`);
       const after = scope === 'user'
         ? await restartUserService(ctx, UNIT_NAME, fail)
         : await restartSystemService(ctx, UNIT_NAME, before, sudo, fail);
@@ -999,10 +995,10 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
       }
       await freshRestartOrFail(before, await serviceSnapshot(ctx, scope, UNIT_NAME), fail);
     },
-    migrate: (ctx) => migrateUbuntu(ctx, rebrand),
-    rollbackMigration: (ctx, report) => rollbackUbuntuMigration(ctx, report, rebrand),
-    stopService: (ctx) => stopUbuntuService(ctx, rebrand),
-    startService: (ctx, opts) => startUbuntuService(ctx, health, rebrand, opts),
+    migrate: (ctx) => migrateUbuntu(ctx),
+    rollbackMigration: (ctx, report) => rollbackUbuntuMigration(ctx, report),
+    stopService: (ctx) => stopUbuntuService(ctx),
+    startService: (ctx, opts) => startUbuntuService(ctx, health, opts),
   };
 }
 

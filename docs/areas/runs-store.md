@@ -9,10 +9,10 @@
 ## Two project directories
 
 `project-paths.ts` supplies ordered read roots: the write root, then the fallback.
-With the release switch on, the write root is `.ai/squawk/` for a moved project (a completed
+The write root is `.ai/squawk/` for a moved project (a completed
 migration's marker in the Git common directory, hearsay-tools/cezarion#3150) and for a fresh
-project with no `.ai/cezar` path; then `.ai/cezar/` is the fallback. Every other project, and
-every project with the switch off, writes `.ai/cezar/`. Below, "legacy" means the write root and
+project with no `.ai/cezar` path; then `.ai/cezar/` is the fallback. Every other project
+writes `.ai/cezar/`. Below, "legacy" means the write root and
 "`.ai/squawk/`" the fallback directory of a project that is not moved. Run IDs form a
 union; the write root's record wins a duplicate. History, artifacts, handoffs, transcript facts,
 worker results and cleanup proofs follow that record's source. Never select each
@@ -77,8 +77,7 @@ boot copy, whole-tree copy, move or symlink occurs.
 | Byte cleanup of a legacy-only resource | Existing ownership and cleanup rules still apply |
 | Legacy-only project | Existing reads, writes, imports, recovery and deletion |
 
-No tombstone or new setting is added. Legacy-directory notices start only with
-the release switch. The project migration engine (P4b2) rewrites the stored paths of
+No tombstone or new setting is added. The project migration engine (P4b2) rewrites the stored paths of
 every affected row in one transaction; see
 [project routes](project-routes.md#project-state-migration-engine). P4b3 and P5 wire and enable it.
 

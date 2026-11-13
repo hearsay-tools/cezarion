@@ -4,7 +4,6 @@ import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 import type { Home } from './home.ts';
 import { resolveHome } from './resolve.ts';
 import { planLegacyMigration } from './migration-plan.ts';
-import { acceptHomeRecovery } from './recovery.ts';
 import { HomeStore } from './store.ts';
 import { homeFileLocation } from './file-location.ts';
 import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
@@ -40,9 +39,11 @@ export async function runMigrationCommand(argv: string[], env: NodeJS.ProcessEnv
     legacy ??= resolveHome({ purpose: 'cli', env, layout: 'legacy' });
     if (file !== undefined && action) {
       // Migration inspections are report-only. Persist backup-derived resets before resolving them.
-      new HomeStore(legacy).recovery(homeFileLocation(legacy, file).path);
+      const store = new HomeStore(legacy), path = homeFileLocation(legacy, file).path;
+      store.recovery(path);
+      // The legacy home has no older home of its own: accept its live-file incident only.
       if (action === 'restore') restorePinnedRecovery(file, legacy);
-      else acceptHomeRecovery(legacy, file, undefined, false);
+      else store.acceptRecovery(path);
       console.log(JSON.stringify({ file, action }, null, 2));
       return 0;
     }

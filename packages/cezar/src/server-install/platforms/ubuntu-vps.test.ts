@@ -200,7 +200,7 @@ describe('ubuntu-vps HTTP/2 install wiring', () => {
     const ui = { ...createAutoUi(), text: async (o: { message: string }) => o.message.includes('Domain') ? 'cezar.example.com' : o.message.includes('Email') ? 'ops@example.com' : 'ops', password: async () => 'longenough' } as Ui;
     const context = { ...ctxWith({ runner, ui }), assumeYes: true };
     function writtenVhost() {
-      const cmd = commands.find((c) => c.includes("base64 --decode > '/etc/nginx/sites-available/cezar'"));
+      const cmd = commands.find((c) => c.includes("base64 --decode > '/etc/nginx/sites-available/hearsay-squawk'"));
       if (!cmd) throw new Error('vhost was not written');
       const encoded = /printf %s '([A-Za-z0-9+/=]+)'/.exec(cmd)?.[1];
       if (!encoded) throw new Error('vhost payload missing');
@@ -248,8 +248,8 @@ describe('ubuntu-vps HTTP/2 install wiring', () => {
     run.context.state.domain = 'shop.example.com';
     await stepById('ssl').run(run.context);
     const edit = run.commands.find((c) => c.includes('sed -i -E') && c.includes('http2'));
-    expect(edit).toContain("'/etc/nginx/sites-available/cezar-shop-example-com'");
-    expect(edit).not.toContain("'/etc/nginx/sites-available/cezar' &&");
+    expect(edit).toContain("'/etc/nginx/sites-available/hearsay-squawk-shop-example-com'");
+    expect(edit).not.toContain("'/etc/nginx/sites-available/hearsay-squawk' &&");
   });
 
   it('does not verify HTTP/2 when nginx validation or reload fails after the listener edit', async () => {
@@ -423,14 +423,14 @@ describe('ubuntu-vps multi-instance artifact paths', () => {
     return c;
   }
 
-  it('the default instance records the legacy un-suffixed nginx/htpasswd paths', async () => {
+  it('the default instance records the un-suffixed nginx/htpasswd paths', async () => {
     const ui = { ...createAutoUi(), text: async () => 'ops', password: async () => 'longenough' } as Ui;
     const ctx = { ...ctxWith({ ui, dryRun: true }), assumeYes: true } as InstallContext;
     const created = await stepById('nginx-proxy').run(ctx);
     const paths = (created?.artifacts ?? []).map((a) => a.path).filter(Boolean);
-    expect(paths).toContain('/etc/nginx/sites-available/cezar');
-    expect(paths).toContain('/etc/nginx/sites-enabled/cezar');
-    expect(paths).toContain('/etc/cezar/htpasswd');
+    expect(paths).toContain('/etc/nginx/sites-available/hearsay-squawk');
+    expect(paths).toContain('/etc/nginx/sites-enabled/hearsay-squawk');
+    expect(paths).toContain('/etc/hearsay-squawk/htpasswd');
   });
 
   it('a named instance suffixes the nginx site + htpasswd with its slug', async () => {
@@ -439,15 +439,15 @@ describe('ubuntu-vps multi-instance artifact paths', () => {
     ctx.ui = { ...createAutoUi(), text: async () => 'ops', password: async () => 'longenough' } as Ui;
     const created = await stepById('nginx-proxy').run(ctx);
     const paths = (created?.artifacts ?? []).map((a) => a.path).filter(Boolean);
-    expect(paths).toContain('/etc/nginx/sites-available/cezar-shop-example-com');
-    expect(paths).toContain('/etc/nginx/sites-enabled/cezar-shop-example-com');
-    expect(paths).toContain('/etc/cezar/htpasswd-shop-example-com');
+    expect(paths).toContain('/etc/nginx/sites-available/hearsay-squawk-shop-example-com');
+    expect(paths).toContain('/etc/nginx/sites-enabled/hearsay-squawk-shop-example-com');
+    expect(paths).toContain('/etc/hearsay-squawk/htpasswd-shop-example-com');
   });
 
-  it("a named instance's systemd unit is cezar-<slug>.service", async () => {
+  it("a named instance's systemd unit is hearsay-squawk-<slug>.service", async () => {
     const created = await stepById('autostart').run(namedCtx());
     const svc = created?.artifacts.find((a) => a.type === 'service');
-    expect(svc?.name).toBe('cezar-shop-example-com.service');
+    expect(svc?.name).toBe('hearsay-squawk-shop-example-com.service');
   });
 });
 
@@ -511,12 +511,12 @@ describe('serviceExecStart', () => {
   const base = { node: '/n/node', entry: '/pkg/dist/index.js', npxPath: '/n/npx' };
 
   it('runs the built entry for a stable checkout/global install', () => {
-    expect(serviceExecStart({ ...base, pkgRoot: '/pkg', entryExists: true })).toBe('/n/node /pkg/dist/index.js');
+    expect(serviceExecStart({ ...base, pkgRoot: '/pkg', entryExists: true })).toBe('/n/node /pkg/dist/hsq.js');
   });
 
-  it('uses the official npx alias when launched from the ephemeral _npx cache', () => {
+  it('uses the official npx package when launched from the ephemeral _npx cache', () => {
     expect(serviceExecStart({ ...base, pkgRoot: '/home/u/.npm/_npx/abcd/node_modules/cezarion', entryExists: false }))
-      .toBe('/n/npx --yes cezarion');
+      .toBe('/n/npx --yes -p @hearsay-tools/squawk hsq');
   });
 
   it('falls back to a resolved global bin when the entry is missing', () => {
@@ -591,7 +591,7 @@ describe('ubuntu-vps redeploy npx-cache refresh (#696)', () => {
       refreshNpxCacheForRedeploy(ctxWith({ ui }), '/n/npx --yes cezar-cli serve --port 4321');
 
       expect(existsSync(join(cache, '_npx', 'aaaa'))).toBe(true);
-      expect(warnings.join('\n')).toMatch(/other than cezarion/);
+      expect(warnings.join('\n')).toMatch(/other than @hearsay-tools\/squawk/);
       expect(warnings.join('\n')).toMatch(/--reconfigure autostart/);
     } finally {
       if (prev === undefined) delete process.env.npm_config_cache;
@@ -699,7 +699,7 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
       dryRun: opts.dryRun,
       state: {
         externalProxy: true,
-        steps: { autostart: { status: STEP_STATUS.done, created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user' }] } } },
+        steps: { autostart: { status: STEP_STATUS.done, created: { artifacts: [{ kind: 'owned', type: 'service', name: opts.instance ? `cezar-${opts.instance}.service` : 'cezar.service', scope: opts.scope ?? 'user' }] } } },
       },
     });
     ctx.instance = opts.instance ?? 'default';
@@ -845,7 +845,7 @@ describe('ubuntu-vps autostart step (dry-run)', () => {
     const svc = created?.artifacts.find((a) => a.type === 'service');
     expect(svc?.kind).toBe('owned');
     expect(svc?.scope).toBe('user');
-    expect(svc?.name).toBe('cezar.service');
+    expect(svc?.name).toBe('hearsay-squawk.service');
   });
 });
 
@@ -1081,6 +1081,3 @@ describe('ubuntu-vps preflight', () => {
     expect(warn.mock.calls[0]?.[0]).toContain('"docker-proxy"');
   });
 });
-
-// These installer fixtures describe the existing Squawk systemd units.
-vi.mock('../../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

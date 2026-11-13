@@ -235,7 +235,7 @@ function recordFreshDecision(legacy: Home, target: Home, plan: MigrationPlan, en
   return record;
 }
 
-/** Explicit split-layout API. Entry points gate calls with REBRAND_SWITCH. No async lock holds. */
+/** Explicit split-layout API. No async lock holds. */
 export function migrateLegacyHome(legacy: Home, target: Home, options: MigrationOptions = {}): MigrationResult {
   if (heldMigrations.has(resolve(legacy.root))) throw new Error(`Home migration already running: ${legacy.root}`);
   const marker = readInstallMarker(target.config);

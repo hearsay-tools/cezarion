@@ -19,25 +19,16 @@ function evaluate(value, context) {
   return typeof value === 'string' && value.startsWith('${{')
     ? runInNewContext(value.slice(3, -2).replace(/needs\.([\w-]+)/g, "needs['$1']"), context) : value;
 }
-function checkoutClassifier(dir, rebrand) {
-  // Match the trusted checkout's runtime dependencies, including the ESM boundary
-  // for Node's built-in TypeScript loader. The fixture root is CommonJS.
-  for (const file of [
-    '.github/scripts/release-bump-pr.cjs', '.github/scripts/change-surface.cjs',
-    'packages/cezar/package.json', 'packages/cezar/src/home/identity.ts',
-    'packages/cezar/src/home/switch.ts',
-  ]) {
+function checkoutClassifier(dir) {
+  // Match the trusted checkout's runtime dependencies. The fixture root is CommonJS.
+  for (const file of ['.github/scripts/release-bump-pr.cjs', '.github/scripts/change-surface.cjs']) {
     const target = path.join(dir, file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(root, file), target);
   }
-  if (rebrand !== undefined) {
-    fs.writeFileSync(path.join(dir, 'packages/cezar/src/home/switch.ts'),
-      `export const REBRAND_SWITCH = ${rebrand};\n`);
-  }
 }
 function classify(jobName, { pr = prFixture(), number = '42', apiFails = false, appLogin = '',
-  files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' }, rebrand } = {}) {
+  files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' } } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-dispatch-'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
   const context = { needs: { 'pr-test-input': { outputs: { sha: '' } } }, github: { event_name: 'workflow_dispatch', sha: HEAD,
@@ -73,7 +64,7 @@ process.stdout.write(JSON.stringify(value));
       if (step.uses?.startsWith('actions/checkout@')) {
         if (['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
         assert.equal(evaluate(step.with.ref, context), BASE, 'classifier comes from API base, never dispatch head');
-        checkoutClassifier(dir, rebrand);
+        checkoutClassifier(dir);
       }
       // The checkout above is simulated by copying scripts, so there is no history to fetch.
       if (!step.run || step.name === 'Fetch the history the baseline check compares') continue;
@@ -96,15 +87,10 @@ test('dispatch validates the live release PR and runs the trusted version-stamp 
   }
 });
 
-test('dispatch loads the trusted identity and selects its alias in both switch states', () => {
-  for (const rebrand of [false, true]) {
-    for (const alias of ['alias-cezarion', 'alias-hsq']) {
-      // The switch-on identity has no alias package: npm refuses the unscoped name `hsq`.
-      const active = !rebrand && alias === 'alias-cezarion';
-      assert.equal(classify('classify-pr', {
-        rebrand, files: [{ filename: `${alias}/package.json` }],
-      }).bump_pr, String(active));
-    }
+test('dispatch refuses alias manifests: the new identity has no alias package', () => {
+  // npm refuses the unscoped name `hsq`; the old `cezarion` alias ships as a compatibility package.
+  for (const alias of ['alias-cezarion', 'alias-hsq']) {
+    assert.equal(classify('classify-pr', { files: [{ filename: `${alias}/package.json` }] }).bump_pr, 'false');
   }
 });
 

@@ -1,6 +1,5 @@
 import { POWERSHELL, powershellEnv } from '../core/process-stat.ts';
 import { execFileSync } from 'node:child_process';
-import { REBRAND_SWITCH } from './switch.ts';
 import type { HomeLayout } from './kind-roots.ts';
 import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -13,7 +12,7 @@ export interface PrivateFileOptions {
 
 /** Replace the Windows DACL, rather than adding a grant to an inherited public ACL. */
 export function protectPrivatePath(path: string, directory: boolean, {
-  platform = process.platform, layout = REBRAND_SWITCH ? 'split' : 'legacy',
+  platform = process.platform, layout = 'split',
 }: PrivateFileOptions = {}): void {
   if (platform !== 'win32' || layout !== 'split') return;
   const security = directory ? 'DirectorySecurity' : 'FileSecurity';
@@ -43,7 +42,7 @@ function directoryIdentity(path: string): { dev: bigint; ino: bigint } | undefin
 /** Cache only successful grants for one directory identity; replacements need a fresh grant. */
 function protectDirectoryOnce(path: string, options: PrivateFileOptions, created: boolean): void {
   const platform = options.platform ?? process.platform;
-  const layout = options.layout ?? (REBRAND_SWITCH ? 'split' : 'legacy');
+  const layout = options.layout ?? 'split';
   if (platform !== 'win32' || layout !== 'split') return;
   const canonical = realpathSync(path).toLowerCase();
   const identity = directoryIdentity(path);

@@ -123,8 +123,7 @@ function validateArchives({ artifacts, manifests, plan }) {
   const version = entries[0]?.pkg.version;
   if (!version || entries.some(e => e.pkg.version !== version)) throw new Error('Snapshot versions differ');
   const service = entries.find(e => e.key === 'cezar');
-  const alias = entries.find(e => e.key === 'alias');
-  if (!service || (manifests.alias && alias?.pkg.dependencies?.[service.pkg.name] !== version)) throw new Error('Alias must pin the service snapshot');
+  if (!service) throw new Error('Missing service snapshot');
   for (const { pkg } of entries) {
     for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
       for (const sibling of Object.values(manifests)) {
@@ -156,11 +155,10 @@ function publishArchives({ entries, plan, dryRun, execute = execFileSync }) {
 // The sticky comment's command. The new identity has no alias package: npm refuses `hsq`.
 function previewCommand(entries, pr) {
   const service = entries.find(e => e.key === 'cezar').pkg;
-  const alias = entries.find(e => e.key === 'alias')?.pkg;
   return {
     version: service.version,
-    run: alias ? `npx ${alias.name}@${alias.version}` : `npx -p ${service.name}@${service.version} ${productIdentity(true).command}`,
-    tag: `${(alias ?? service).name}@pr-${pr}`,
+    run: `npx -p ${service.name}@${service.version} ${productIdentity().command}`,
+    tag: `${service.name}@pr-${pr}`,
   };
 }
 

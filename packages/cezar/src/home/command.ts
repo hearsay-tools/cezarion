@@ -1,5 +1,4 @@
 import { BINARY_NAMES, npxCommand, productIdentity, type BinaryName } from './identity.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 
 /** npm's Windows wrappers pass the old bin target, index.js, rather than their name. */
 export function invokedCommand(entry: string | undefined = process.argv[1]): BinaryName | undefined {
@@ -11,24 +10,21 @@ export function invokedCommand(entry: string | undefined = process.argv[1]): Bin
   return BINARY_NAMES.find(binary => binary === name);
 }
 
-/** Old entry points retain their historical help until the release switch. */
-export function cliCommand(entry: string | undefined = process.argv[1], rebrand = REBRAND_SWITCH): BinaryName {
-  const invoked = invokedCommand(entry);
-  if (invoked === 'hsq' || rebrand) return invoked ?? productIdentity(rebrand).command;
-  return productIdentity(false).command;
+/** The command the user typed, or `hsq`. */
+export function cliCommand(entry: string | undefined = process.argv[1]): BinaryName {
+  return invokedCommand(entry) ?? productIdentity().command;
 }
 
 /** Render command examples only; callers keep product prose and paths unchanged. */
-export function commandText(text: string, entry: string | undefined = process.argv[1], rebrand = REBRAND_SWITCH): string {
-  if (!rebrand && invokedCommand(entry) !== 'hsq') return text;
-  if (text === 'cezarion' || text === 'cez') return cliCommand(entry, rebrand);
-  return text.replace(/(?<![\w./\\-])\b(?:cez|hsq)(?=\s|\]|`|$)/g, cliCommand(entry, rebrand))
-    .replace(/\bnpx cezarion(?:@([\w.-]+))?(?![\w@-])/g, (_, version?: string) => npxCommand(version, rebrand));
+export function commandText(text: string, entry: string | undefined = process.argv[1]): string {
+  if (text === 'cezarion' || text === 'cez') return cliCommand(entry);
+  return text.replace(/(?<![\w./\\-])\b(?:cez|hsq)(?=\s|\]|`|$)/g, cliCommand(entry))
+    .replace(/\bnpx cezarion(?:@([\w.-]+))?(?![\w@-])/g, (_, version?: string) => npxCommand(version));
 }
 
 /** The dispatcher owns the one per-process notice, including task command invocations. */
-export function oldCommandNotice(entry: string | undefined, rebrand = REBRAND_SWITCH): string | undefined {
+export function oldCommandNotice(entry: string | undefined): string | undefined {
   const invoked = invokedCommand(entry);
-  if (!rebrand || invoked === undefined || invoked === 'hsq') return;
+  if (invoked === undefined || invoked === 'hsq') return;
   return `[${invoked}] '${invoked}' is deprecated; use '${productIdentity(true).command}' instead.`;
 }

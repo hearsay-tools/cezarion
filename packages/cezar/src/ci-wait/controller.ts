@@ -106,7 +106,7 @@ export class CiToolController {
     }
   }
 
-  provision(handlers: SquawkToolHandlers, rebrand?: boolean): CiToolSession {
+  provision(handlers: SquawkToolHandlers): CiToolSession {
     if (this.closed) throw new ToolsUnavailableError('the tool controller was closed', socketRoot());
     const token = randomBytes(32).toString('hex');
     const capability: Capability = { ...handlers, lifetime: new AbortController() };
@@ -118,7 +118,7 @@ export class CiToolController {
       descriptor: { name: `cezar_ci_${randomUUID().replaceAll('-', '')}`, command: process.execPath, args: source ? ['--import', fileURLToPath(import.meta.resolve('tsx')), entry.replace(/\.js$/, '.ts')] : [entry] },
       // #781: the session carries the preview opt-in, so its runner admits and forwards exactly
       // the tools this session's adapter lists.
-      env: { ...productEnvEntries('TOOL_TOKEN', token, rebrand), ...productEnvEntries('TOOL_SOCKET', this.address, rebrand), ...(previewToolEnabled() ? productEnvEntries('PREVIEW', '1', rebrand) : {}), ...productEnvEntries('AUTOMATIONS', automationsToolEnabled() ? '1' : '0', rebrand) },
+      env: { ...productEnvEntries('TOOL_TOKEN', token), ...productEnvEntries('TOOL_SOCKET', this.address), ...(previewToolEnabled() ? productEnvEntries('PREVIEW', '1') : {}), ...productEnvEntries('AUTOMATIONS', automationsToolEnabled() ? '1' : '0') },
       revoke: () => { this.capabilities.delete(token); capability.lifetime.abort(); },
     };
   }

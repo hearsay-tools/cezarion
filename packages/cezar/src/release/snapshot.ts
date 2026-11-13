@@ -2,8 +2,8 @@
  *
  *  Spec `.ai/specs/2026-07-18-npm-preview-publish.md` (#482): every green CI run
  *  publishes an installable preview of the CLI. This module decides *whether* a
- *  given CI event publishes, under *which* version and dist-tag, and how the two
- *  manifests (the scoped package and its unscoped alias) are stamped. Kept
+ *  given CI event publishes, under *which* version and dist-tag, and how the release
+ *  manifests are stamped. Kept
  *  dependency-free and side-effect-free so the decision is unit-testable; the
  *  script owns file writes, `npm publish`, and the exit code.
  *
@@ -114,7 +114,7 @@ export type { ManifestLike, ReleaseManifests } from './manifests.ts';
 /** Stamp the release set to the snapshot version.
  *
  *  Every intra-release dependency is pinned **exact** (`0.1.5-pr482.123`, no range) so
- *  `npx <alias>@<version>` runs exactly the PR's code and the service resolves exactly the
+ *  `npx -p <package>@<version> hsq` runs exactly the PR's code and the service resolves exactly the
  *  api-client it was cut with — a `^` range would resolve to whatever newer version exists
  *  (spec, resolved Q5). Stable releases keep their `^` range and never go through this
  *  stamper. */

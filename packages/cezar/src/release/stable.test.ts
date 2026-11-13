@@ -53,7 +53,6 @@ describe('stampStableManifests', () => {
       dependencies: { '@scope/client': '^0.1.5' },
       devDependencies: { '@scope/impl': '^0.1.5' },
     },
-    alias: { name: 'impl-cli', version: '0.1.5', dependencies: { '@scope/impl': '^0.1.5' } },
   });
 
   it('stamps every manifest and keeps caret ranges on the intra-release pins', () => {
@@ -62,10 +61,8 @@ describe('stampStableManifests', () => {
     expect(stamped.apiClient.version).toBe('0.1.6');
     expect(stamped.cezar.version).toBe('0.1.6');
     expect(stamped.web.version).toBe('0.1.6');
-    expect(stamped.alias!.version).toBe('0.1.6');
     expect(stamped.cezar.files).toEqual(['dist']); // passthrough untouched
     // Caret, not an exact pin — the opposite of the snapshot stamper.
-    expect(stamped.alias!.dependencies).toEqual({ '@scope/impl': '^0.1.6' });
     expect(stamped.cezar.devDependencies).toEqual({ '@scope/client': '^0.1.6' });
     expect(stamped.web.dependencies).toEqual({ '@scope/client': '^0.1.6' });
     expect(stamped.web.devDependencies).toEqual({ '@scope/impl': '^0.1.6' });
@@ -85,27 +82,6 @@ describe('stampStableManifests', () => {
 
     expect(stamped.cezar.dependencies).toEqual({ '@scope/client': '^0.1.6', hono: '^4.6.0' });
     expect(stamped.cezar.devDependencies).toBeUndefined();
-  });
-
-  it('lets the alias inherit repository/homepage/bugs from the service so provenance validates', () => {
-    const repository = { type: 'git', url: 'https://github.com/open-mercato/cezar' };
-    const manifests = set();
-    manifests.cezar = {
-      ...manifests.cezar,
-      repository,
-      homepage: 'https://example.test',
-      bugs: { url: 'https://example.test/issues' },
-    };
-
-    const stamped = stampStableManifests(manifests, '0.1.6');
-
-    expect(stamped.alias!.repository).toEqual(repository);
-    expect(stamped.alias!.homepage).toBe('https://example.test');
-    expect(stamped.alias!.bugs).toEqual({ url: 'https://example.test/issues' });
-  });
-
-  it('leaves the alias untouched when the service declares no repository', () => {
-    expect('repository' in stampStableManifests(set(), '0.1.6').alias!).toBe(false);
   });
 
   it('stamps a private package like any other — it is in the release, just not on the registry', () => {
@@ -133,7 +109,7 @@ describe('stampStableManifests', () => {
     const manifests = set();
     stampStableManifests(manifests, '0.1.6');
     expect(manifests.cezar.version).toBe('0.1.5');
-    expect(manifests.alias!.dependencies).toEqual({ '@scope/impl': '^0.1.5' });
+    expect(manifests.web.devDependencies).toEqual({ '@scope/impl': '^0.1.5' });
   });
 });
 

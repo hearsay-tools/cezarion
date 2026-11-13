@@ -29,7 +29,7 @@ it('D4: the Windows junction branch points current at the final version path aft
   expect(readFileSync(join(target, 'current/entry'), 'utf8')).toBe('junction bytes');
 });
 
-it('migration copies and archives request the split Windows private ACL while the release switch is off', () => {
+it('migration copies and archives request the split Windows private ACL', () => {
   const source = storeRoot(), target = join(storeRoot(), 'copy'), archive = join(storeRoot(), 'backups/archive.tar.gz');
   const home = migrationFixture();
   writeFileSync(join(source, 'auth.json'), '{"secret":"credential"}');

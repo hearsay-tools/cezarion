@@ -15,7 +15,7 @@ export function benchmarkHome(home: Home): Home {
 
 /** Sandbox controls must override both inherited product prefixes. */
 export function setBenchmarkEnv(env: NodeJS.ProcessEnv = process.env): void {
-  Object.assign(env, productEnvEntries('DRY_RUN', '1', true), productEnvEntries('AUTONAME', '0', true));
+  Object.assign(env, productEnvEntries('DRY_RUN', '1'), productEnvEntries('AUTONAME', '0'));
 }
 
 /** Retain an explicit legacy sandbox or allocate an isolated benchmark home. */
@@ -23,10 +23,10 @@ export function prepareBenchmarkEnv(env: NodeJS.ProcessEnv = process.env): strin
   setBenchmarkEnv(env);
   const existing = legacyHomeEnv(env);
   if (existing) {
-    Object.assign(env, productEnvEntries('HOME', existing, true));
+    Object.assign(env, productEnvEntries('HOME', existing));
     return undefined;
   }
   const ownHome = mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
-  Object.assign(env, productEnvEntries('HOME', ownHome, true));
+  Object.assign(env, productEnvEntries('HOME', ownHome));
   return ownHome;
 }
