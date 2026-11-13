@@ -15,6 +15,22 @@ class FailureWriterLimitError extends Error {
   constructor(code) { super(code);this.code=code; }
 }
 
+const withoutIndependent=({independentCause,...cause})=>cause;
+// The step's recorded occurrences decide which selection it reports, so a
+// replay returns what the first pass filed. Recorded under the v1 selection
+// (an earlier reporter): that selection exactly, quota causes included.
+// Recorded under the quota-free selection: that one. Not recorded: the
+// quota-free selection, where a GitHub quota cause gives way to the step's
+// first other error or, without one, is not filed (`suppressed`).
+function selectCauses(found,recorded) {
+  const v1=found.map(withoutIndependent);
+  const quotaFree=found.flatMap(cause=>!isQuotaCause(cause) ? [withoutIndependent(cause)] : cause.independentCause ? [cause.independentCause] : []);
+  const holds=causes=>causes.some(cause=>recorded.has(cause.signature));
+  if(holds(v1)) return v1;
+  if(holds(quotaFree) || !recorded.size) return Object.assign(quotaFree,{suppressed:found.some(cause=>isQuotaCause(cause) && !cause.independentCause)});
+  return v1;
+}
+
 // Without `since`, every issue in the repository (the sweep's adoption scan).
 // With `since` (the run's creation time), every open issue plus every issue
 // updated since then: an occurrence marker for that run can only be written
@@ -133,11 +149,8 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
     const prefix=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:`;
     const failureIssues=issues.filter(issue=>/<!-- cez-failure-signature:v1:[a-f0-9]{64} -->/.test(issue.body||''));
     const recorded=await recordedSignatures(failureIssues,prefix,run);
-    // A GitHub quota cause is not filed, unless an earlier reporter already
-    // recorded it for this step: a replay then returns that report unchanged.
-    const suppressed=found.filter(cause=>isQuotaCause(cause) && !recorded.has(cause.signature));
-    if(suppressed.length) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
-    const causes=found.filter(cause=>!suppressed.includes(cause));
+    const causes=selectCauses(found,recorded);
+    if(causes.suppressed) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
     if(!causes.length) return [];
     const effectiveCauses=effectiveCausesFor(causes,causesForStep({run,job,step,log:''})[0],recorded);
     const results=[];

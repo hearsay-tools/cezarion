@@ -198,29 +198,56 @@ test('the reporter reads issues updated since the failed run was created',async(
  const reads=h.calls.filter(([route])=>route==='GET /repos/{owner}/{repo}/issues').map(([,args])=>[args.state,args.since]);
  assert.deepEqual(reads,[['open',undefined],['all',h.state.run.created_at]]);
 });
-test('replaying a main CI attempt reported before quota filtering keeps its saved summary',async()=>{
- // Before quota filtering, a quota job and a TypeError job filed two reports
- // and a summary linking both. A replay must find both, not shrink the set.
+// Replays must return what the first pass filed. Job A's step has one of four
+// log shapes; job B always fails with its own error, so every attempt has a
+// main-CI summary. The first pass is either the pre-change reporter (main's
+// selection: first error line, quota causes filed) or this reporter.
+const QUOTA='##[error]API rate limit exceeded for installation.';
+const STEP_LOGS={'quota-only':QUOTA,'quota-then-error':`${QUOTA}\nTypeError: build failed`,'error-then-quota':`TypeError: build failed\n${QUOTA}`,'error-only':'TypeError: build failed'};
+function twoFailedJobs(h,log) {
+ mainCi(h);
+ const a=h.state.jobs.find(job=>job.conclusion==='failure');
+ h.state.jobs.push({...structuredClone(a),id:a.id+1,name:'Cockpit browser E2E shard 2/8'});
+ h.state.jobLogs={[a.id]:log,[a.id+1]:'ReferenceError: other job failed'};
+}
+// What main's reporter left: one issue and comment per v1 cause (each
+// signature distinct here), then the main-CI summary over both.
+async function reportWithMainSelection(h) {
  const {causesForStep}=require('./failure-diagnostics.cjs');
  const {defaultBodyFor,commentFor}=require('./failure-issue-writer.cjs');
  const {routeMainCiSummary}=require('./main-ci-summary.cjs');
- const h=harness();mainCi(h);
- const failed=h.state.jobs[0];
- h.state.jobs.push({...structuredClone(failed),id:failed.id+1,name:'Cockpit browser E2E shard 2/8'});
- h.state.jobLogs={[failed.id]:'TypeError: build failed',[failed.id+1]:'##[error]API rate limit exceeded for installation.'};
- const run=h.state.run, runUrl=`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/attempts/${run.run_attempt}`;
- const at=new Date(Date.parse(run.created_at)+60*60*1000).toISOString();
+ const github=h.options.github, base={owner:'hearsay-tools',repo:'cezarion'}, run=h.state.run;
+ const runUrl=`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/attempts/${run.run_attempt}`;
+ const reports=[];
  for(const job of h.state.jobs.filter(entry=>entry.conclusion==='failure')) {
   const step=job.steps.find(entry=>entry.conclusion==='failure');
-  const [cause]=causesForStep({run,job,step,log:h.state.jobLogs[job.id]});
-  const signature=`<!-- cez-failure-signature:v1:${cause.signature} -->`;
-  const occurrence=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature} -->`;
-  const number=h.state.issues.length+1;
-  h.state.issues.push({number,state:'open',title:'[Task]: Investigate setup failure',labels:['area-ci'],created_at:at,updated_at:at,body:defaultBodyFor({cause,runUrl,signature,occurrence})});
-  h.state.comments.push({issue_number:number,body:commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/job/${job.id}`,occurrence})});
+  for(const {independentCause,...cause} of causesForStep({run,job,step,log:h.state.jobLogs[job.id]})) {
+   const signature=`<!-- cez-failure-signature:v1:${cause.signature} -->`;
+   const occurrence=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature} -->`;
+   const {data:issue}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:'[Task]: Investigate failure',labels:['area-ci'],body:defaultBodyFor({cause,runUrl,signature,occurrence})});
+   await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:issue.number,body:commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/job/${job.id}`,occurrence})});
+   reports.push(issue);
+  }
  }
- await routeMainCiSummary({github:h.options.github,owner:'hearsay-tools',repo:'cezarion',run,issues:[],reports:[{number:1},{number:2}]});
- assert.equal(h.state.issues.length,3);
- const result=await reportFailure(h.options);
- assert.equal(result.reported,0);assert.equal(h.state.issues.length,3);assert.equal(h.state.comments.length,2);
-});
+ await routeMainCiSummary({github,...base,run,issues:[],reports});
+}
+const snapshot=h=>({issues:h.state.issues.length,comments:h.state.comments.length,summary:h.state.issues.find(issue=>/cez-main-ci-attempt/.test(issue.body))?.body});
+const FIRST_PASS={'reported by main':reportWithMainSelection,'not reported':h=>reportFailure(h.options)};
+const REPLAYS={'replay with logs':()=>{},'replay without logs':h=>{for(const id of Object.keys(h.state.jobLogs))h.state.jobLogs[id]=null;}};
+for(const [seedName,firstPass] of Object.entries(FIRST_PASS)) for(const [shape,log] of Object.entries(STEP_LOGS)) for(const [replayName,prepare] of Object.entries(REPLAYS)) {
+ const exception=seedName==='not reported' && shape==='quota-only' && replayName==='replay without logs';
+ test(`${seedName}, ${shape}, ${replayName}: ${exception?'known limitation: one unknown-cause report and summary drift':'issues, comments and summary unchanged'}`,async()=>{
+  const h=harness();twoFailedJobs(h,log);await firstPass(h);
+  const first=snapshot(h);assert.ok(first.summary);
+  prepare(h);
+  if(exception) {
+   // The first pass filed nothing for the quota-only step and left no marker,
+   // so with its log gone the replay cannot tell it from an unknown failure.
+   await assert.rejects(reportFailure(h.options),/Main CI summary manifest changed/);
+   assert.equal(h.state.issues.length,first.issues+1);assert.equal(h.state.comments.length,first.comments+1);
+   return;
+  }
+  await reportFailure(h.options);
+  assert.deepEqual(snapshot(h),first);
+ });
+}

@@ -124,13 +124,17 @@ test('timestamps in test names still identify tests',()=>{
  const causes=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Run unit tests'},log});
  assert.equal(causes.length,2);assert.notEqual(causes[0].signature,causes[1].signature);
 });
-test('a GitHub quota error never hides an independent error in the same step',()=>{
+test('a step that chose a GitHub quota error carries its first other error for the writer',()=>{
  const step={number:5,name:'Build application'};
- const log='##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.\nTypeError: build failed';
- const [cause,...rest]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log});
- assert.equal(rest.length,0);assert.equal(cause.failureIdentity,'TypeError: build failed');assert.equal(isQuotaCause(cause),false);
- const [quota]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:log.split('\n')[0]});
- assert.equal(isQuotaCause(quota),true);
+ const quota='##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
+ // The v1 selection (first error) is unchanged, so its signature matches main.
+ const [cause,...rest]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:`${quota}\nTypeError: build failed`});
+ assert.equal(rest.length,0);assert.equal(isQuotaCause(cause),true);
+ assert.equal(cause.signature,causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:quota})[0].signature);
+ assert.equal(cause.independentCause.failureIdentity,'TypeError: build failed');assert.equal(isQuotaCause(cause.independentCause),false);
+ assert.equal(causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:quota})[0].independentCause,undefined);
+ const [first]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:`TypeError: build failed\n${quota}`});
+ assert.equal(first.failureIdentity,'TypeError: build failed');assert.equal(first.independentCause,undefined);
 });
 test('non-quota signatures stay exactly as before quota filtering, so replays find existing reports',()=>{
  // Golden values computed on main before this change; a different value

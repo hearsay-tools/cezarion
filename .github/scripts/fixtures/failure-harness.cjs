@@ -20,7 +20,7 @@ function harness() {
     },
   };
   const jobLog=args=>{
-    const log=state.jobLogs?.[args.job_id] ?? state.log;
+    const log=state.jobLogs && args.job_id in state.jobLogs ? state.jobLogs[args.job_id] : state.log;
     if(log===null) throw Object.assign(new Error('expired secret'),{status:410});
     return {data:log};
   };
