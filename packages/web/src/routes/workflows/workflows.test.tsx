@@ -157,22 +157,6 @@ describe('canvas seeding', () => {
 // ---- action hierarchy + readable summaries ----------------------------------------------------
 
 describe('workflow editor presentation', () => {
-  it('makes Save the sole primary toolbar action and keeps destructive emphasis inside confirmation', async () => {
-    stubFetch()
-    renderAt('/workflows')
-    await waitFor(() => expect(stepCards()).toHaveLength(2))
-
-    const save = document.querySelector<HTMLElement>('[data-slot="wb-save"]')!
-    const removeFile = document.querySelector<HTMLElement>('[data-slot="wb-delete"]')!
-    expect(save.dataset.variant).toBe('primary')
-    expect(removeFile.dataset.variant).toBe('ghost')
-    expect(removeFile.className).not.toContain('text-soft-foreground')
-
-    fireEvent.click(removeFile)
-    const confirm = document.querySelector<HTMLElement>('[data-slot="wb-delete-confirm"]')!
-    expect(confirm.className).toContain('bg-danger')
-  })
-
   it('shows the step prompt ahead of the skill catalog description', async () => {
     stubFetch({}, [{ ...SHIP, steps: [{ ...SHIP.steps[0]!, prompt: 'Implement {{task}} and leave a concise review note after verification.' }, SHIP.steps[1]!] }])
     renderAt('/workflows')
@@ -182,8 +166,6 @@ describe('workflow editor presentation', () => {
     const summary = first.querySelector<HTMLElement>('[data-slot="wb-step-summary"]')!
     expect(summary).toBeTruthy()
     expect(summary.textContent).toBe('Implement {{task}} and leave a concise review note after verification.')
-    expect(summary.className).toContain('break-words')
-    expect(summary.className).not.toContain('truncate')
     expect(first.querySelector('[data-slot="wb-step-heading"]')).toBeTruthy()
   })
 

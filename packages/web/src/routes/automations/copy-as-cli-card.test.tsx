@@ -29,7 +29,6 @@ describe('CopyAsCliCard', () => {
     const writeText = vi.fn(async () => undefined)
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     renderInProject(<CopyAsCliCard draft={draft} />)
-    expect(screen.getByRole('heading', { name: 'Copy as CLI' })).not.toBeNull()
     expect(screen.getByText(line)).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(line))

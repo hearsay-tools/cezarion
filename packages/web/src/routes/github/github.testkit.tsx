@@ -338,25 +338,6 @@ export const waitForAgentRunEnabled = () =>
     ).toBe(false),
   )
 
-export function cascadeCss(css: string, selectors: readonly string[]): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const selector of selectors) {
-    const re = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]+)\\}`, 'g')
-    for (const match of css.matchAll(re)) {
-      const body = match[1]
-      if (!body) continue
-      for (const part of body.split(';')) {
-        const i = part.indexOf(':')
-        if (i < 0) continue
-        const prop = part.slice(0, i).trim()
-        const value = part.slice(i + 1).trim()
-        if (prop) out[prop] = value
-      }
-    }
-  }
-  return out
-}
-
 export async function selectSkill(name: string): Promise<void> {
   const chip = `[data-slot="gh-skill-chip"][data-skill="${name}"]`
   const opt = `[data-slot="gh-skill-option"][data-skill="${name}"]`

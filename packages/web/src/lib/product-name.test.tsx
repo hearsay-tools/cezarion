@@ -23,16 +23,24 @@ describe.each([false, true])('cockpit product display (switch %s)', rebrand => {
     const { TaskAccessControls } = await import('@/components/task-access-controls')
     const desktop = renderToStaticMarkup(<DesktopControls />)
     const access = renderToStaticMarkup(<TaskAccessControls allowWorkers allowMessaging onChange={() => {}} />)
-    expect(desktop).toContain(`${rebrand ? state.displayName : 'Cezarion'} · Local`)
-    expect(access).toContain(`Allow ${rebrand ? state.displayName : 'cezar'} workers`)
-    expect(access).toContain(`start ${rebrand ? state.displayName : 'Cezar'} workers`)
+    const rebranded = readProductIdentity(true).displayName
+    if (rebrand) {
+      expect(desktop).toContain(state.displayName)
+      expect(access).toContain(state.displayName)
+      expect(`${desktop}${access}`).not.toMatch(/cezar/i)
+    } else {
+      expect(desktop).toContain('Cezarion')
+      expect(access).toContain('cezar')
+      expect(access).toContain('Cezar')
+      expect(`${desktop}${access}`).not.toContain(rebranded)
+    }
   })
 
   it('renders both shared remote-settings hints from the command identity', async () => {
     Object.assign(state, readProductIdentity(rebrand))
     const { RemoteSettingsNotice, REMOTE_SETTINGS_ENABLE_COMMAND } = await import('@/routes/settings/remote-settings-notice')
-    expect(renderToStaticMarkup(<code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>)).toBe(`<code>${state.command} remote-settings enable</code>`)
-    expect(renderToStaticMarkup(<RemoteSettingsNotice risk="Commands run here" />)).toContain(`<code>${state.command} remote-settings disable</code>`)
+    expect(REMOTE_SETTINGS_ENABLE_COMMAND).toBe(`${state.command} remote-settings enable`)
+    expect(renderToStaticMarkup(<RemoteSettingsNotice risk="Commands run here" />)).toContain(`${state.command} remote-settings disable`)
   })
 
   it('changes only the product suffix in document titles', () => {

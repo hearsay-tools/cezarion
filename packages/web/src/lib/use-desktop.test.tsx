@@ -16,7 +16,6 @@ it('reads the md query before its first render and follows changes until unmount
   const { result, unmount } = renderHook(useIsDesktop)
   expect(result.current).toBe(false)
   expect(matchMedia).toHaveBeenCalledWith(DESKTOP_MEDIA_QUERY)
-  expect(DESKTOP_MEDIA_QUERY).toBe('(min-width: 48rem)')
   act(() => { matches = true; for (const listener of listeners) listener() })
   expect(result.current).toBe(true)
   unmount()

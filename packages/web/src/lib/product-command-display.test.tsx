@@ -68,6 +68,6 @@ describe.each([false, true])('browser command hints (switch %s)', rebrand => {
     expect(screen.getByText(`${state.identity.command} remote-settings enable`)).toBeTruthy()
     expect(screen.getByText(state.identity.npx)).toBeTruthy()
     expect(state.identity.npx).toBe(rebrand ? 'npx -p @hearsay-tools/squawk hsq' : 'npx cezarion')
-    expect(screen.getByText((text, element) => element?.tagName === 'PRE' && text.includes(`${state.identity!.command} automation add`))).toBeTruthy()
+    expect(screen.getAllByText((text) => text.includes(`${state.identity!.command} automation add`)).length).toBeGreaterThan(0)
   })
 })

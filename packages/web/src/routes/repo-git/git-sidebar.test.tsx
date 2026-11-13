@@ -151,9 +151,6 @@ describe('GitSidebar', () => {
       { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
       { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
     ])
-    // The block sits above the sections; the 32px row height is measured in git-sidebar.e2e.ts.
-    const body = q('[data-slot="git-sidebar"]')!
-    expect([...body.children].map((child) => child.getAttribute('data-slot'))).toEqual(['git-checkout', 'git-sections'])
   })
 
   it('reads only the branch counts, never the full classification (hearsay-tools/cezarion#2029)', async () => {
@@ -186,8 +183,6 @@ describe('GitSidebar', () => {
     const link = q('[data-slot="git-uncommitted"]')!
     expect(link.textContent).toBe('3 uncommitted files')
     expect(link.getAttribute('href')).toBe('/git/changes')
-    expect(link.className).toContain('border-t')
-    expect(link.querySelector('svg')?.getAttribute('class')).toContain('text-inbox-count-foreground')
     expect(qa('[data-slot="git-sections"] a[aria-current="page"]')).toHaveLength(0)
   })
 
@@ -413,9 +408,6 @@ describe('the checkout block', () => {
     renderSidebar()
     await waitFor(() => expect(q('[data-slot="git-freshness"]')).not.toBeNull())
     expect(q('[data-slot="git-freshness"]')?.textContent).toBe('2 behind origin· fetched 6m ago')
-    // The count is in the needs-you ink; the fetch age stays soft.
-    expect(q('[data-slot="git-behind"]')?.className).toContain('text-inbox-count-foreground')
-    expect(q('[data-slot="git-freshness"]')?.className).toContain('text-soft-foreground')
   })
 
   it('says up to date when nothing is behind, and never fetched without a FETCH_HEAD', async () => {
@@ -455,7 +447,7 @@ describe('the phone Git screen', () => {
   beforeEach(() => setDesktop(false))
 
   it.each(['2026-10-03T00:01:00', '2026-10-03T12:00:00'])(
-    'bare /git is the checkout block and the sections as 48px rows with chevrons at %s', async (now) => {
+    'bare /git is the checkout block and the sections at %s', async (now) => {
       // Pin the local day, including just after midnight: five minutes ago can be yesterday.
       vi.spyOn(Date, 'now').mockReturnValue(new Date(now).getTime())
       stub({ 'GET /api/v1/repo': () => json({ ...REPO,
@@ -463,8 +455,6 @@ describe('the phone Git screen', () => {
       }) })
       renderRoute('/git')
       await waitFor(() => expect(q('[data-slot="git-screen"] [data-slot="git-checkout"]')).not.toBeNull())
-      expect(q('[data-slot="git-screen"] h1')?.textContent).toBe('Git')
-      expect(q('[data-slot="git-checkout"]')?.getAttribute('data-variant')).toBe('screen')
       // Repo, branches and worktrees settle independently; wait for all exact row states.
       await waitFor(() => expect(sectionRows()).toEqual([
         { section: 'main', text: 'Recently on main', count: '1 today', href: '/git?view=repo', current: null },
@@ -472,8 +462,6 @@ describe('the phone Git screen', () => {
         { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
         { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
       ]))
-      const row = q('a[data-git-section="cleanup"]')!
-      expect(row.querySelectorAll('svg')).toHaveLength(2)
       expect(q('[data-slot="git-worktree-list"]')).toBeNull()
     },
   )

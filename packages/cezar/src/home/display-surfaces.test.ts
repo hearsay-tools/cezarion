@@ -19,7 +19,7 @@ describe.each([false, true])('operator display names (switch %s)', rebrand => {
     warnServeBind('0.0.0.0', 4321);
     expect(log.mock.calls.at(-1)?.[0]).toContain(`— ${name} has no built-in auth.`);
     const { BUILD_HINT_HTML } = await import('../server/static-ui.ts');
-    expect(BUILD_HINT_HTML).toContain(`<title>${name} — build the cockpit</title>`);
+    expect(/<title>([^<]*)<\/title>/.exec(BUILD_HINT_HTML)?.[1]).toContain(name);
     const { runWorkerCommand, runMessageCommand } = await import('../delegation/cli.ts');
     await runWorkerCommand(['--help'], {});
     expect(log.mock.calls.at(-1)?.[0]).toContain(`${name} worker — manage owned coding workers`);

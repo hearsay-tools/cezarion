@@ -11,7 +11,9 @@ import { SKILL_DIRS } from '../../src/skills.js';
  * import the server. This reads that copy and compares it with the server's discovery list.
  */
 test('the project skill dirs the cockpit hint names are the ones discovery scans, in order', () => {
-  const hint = readFileSync(new URL('../../../web/src/components/skill-empty-hint.tsx', import.meta.url), 'utf8');
+  const hint = readFileSync(new URL('../../../web/src/components/skill-empty-hint.tsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
   const declared = /const SKILL_PROJECT_DIRS = \[([^\]]*)\] as const/.exec(hint);
   assert.ok(declared, 'skill-empty-hint.tsx declares SKILL_PROJECT_DIRS');
   const named = [...declared[1]!.matchAll(/'([^']+)'/g)].map((match) => match[1]);
@@ -24,7 +26,7 @@ test('the project skill dirs the cockpit hint names are the ones discovery scans
     else listed.push(`${dir}/`);
   }
   assert.deepEqual(named, listed);
-  assert.ok(mirrors.includes('.claude/skills') && hint.includes('<Path>.claude/skills/</Path>'), 'the hint names a real agent mirror');
+  assert.ok(mirrors.includes('.claude/skills') && hint.includes('.claude/skills/'), 'the hint names a real agent mirror');
 });
 
 // The harness must replace every repo catalog that the served server can discover.

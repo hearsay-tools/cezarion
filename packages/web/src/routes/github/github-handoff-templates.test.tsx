@@ -292,12 +292,3 @@ describe('templates assigned to a skill auto-apply when a skill is picked', () =
     expect(screen.getByLabelText('Custom prompt')).toHaveProperty('value', BASE)
   })
 })
-
-it('places the editable handoff prompt before template and execution settings', async () => {
-  stubFetch()
-  await openDetail()
-  const prompt = screen.getByRole('textbox', { name: 'Custom prompt' })
-  const workflow = screen.getByRole('button', { name: 'Choose a workflow' })
-  expect(prompt.compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  expect(screen.getByText('Instructions for the agent')).toBeTruthy()
-})

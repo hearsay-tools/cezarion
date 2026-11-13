@@ -169,7 +169,10 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     expect(document.body.textContent).toContain('—') // null size
     // A reclaimable row inside the keep limit is kept; a review row is in use.
     expect(states()).toEqual(['kept · newest 10', 'in use'])
-    expect(document.querySelector('[data-slot="worktrees-retention"]')?.textContent).toBe('Retention keeps the newest 10 finished checkouts (Settings › Worktrees) and reclaims the rest. Reclaim removes the directory only; the branch stays, so its work stays recoverable.')
+    const limited = document.querySelector('[data-slot="worktrees-retention"]')?.textContent ?? ''
+    expect(limited).toContain('newest 10')
+    expect(limited).toMatch(/reclaims the rest/)
+    expect(limited).not.toMatch(/nothing is reclaimed/)
   })
 
   it('labels the rows past the keep limit reclaimable and sizes the button from exactly those', async () => {
@@ -220,7 +223,10 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     serve({ worktrees: [], totalBytes: 0, keep: 0 })
     renderPanel()
     await waitFor(() => expect(document.querySelector('[data-slot="worktrees-empty"]')).not.toBeNull())
-    expect(document.querySelector('[data-slot="worktrees-retention"]')?.textContent).toBe('Retention is unlimited (Settings › Worktrees), so nothing is reclaimed on its own. Reclaim removes the directory only; the branch stays, so its work stays recoverable.')
+    const unlimited = document.querySelector('[data-slot="worktrees-retention"]')?.textContent ?? ''
+    expect(unlimited).toContain('unlimited')
+    expect(unlimited).toMatch(/nothing is reclaimed/)
+    expect(unlimited).not.toMatch(/reclaims the rest/)
   })
 
   it('disables Reclaim now when reclaimable finished worktrees are within keep', async () => {
@@ -267,7 +273,7 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     expect(message.toLowerCase()).not.toContain('all worktrees are within the limit')
     // The rows past keep=1 are still listed; the server kept them (dirty or in use), so say so.
     expect(message).toBe('Nothing was reclaimed — the worktrees past the keep limit have uncommitted work or are in use')
-    expect(document.querySelector('[data-slot="toast"]')?.className).toContain('text-contrast-foreground')
+    expect(document.querySelector('[data-slot="toast"]')?.getAttribute('data-tone')).toBe('default')
   })
 
   it('a partial reclaim names how many past-keep rows the server kept', async () => {

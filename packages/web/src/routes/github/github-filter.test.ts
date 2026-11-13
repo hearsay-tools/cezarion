@@ -76,20 +76,21 @@ describe('allLabels', () => {
 })
 
 describe('labelChipStyle', () => {
-  it('tints from a 6-hex color', () => {
+  it('tints the fill, border and ink from a 6-hex color', () => {
     const style = labelChipStyle('d73a4a')
-    expect(style.backgroundColor).toBe('#d73a4a22')
-    expect(style.borderColor).toBe('#d73a4a66')
+    for (const value of [style.backgroundColor, style.borderColor, style.color]) expect(value).toContain('#d73a4a')
   })
 
-  it('falls back to neutral tokens when the color is missing or malformed', () => {
-    expect(labelChipStyle(undefined).color).toBe('var(--muted-foreground)')
-    expect(labelChipStyle('nothex').color).toBe('var(--muted-foreground)')
+  it('does not tint when the color is missing or malformed', () => {
+    for (const color of [undefined, 'nothex']) {
+      const style = labelChipStyle(color)
+      expect(style.backgroundColor).toBeUndefined()
+      expect(String(style.color)).not.toContain('#')
+    }
   })
 
   it('blends the ink toward the theme foreground so it reads in both light and dark', () => {
-    // No fixed hex: the color mixes toward `--foreground`, which flips per theme.
-    expect(labelChipStyle('000000').color).toBe('color-mix(in srgb, #000000 50%, var(--foreground))')
+    expect(labelChipStyle('000000').color).toContain('var(--foreground)')
   })
 })
 

@@ -264,7 +264,7 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
 | Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | 1: no raw transcript path outside its owners | The adapted predicate fixture and both compression/reopen behavior cases; new lint fixtures pin helpers, dynamic paths, fixed strings, comments and stale exceptions |
 | Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | 5: server scope, reads-to-end, two server baseline checks, cockpit baseline check | 91 server fixtures; 79 cockpit fixtures moved to `packages/cezar/src/lint/unit-wait-discipline.test.ts`; host `asyncUtilTimeout` test stays in web |
-| Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | 11: ten per-file rules and status stylesheet ownership; walker replaced by discovery fixtures (see per-case inventory below) | Five named-content cases; fill-accent spelling fixture moved beside the scanner |
+| Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | 11: ten per-file rules and status stylesheet ownership; walker replaced by discovery fixtures (see per-case inventory below) | Two named-content cases (Poppins license, reserved purple); fill-accent spelling fixture moved beside the scanner |
 | Card-2 contrast (M10) | `packages/web/src/test/card-2-contrast.test.ts`, now `packages/cezar/src/lint/card-2-contrast.test.ts` | 1: no new unsafe small-text site or stale baseline entry | 20 scanner fixture cases; static classes only, dynamic styling still needs browser evidence |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
 | File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
@@ -341,14 +341,14 @@ regexes, applicability, allowed predicates and their reasons remain unchanged.
 | `no-100vh` | Moved: same rule and CSS runner |
 | No stylesheet hides or restyles a status dot or pill | Moved: `guardianCssProblems` in the lint runner; original selector/body regexes |
 | Actually scans the codebase | Replaced: nested src/e2e CSS discovery fixture, real oxlint src/e2e fixtures and fail-closed plugin/config checks pin discovery without a test-time repository walk |
-| Poppins typeface | Retained: named token sheet and installed font license |
-| Mineral-teal/gold vocabulary | Retained: named token sheet content |
-| Live-run purple | Retained: named token sheet and status-dot component content |
-| Merged-chip purple | Retained: named task-lists stylesheet content |
-| Shared-control rhythm | Retained: named button, input, select and composer content |
+| Poppins typeface | Retained: installed font license only; the stylesheet import and `--sans` pins were removed |
+| Mineral-teal/gold vocabulary | Retained: purple stays reserved for `merged*`, `running` and `status-running` tokens; the exact token hex pins were removed |
+| Live-run purple | Removed: `status-dot.test.tsx` proves every tone, running and info included, has its own fill |
+| Merged-chip purple | Removed: a stylesheet-text pin |
+| Shared-control rhythm | Removed: Tailwind class pins; touch targets are measured in a browser |
 | Fill-accent ink spellings | Retained scanner fixture, moved to `packages/cezar/src/lint/design-guardian.test.ts` beside its rule |
 
-The five content tests stay in `packages/web/src/design-guardian.test.ts`. They read only the files
+The two content tests stay in `packages/web/src/design-guardian.test.ts`. They read only the files
 named in their assertions; no source walk runs at import. Their old duration weights were removed
 from both duration manifests because they measured the removed repository scan; the sequencers use
 the upper-quartile fallback until successful CI suite summaries provide fresh measurements. Historical
