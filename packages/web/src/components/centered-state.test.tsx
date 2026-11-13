@@ -73,6 +73,7 @@ describe('TwinkleBackdrop', () => {
     expect(backdrop?.className).toContain('pointer-events-none')
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (reduced motion).
   it('pulses its squares only when motion is allowed', () => {
     const { container } = render(<TwinkleBackdrop />)
     const squares = [...container.querySelectorAll('[data-slot="twinkle-backdrop"] > span')]

@@ -732,6 +732,7 @@ describe('TaskQuickList', () => {
       expect(onTogglePin.mock.calls[1]?.[0]).toMatchObject({ id: 'kept' })
     })
 
+    // Rule: docs/areas/web-ui.md § Touch and phone rules: a finger can reach every control.
     it('stays reachable on a device that cannot hover — the drawer has no pointer', () => {
       // The bug this pins: the control was revealed by `group-hover` and focus alone, so on a
       // phone (where this same list IS the drawer) there was no way to reach it at all. The

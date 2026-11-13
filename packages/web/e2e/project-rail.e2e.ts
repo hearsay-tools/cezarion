@@ -317,6 +317,7 @@ describe('expandable project rail (#711)', () => {
   })
 
   for (const theme of ['dark', 'light'] as const) {
+    // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
     it(`keeps names and state words at 4.5:1 on default, hover and selected rows, ${theme}`, () => {
       gotoRail(theme)
       browser.evaluate(`localStorage.setItem('cez-project-rail-expanded', '1')`)

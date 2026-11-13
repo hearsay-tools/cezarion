@@ -243,6 +243,7 @@ describe('task quick-list', () => {
     expect(sample.text).toContain(title)
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
   it('keeps selected and hovered sidebar task metadata AA-readable', () => {
     const selectedRow = '[data-slot="task-row"][data-run-id="fix-done"]'
     const hoveredRow = '[data-slot="task-row"][data-run-id="fix-failed"]'
@@ -527,6 +528,7 @@ describe('tasks table overview', () => {
     showResourceTable()
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast, focus).
   it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => withHoverBrowser(() => {
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
@@ -1544,6 +1546,7 @@ describe('archive from the sidebar (#780)', () => {
     expect((await stored('arc-pinned')).pinned).toBe(true)
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
   it('keeps the row button and Finished sweep readable, at rest and hovered, in both themes', () => {
     try {
       for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
@@ -1785,6 +1788,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
     expect((await stored('sw-live')).archived).toBeFalsy()
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
   it('keeps "Archive" on --muted and "Release to archive" on --info readable, dark and light', async () => {
     try {
       for (const variant of contrastQaVariants.filter(({ viewport, density }) => viewport.width === 1440 && density === 'comfortable')) {

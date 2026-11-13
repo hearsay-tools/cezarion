@@ -129,6 +129,7 @@ describe('PreviewStates (design 5.1 to 5.18)', () => {
     expect(document.querySelector('[data-slot="preview-log-tail"]')).toBeNull()
   })
 
+  // Rule: .ai/specs/2026-10-02-live-preview-v1.md § 5.7.
   it('5.7 uses the spec copy: waiting on another service, not waiting for input', () => {
     const a = show({ t: 'state', stage: 'server-stalled', server, logTail: '> wait-on tcp:5432' })
     expect(screen.getByRole('heading', { name: 'web is running, but :5173 is silent' })).toBeTruthy()

@@ -55,6 +55,7 @@ function props(extra: Partial<PreviewToolbarProps> = {}): PreviewToolbarProps {
 const openMenu = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
 
 describe('PreviewToolbar', () => {
+  // Rule: .ai/specs/2026-10-02-live-preview-v1.md § Pane.
   it('orders its controls: back, forward, reload, URL, viewport, quality, stats, badge, More, close', () => {
     render(<PreviewToolbar {...props()} />)
     const order = [...document.querySelectorAll<HTMLElement>('[data-slot="preview-toolbar"] button, [data-slot="preview-toolbar"] input')].map(
@@ -106,6 +107,7 @@ describe('PreviewToolbar', () => {
     expect(document.querySelector('[data-slot="preview-experimental"]')).toBeNull()
   })
 
+  // Rule: .ai/specs/2026-10-02-live-preview-v1.md § URL field.
   it('an adopted server also shrinks the badge, and says so inside the URL field', () => {
     render(<PreviewToolbar {...props({ adopted: true })} />)
     expect(screen.getByLabelText('Experimental').textContent).toBe('')

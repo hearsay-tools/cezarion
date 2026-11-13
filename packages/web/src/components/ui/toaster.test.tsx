@@ -50,6 +50,7 @@ describe('Toaster', () => {
     expect(className).toContain('top-[calc(66px+env(safe-area-inset-top))]')
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (reduced motion).
   it('animates in on open and out on close, only when motion is allowed', () => {
     render(<Toaster />)
     act(() => toast('animated'))
@@ -243,6 +244,7 @@ describe('Toaster', () => {
       expect(document.activeElement).toBe(document.body)
     })
 
+    // Rule: docs/areas/web-ui.md § Accessibility rules (focus).
     it('has a focus-visible ring on the action button', () => {
       show()
       const cls = document.querySelector('[data-slot="toast-action"]')!.className

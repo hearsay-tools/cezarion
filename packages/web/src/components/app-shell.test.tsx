@@ -534,6 +534,7 @@ describe('AppShell', () => {
    *  scroll its document or clip its composer on an iPhone — a refactor that drops one is a
    *  regression no visual test would catch on a desktop viewport. */
   describe('layout contract', () => {
+    // Rule: .ai/specs/2026-07-14-cockpit-ui-redesign.md § Mobile (layout contract).
     it('is exactly one viewport tall and never scrolls the document', () => {
       renderShell()
       const shell = document.querySelector('[data-slot="app-shell"]') as HTMLElement
@@ -543,6 +544,7 @@ describe('AppShell', () => {
       expect(shell.className).toContain('overflow-hidden')
     })
 
+    // Rule: .ai/specs/2026-07-14-cockpit-ui-redesign.md § Mobile (layout contract).
     it('makes the main region the only scroller, and contains its overscroll', () => {
       renderShell()
       const main = screen.getByRole('main')
@@ -550,6 +552,7 @@ describe('AppShell', () => {
       expect(main.className).toContain('overscroll-contain')
     })
 
+    // Rule: docs/areas/web-ui.md § Touch and phone rules: chrome clears the safe-area insets.
     it('pads for safe areas and lets the keyboard reserve the composer row', () => {
       renderShell()
       const shell = document.querySelector('[data-slot="app-shell"]') as HTMLElement
@@ -792,6 +795,7 @@ describe('AppShell', () => {
       await waitFor(() => expect(drawer()).toBeNull())
     })
 
+    // Rule: docs/areas/web-ui.md § Touch and phone rules: chrome clears the safe-area insets.
     it('pads the drawer for the safe-area insets', () => {
       renderShell()
       openMenu()
