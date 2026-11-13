@@ -7,7 +7,7 @@ import { RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-api-clie
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { seedRuns } from './seed-runs'
-import { waitForSettledSample } from './visual-ready'
+import { clickInView, waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
@@ -144,12 +144,6 @@ function tapEdge(selector: string, mobile: boolean) {
   browser.tapAt(Math.round(x), Math.round(y))
 }
 
-/** A native click on a control the journey reaches below the fold: scroll it to the centre first. */
-function clickInView(selector: string) {
-  browser.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center', inline: 'center' })`)
-  browser.click(selector)
-}
-
 function focus(selector: string) {
   // Establish keyboard modality before focusing the control, then use a real key press.
   browser.press('Tab')
@@ -172,11 +166,6 @@ describe('density-independent mobile action targets (#166)', () => {
         browser.goto(`${baseUrl}${path}`)
         browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea, [data-slot="appearance-section"], [data-slot="wb-name"]') !== null`)
         appearance(density, 'dark')
-        // Below the fold at 360×640 the summary sits behind the tab bar's row until scrolled to.
-        if (path.endsWith('/new')) {
-          browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
-          browser.click('[data-slot="execution-options"] summary')
-        }
         browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
         const audit = targetAudit()
         expect(audit.small, path).toEqual([])
@@ -375,7 +364,7 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
       browser.waitForFunction(`document.querySelector('${textarea}')?.disabled === false`)
       appearance(density, theme)
       browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]') !== null`)
-      clickInView('[data-slot="mode-seg"] button:first-child')
+      clickInView(browser, '[data-slot="mode-seg"] button:first-child')
       browser.click(textarea)
       browser.press('Control+a')
       browser.press('Backspace')
@@ -383,7 +372,7 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
       browser.waitForFunction(`document.querySelector('${send}')?.disabled === true`)
       browser.fill(textarea, 'Preserve this draft while changing density')
       browser.waitForFunction(`document.querySelector('${send}')?.disabled === false`)
-      clickInView('[data-slot="mode-plan"]')
+      clickInView(browser, '[data-slot="mode-plan"]')
       browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked') === 'true'`)
       for (const next of ['comfortable', 'compact', 'ultra', density]) appearance(next, theme)
       expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Preserve this draft while changing density')
@@ -391,8 +380,8 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
       focus('[data-slot="mode-seg"] button:first-child')
       browser.press('Enter')
       expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('false')
-      clickInView('[data-slot="execution-options"] summary')
-      clickInView('[data-slot="model-pill"]')
+      clickInView(browser, '[data-slot="execution-options"] summary')
+      clickInView(browser, '[data-slot="model-pill"]')
       browser.waitForFunction(`document.querySelector('[role="menu"]') !== null`)
       browser.press('ArrowDown')
       browser.press('Enter')
@@ -402,7 +391,7 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
       appearance(density, theme)
       expect(browser.text('[data-slot="model-pill"]')).toBe(model)
       if (mobile) {
-        clickInView('[aria-label^="Open projects"]')
+        clickInView(browser, '[aria-label^="Open projects"]')
         browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
         focus('[aria-label="Close menu"]')
         browser.press('Enter')
@@ -420,22 +409,22 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
       browser.goto(`${baseUrl}/p/${project}/workflows`)
       browser.waitForFunction(`document.querySelector('[data-slot="wb-step-actions"]') !== null`)
       appearance(density, theme)
-      clickInView('[data-slot="wb-name"]')
+      clickInView(browser, '[data-slot="wb-name"]')
       browser.press('Control+a')
       browser.press('Backspace')
       browser.waitForFunction(`document.querySelector('[data-slot="wb-name"]').value === ''`)
       browser.fill('[data-slot="wb-name"]', 'Kept workflow draft')
-      clickInView('[data-slot="wb-step-actions"]')
+      clickInView(browser, '[data-slot="wb-step-actions"]')
       browser.waitForFunction(`document.querySelector('[data-slot="wb-step-remove"]') !== null`)
-      clickInView('[data-slot="wb-step-remove"]')
+      clickInView(browser, '[data-slot="wb-step-remove"]')
       browser.waitForFunction(`document.querySelectorAll('[data-slot="wb-step"]').length === 0`)
-      clickInView('[data-slot="wb-skill"][data-skill="touch-check"] [data-slot="wb-skill-add"]')
+      clickInView(browser, '[data-slot="wb-skill"][data-skill="touch-check"] [data-slot="wb-skill-add"]')
       browser.waitForFunction(`document.querySelectorAll('[data-slot="wb-step"]').length === 1`)
       appearance('compact', theme)
       appearance(density, theme)
       expect(browser.evaluate(`document.querySelector('[data-slot="wb-name"]').value`)).toBe('Kept workflow draft')
       // The variant matrix opens the YAML panel with an edge tap; here the keyboard toggles it.
-      clickInView('[data-slot="wb-yaml-toggle"]')
+      clickInView(browser, '[data-slot="wb-yaml-toggle"]')
       browser.waitForFunction(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open === true`)
       focus('[data-slot="wb-yaml-toggle"]')
       browser.press('Enter')
