@@ -392,8 +392,9 @@ describe('AppShell', () => {
   })
 
   /** The resizable desktop column (#788, option C). jsdom has no layout engine, so these assert
-   *  the state machine and the accessibility contract; the drag itself is exercised for real in
-   *  `e2e/sidebar-resize.e2e.ts`. */
+   *  the state machine and the accessibility contract; the drag, the clamps, the keyboard resize
+   *  and the reload are exercised for real in `e2e/quick-list.e2e.ts` ("a row under width
+   *  contention, in a column the user can widen"). */
   describe('resizable sidebar', () => {
     const handle = () => document.querySelector('[data-slot="sidebar-resize-handle"]') as HTMLElement
 

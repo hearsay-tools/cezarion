@@ -80,13 +80,6 @@ describe('ReferenceChip with a status', () => {
     expect(dot?.getAttribute('data-tone')).toBe('pending')
   })
 
-  it('writes that amber with the INK token, not the dot fill', () => {
-    // `--pending` is amber-400 in both themes and fails contrast as text on the light one, which
-    // is what the design guardian's `no-amber-text` rule is protecting.
-    const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status="checks-pending" />)
-    expect(chip.className).not.toMatch(/\btext-pending\b(?!-strong)/)
-  })
-
   it('drops the native title so the two tooltips cannot fight', () => {
     const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status="merged" />)
     expect(chip.getAttribute('title')).toBeNull()

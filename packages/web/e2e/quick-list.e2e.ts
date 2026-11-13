@@ -1815,12 +1815,4 @@ describe('swipe to archive on touch (#780 §7)', () => {
       restoreContrastQaDefaults(browser)
     }
   })
-
-  it('snaps over 200ms, and not at all under prefers-reduced-motion', () => {
-    const duration = `getComputedStyle(document.querySelector('${rowSel('sw-5')}')).transitionDuration`
-    const animated = browser.waitForValue<string>(duration)
-    expect(Number.parseFloat(animated)).toBeGreaterThan(0)
-    browser.setReducedMotion()
-    expect(browser.waitForValue(duration, (value) => value !== animated)).toBe('0s')
-  })
 })

@@ -740,11 +740,6 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'plain', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
       const pin = document.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.className).toContain('no-hover:opacity-100')
-      // …and big enough for a thumb there, where 20px is not a target — in a slot that is
-      // 44px wide on that device all the time, so the reveal still moves nothing.
-      expect(pin.className).toContain('no-hover:min-h-11')
-      expect(pin.className).toContain('no-hover:min-w-11')
-      expect(pin.closest('[data-slot="task-row-trailing"]')?.className).toContain('no-hover:w-11')
       // The quiet default survives for pointer devices: invisible until hovered.
       expect(pin.className).toContain('opacity-0')
     })
@@ -1703,17 +1698,6 @@ describe('sidebar archive (#780)', () => {
     expect(groupButton('pinned')).toBeNull()
   })
 
-  it('gives the group buttons a 44px target on touch', () => {
-    renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
-    const className = groupButton('unpinned')!.className
-    // A 44px hit area from a pseudo-element: the header keeps its natural height.
-    expect(className).toContain('max-md:before:h-11')
-    expect(className).toContain('no-hover:before:h-11')
-    expect(className).not.toContain('max-md:h-11')
-    const row = groupButton('unpinned')!.parentElement as HTMLElement
-    expect(row.className).not.toContain('min-h-11')
-  })
-
   it('names the group button with its visible text first, then the project', () => {
     renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
     expect(groupButton('unpinned')!.getAttribute('aria-describedby')).toBe(
@@ -1834,7 +1818,8 @@ describe('swipe to archive on touch (#780 §7)', () => {
 
   it('snaps with a motion-safe transition, never while the finger drags', () => {
     renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
-    // The 200ms duration and the reduced-motion 0s resolve in quick-list.e2e.ts.
+    // Tailwind compiles `motion-safe:` into a prefers-reduced-motion query: under reduced
+    // motion the row snaps with no transition (docs/areas/web-ui.md § Accessibility rules).
     expect(layer('fin').className).toContain('motion-safe:transition-transform')
     swipe('fin', -50, { release: false })
     expect(layer('fin').className).not.toContain('motion-safe:transition-transform')

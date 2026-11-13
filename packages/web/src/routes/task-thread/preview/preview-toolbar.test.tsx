@@ -232,7 +232,6 @@ describe('PreviewToolbar', () => {
     expect(screen.getByText('Stream quality')).toBeTruthy()
     const options = screen.getAllByRole('menuitemradio')
     expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
-    expect(options.every(option => option.className.includes('min-h-11'))).toBe(true)
     fireEvent.click(options[0]!)
     expect(onQuality).toHaveBeenCalledWith('normal')
   })

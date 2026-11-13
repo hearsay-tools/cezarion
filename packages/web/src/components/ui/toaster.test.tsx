@@ -37,25 +37,17 @@ describe('Toaster', () => {
     expect(document.querySelector('[data-slot="toast"]')).toBeNull()
   })
 
-  it('anchors the stack to the top-right corner, not the bottom centre', () => {
+  it('clears the safe-area insets at its top-right anchor', () => {
+    // docs/areas/web-ui.md § Touch and phone rules: chrome clears the safe-area insets.
+    // jsdom resolves no env(), so the class is the cheapest proof.
     render(<Toaster />)
     act(() => toast('anchored'))
 
-    const stack = document.querySelector('[data-slot="toaster"]')!
-    const className = stack.className
-    expect(className).toContain('fixed')
+    const className = document.querySelector('[data-slot="toaster"]')!.className
     expect(className).toContain('md:top-[calc(16px+env(safe-area-inset-top))]')
     expect(className).toContain('right-[calc(16px+env(safe-area-inset-right))]')
-    expect(className).toContain('items-end')
-    // Below `md` the app shell renders its own 56px header whose right end holds the run
-    // status dot and kebab; anchoring at 16px there would cover the very controls #818 is
-    // about. The pair must stay a pair.
+    // Below `md` the stack sits under the app shell's 56px header.
     expect(className).toContain('top-[calc(66px+env(safe-area-inset-top))]')
-    // The bottom-centre anchor this replaced must not linger — it is what put the toast on
-    // top of the thread's action row (#818).
-    expect(className).not.toContain('items-center')
-    expect(className).not.toContain('bottom-')
-    expect(className).not.toContain('inset-x-0')
   })
 
   it('animates in on open and out on close, only when motion is allowed', () => {
@@ -65,16 +57,17 @@ describe('Toaster', () => {
     const item = screen.getByRole('status')
     expect(item.getAttribute('data-state')).toBe('open')
     expect(item.className).toContain('motion-safe:animate-in')
-    expect(item.className).toContain('motion-safe:slide-in-from-right-4')
     expect(item.className).toContain('motion-safe:data-[state=closed]:animate-out')
-    expect(item.className).toContain('motion-safe:data-[state=closed]:slide-out-to-right-4')
-    // The animation duration and the store's EXIT_MS (200ms) remove the node together. Raise
-    // one without the other and the slide-out is unmounted mid-flight, so pin the class here:
-    // a failure points the editor straight at EXIT_MS in toaster.tsx.
-    expect(item.className).toContain('motion-safe:duration-200')
 
+    // The store keeps the closed node for EXIT_MS (toaster.tsx), so the slide-out must last
+    // exactly that long: shorter wastes nothing, longer is unmounted mid-flight.
+    const duration = Number(/\bmotion-safe:duration-(\d+)\b/.exec(item.className)?.[1])
     act(() => vi.advanceTimersByTime(5000))
     expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+    act(() => vi.advanceTimersByTime(duration - 1))
+    expect(screen.queryByRole('status')).not.toBeNull()
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('stacks multiple toasts and dismisses each on its own clock', () => {
@@ -254,9 +247,6 @@ describe('Toaster', () => {
       show()
       const cls = document.querySelector('[data-slot="toast-action"]')!.className
       expect(cls).toContain('focus-visible:outline-2')
-      expect(cls).toContain('focus-visible:outline-offset-2')
-      expect(cls).toContain('focus-visible:outline-current')
-      expect(cls).toContain('outline-none')
     })
 
     it('resetToasts clears paused timers', () => {

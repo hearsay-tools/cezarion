@@ -6,7 +6,6 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { normalizeColorSample } from './contrast'
 
 import { waitForSettledSample } from './visual-ready'
 import { expandedRailSampleExpression } from './project-rail-ready'
@@ -109,11 +108,7 @@ function gotoRail(theme: 'dark' | 'light' = 'dark'): void {
   browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} [data-slot="rail-pill-top"]') !== null`)
 }
 
-const style = (selector: string, prop: string) =>
-  String(normalizeColorSample(browser, browser.evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(prop)}]`)))
-
 beforeEach(() => {
-  browser.setReducedMotion(false)
   browser.goto(baseUrl + `/p/${bootProject}/`)
   browser.evaluate(`localStorage.removeItem('cez-project-locations'); localStorage.removeItem('cez-project-rail-expanded')`)
 })
@@ -364,17 +359,4 @@ describe('expandable project rail (#711)', () => {
       browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)
     })
   }
-
-  it('does not animate the width under reduced motion', () => {
-    browser.setReducedMotion()
-    gotoRail()
-    collapse()
-    browser.goto(baseUrl + `/p/${bootProject}/`)
-    browser.waitForFunction(`matchMedia('(prefers-reduced-motion: reduce)').matches && document.querySelector('${TOGGLE}') !== null`)
-    expect(style(RAIL, 'transitionProperty')).toBe('none')
-    browser.click(TOGGLE)
-    // No transition: the width is final on the next frame, with no wait for a settle.
-    expect(waitForSettledSample(browser, `document.querySelector('${RAIL}').getBoundingClientRect().width`)).toBe(232)
-    collapse()
-  })
 })

@@ -1,5 +1,7 @@
 import { WaitForValueError, type AgentBrowser } from './agent-browser'
 
+// The contrast and focus rules these helpers sample: docs/areas/web-ui.md § Accessibility rules.
+
 export interface ContrastSample {
   foreground: string
   background: string
