@@ -1,53 +1,59 @@
 {
   "_provenance": {
     "source": "Successful CI eight-shard suite summaries on main or its merge queue",
-    "aggregation": "Per-file median of available passed suite durations; milliseconds. Unmeasured current files use the measured upper quartile.",
+    "aggregation": "Only updatedFiles use these runs and their per-file medians (milliseconds); other weights retain the baselineCommit manifest. Removed paths are listed too.",
     "root": "packages/web/e2e",
     "runs": [
       {
-        "id": 43206254266,
-        "headSha": "924575538e2e424854dbdcc968acc8b54980c938",
+        "id": 43421934321,
+        "headSha": "e5c15e26fccc43b420b2c1b5ff298a302e8b8cec",
         "jobs": [
-          131142158285,
-          131142158293,
-          131142158325,
-          131142158360,
-          131142158433,
-          131142158436,
-          131142158454,
-          131142159068
+          131873882990,
+          131873882995,
+          131873883135,
+          131873883146,
+          131873883174,
+          131873883193,
+          131873883246,
+          131873883260
         ]
       },
       {
-        "id": 43201508525,
-        "headSha": "c6574b70244da8e8fa7be70e8a120993d8df08a2",
+        "id": 43421746562,
+        "headSha": "1f4da782b1302f5ca675dcedf638f38d12f07e89",
         "jobs": [
-          131126726378,
-          131126726457,
-          131126726470,
-          131126726520,
-          131126726530,
-          131126726543,
-          131126726601,
-          131126727066
+          131873352913,
+          131873352949,
+          131873352974,
+          131873352991,
+          131873353023,
+          131873353026,
+          131873353108,
+          131873353140
         ]
       },
       {
-        "id": 43188846583,
-        "headSha": "cc3cead4b816910280bfc6633348cbe59cd74e5d",
+        "id": 43420669483,
+        "headSha": "7474cdebadcb75585c0fff090397139f4e43ed3c",
         "jobs": [
-          131083629253,
-          131083629275,
-          131083629297,
-          131083629319,
-          131083629329,
-          131083629413,
-          131083629499,
-          131083629595
+          131869632901,
+          131869632938,
+          131869632948,
+          131869632987,
+          131869633001,
+          131869633067,
+          131869633127,
+          131869633183
         ]
       }
     ],
-    "estimatedFiles": []
+    "estimatedFiles": [],
+    "baselineCommit": "e5c15e26fccc43b420b2c1b5ff298a302e8b8cec",
+    "updatedFiles": [
+      "quick-list.e2e.ts",
+      "task-list-workload.e2e.ts"
+    ],
+    "remainingChanges": 0
   },
   "durationsMs": {
     "activity.e2e.ts": 4724,
@@ -100,7 +106,7 @@
     "project-rail.e2e.ts": 34846,
     "project-sidebar.e2e.ts": 6354,
     "queued-stack.e2e.ts": 41137,
-    "quick-list.e2e.ts": 95004,
+    "quick-list.e2e.ts": 121253,
     "remote-settings-admin.e2e.ts": 4890,
     "removed-project-root.e2e.ts": 5370,
     "repo-git-diff.e2e.ts": 8097,
@@ -134,7 +140,7 @@
     "task-github-items.e2e.ts": 13607,
     "task-handoff.e2e.ts": 12886,
     "task-list-virtualization.e2e.ts": 126239,
-    "task-list-workload.e2e.ts": 22944,
+    "task-list-workload.e2e.ts": 28812,
     "task-pr-collection.e2e.ts": 24058,
     "task-status-groups.e2e.ts": 11763,
     "task-thread-layout.e2e.ts": 116294,
