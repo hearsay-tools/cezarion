@@ -1,12 +1,15 @@
 'use strict';
-// Trusted control plane: read live evidence, rerun one native job. Never check out
-// PR code, request a model review, post findings or dispatch the CI workflow.
+// Trusted control plane: read live evidence once per PR, rerun one native job and
+// sync the board. Never check out PR code, request a model review, post findings
+// or dispatch the CI workflow.
 const { setTimeout: delay } = require('node:timers/promises');
 const { reader, positive, validSha, REVIEW, successfulJobs } = require('./queue-ci-proof.cjs');
 const { readCodeRabbitAdmission, trustedCheck } = require('./coderabbit-admission.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
 const { signalTarget } = require('./review-signal.cjs');
+const { readHeadChecks, reviewCheckCompleted, boardStatus, syncBoard } = require('./pr-readiness.cjs');
 const TARGET_LIMIT = 4;
+const PULL_ACTIONS = new Set(['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
 const recovery = reason => new Error(`${reason}; dispatch with pr_number for manual recovery`);
 function associationNumbers(pulls) {
   if (!Array.isArray(pulls) || pulls.length > TARGET_LIMIT
@@ -51,6 +54,10 @@ async function eventTarget(read, eventName, payload, fullName) {
     const number = Number(payload.inputs?.pr_number);
     if (!positive(number)) throw new Error('pr_number must be a positive integer');
     return { numbers: [number] };
+  }
+  if (eventName === 'pull_request_target') {
+    const number = payload.pull_request?.number;
+    return PULL_ACTIONS.has(payload.action) && positive(number) ? { numbers: [number] } : null;
   }
   if (eventName === 'check_run') return checkTarget(read, payload);
   if (eventName === 'workflow_run') {
@@ -112,36 +119,37 @@ async function nativeProof(args, pr, log) {
     return null;
   }
 }
-async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, now, deadline, sleep, log }) {
-  const args = { github, owner, repo, now, deadline };
-  const proof = await nativeProof(args, pr, log);
-  if (!proof) return 'native-evidence-unavailable';
+// The native job and policy a targeted rerun would act on, or why none can.
+function nativeDecision(proof, pr, log) {
+  if (!proof) return { outcome: 'native-evidence-unavailable' };
   const policy = gatePolicy(proof);
-  if (!policy) return refuseLegacy(pr, log);
+  if (!policy) return { outcome: refuseLegacy(pr, log) };
   const job = reviewJob(proof);
-  if (!job) return 'job-not-completed-or-preflight-failed';
+  if (!job) return { outcome: 'job-not-completed-or-preflight-failed' };
   // An immutable success-only reader can revoke shared rejections, but cannot
   // promote a failed historical job under the newer no-files admission policy.
-  if (policy === 'execution-only' && job.conclusion !== 'success') return refuseLegacy(pr, log);
-  const admission = () => readCodeRabbitAdmission({ ...args, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin });
-  // Current-policy read failures still revoke green. Historical jobs need a
-  // validated rejection: an error alone cannot prove that their reader fails.
-  const desired = async () => {
-    try { return (await admission()).admitted; }
-    catch { return policy === 'admission' ? false : null; }
-  };
-  const admitted = await desired();
+  if (policy === 'execution-only' && job.conclusion !== 'success') return { outcome: refuseLegacy(pr, log) };
+  return { policy, job };
+}
+// Current-policy read failures still revoke green. Historical jobs need a
+// validated rejection: an error alone cannot prove that their reader fails.
+const desiredAdmission = (evidence, policy) => evidence.error ? (policy === 'admission' ? false : null) : evidence.result.admitted;
+async function readAdmission(admission) {
+  try { return { result: await admission() }; }
+  catch (error) { return { error }; }
+}
+async function rerunIfChanged({ args, read, write, owner, repo, pr, proof, policy, job, first, admission, now, sleep, log }) {
+  const admitted = desiredAdmission(first, policy);
   if (admitted === null) return 'review-evidence-unavailable';
   if (admitted === (job.conclusion === 'success')) return 'unchanged';
   if (!rerunnable(proof.run, now())) {
     log(`PR ${pr.number}: native CI cannot rerun (30 days / 50 attempts / active run). Repair CI or push a new head; no dispatch fallback.`);
     return 'rerun-unavailable';
   }
-  if (await desired() !== admitted) return 'changed';
+  if (desiredAdmission(await readAdmission(admission), policy) !== admitted) return 'changed';
   const final = await nativeProof(args, pr, log);
   if (!final) return 'native-evidence-unavailable';
   if (gatePolicy(final) !== policy || !unchangedJob(proof, final, job)) return 'changed';
-  const read = reader(github, owner, repo, deadline, now);
   let live;
   try { live = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pr.number }); }
   catch { return 'pull-evidence-unavailable'; }
@@ -150,17 +158,61 @@ async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, now,
   // the authoritative attempt before deciding again. Per-PR concurrency
   // serializes this workflow's writes; external manual reruns remain observable.
   let ambiguous = false;
-  try { await read('POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun', { job_id: job.id }); }
+  try { await write('POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun', { job_id: job.id }); }
   catch { ambiguous = true; }
   // A timeout can hide an accepted write. Keep serialization while observing
   // both successful and ambiguous responses; neither path retries the POST.
-  try { await observeRerun(read, proof.run, now, sleep, deadline); }
+  try { await observeRerun(read, proof.run, now, sleep, args.deadline); }
   catch {
     throw new Error('Rerun acceptance not yet visible. Inspect the native run before further retries; this execution made one POST and cannot prove its outcome.');
   }
   if (ambiguous) log(`PR ${pr.number}: targeted rerun became visible after an ambiguous API response.`);
   log(`PR ${pr.number}: rerun native review job ${job.id}, run ${proof.run.id}, attempt ${proof.run.run_attempt}; admission=${admitted}.`);
   return 'rerun-requested';
+}
+// One read of native proof and admission serves both the rerun and the board.
+// Each read happens only when its result can change a decision. The board
+// follows before the rerun attempt, so a rejected or ambiguous POST that throws
+// cannot leave a card In review.
+async function reconcilePull({ github, read, write, owner, repo, pr, checks, board, followBoard, releaseAppBotLogin, now, deadline, sleep, log }) {
+  const args = { github, owner, repo, now, deadline };
+  // Before any review check run on the head completes, the native job cannot be
+  // complete and no required check set can be green. Unreadable checks read on.
+  const reviewDone = !checks || reviewCheckCompleted(checks.checkRuns);
+  const proof = reviewDone ? await nativeProof(args, pr, log) : null;
+  const native = reviewDone ? nativeDecision(proof, pr, log) : { outcome: 'job-not-completed-or-preflight-failed' };
+  const boardNeedsAdmission = Boolean(board && checks?.ready && proof?.passed);
+  const admission = () => readCodeRabbitAdmission({ ...args, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin });
+  const first = native.job || boardNeedsAdmission ? await readAdmission(admission) : null;
+  if (first?.error) log(`PR ${pr.number}: fresh review admission unavailable.`);
+  await followBoard(Boolean(boardNeedsAdmission && first?.result?.admitted));
+  return native.job
+    ? rerunIfChanged({ args, read, write, owner, repo, pr, proof, ...native, first, admission, now, sleep, log })
+    : native.outcome;
+}
+async function headChecks(read, pr, log) {
+  try { return await readHeadChecks(read, pr.head.sha); }
+  catch {
+    log(`PR ${pr.number}: required checks unavailable; board sync skipped.`);
+    return null;
+  }
+}
+// A final read refuses a stale board move when the head, state or target
+// changed while this job read. Without a project token it is not needed.
+async function followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log }) {
+  if (!checks) return;
+  const sync = status => syncBoard({ projectGithub, owner, repo, pullNumber: pr.number, status, log });
+  if (!projectGithub) return sync(boardStatus({ checks, admitted, draft: pr.draft }));
+  let final;
+  try { final = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pr.number }); }
+  catch {
+    log(`PR ${pr.number}: board sync skipped: the final PR read failed.`);
+    return;
+  }
+  if (!sameLivePull(final, pr, `${owner}/${repo}`)) return;
+  const status = boardStatus({ checks, admitted, draft: final.draft });
+  log(`PR ${final.number}: board follows ${status} (admitted=${checks.ready && admitted}, draft=${final.draft}).`);
+  return sync(status);
 }
 function eligiblePull(pr, fullName) {
   return positive(pr?.number) && pr.state === 'open' && validSha(pr.head?.sha)
@@ -188,15 +240,19 @@ async function discover({ github, owner, repo, eventName, payload, now = Date.no
   }
   return { numbers };
 }
-async function reconcile({ github, owner, repo, pullNumber, releaseAppBotLogin,
+// `github` (GITHUB_TOKEN) makes the one targeted rerun write; `readGithub`
+// (the release App when available) makes every read; `projectGithub` syncs the board.
+async function reconcile({ github, readGithub = github, projectGithub = null, owner, repo, pullNumber, releaseAppBotLogin,
   now = Date.now, sleep = delay, log = () => {} }) {
   if (!positive(pullNumber)) throw new Error('Missing trusted discovery PR number');
-  const deadline = now() + 120000, read = reader(github, owner, repo, deadline, now);
+  const deadline = now() + 120000, read = reader(readGithub, owner, repo, deadline, now);
   const pr = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
   if (pr?.number !== pullNumber || !eligiblePull(pr, `${owner}/${repo}`)) return 'ineligible';
   // The admitted event is only a wake hint. Queue only PR identity, then prove
   // the newest live head/run at the lock head; never carry historical proof.
-  return reconcilePull({ github, owner, repo, pr,
-    releaseAppBotLogin, now, deadline, sleep, log });
+  const checks = await headChecks(read, pr, log);
+  return reconcilePull({ github: readGithub, read, write: reader(github, owner, repo, deadline, now),
+    owner, repo, pr, checks, board: Boolean(projectGithub), releaseAppBotLogin, now, deadline, sleep, log,
+    followBoard: admitted => followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log }) });
 }
 module.exports = { discover, reconcile, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };

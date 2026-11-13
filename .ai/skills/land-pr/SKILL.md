@@ -124,7 +124,7 @@ includes waiting for its required checks. A changed head invalidates the gate.
 
 ## 3. Merge or wait
 
-Agents open PRs ready, and `pr-readiness.yml` never changes draft state. A
+Agents open PRs ready, and `coderabbit-reconcile.yml` never changes draft state. A
 draft PR is a human's: leave it as it is and tell the owner it needs promotion,
 because no workflow promotes a draft. When the gate holds but owner action is required, send the
 owner the PR, `H`, gate evidence and the specific missing approval. Register

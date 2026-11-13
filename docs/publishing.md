@@ -297,6 +297,18 @@ performs this setup once:
    [Actions repository secrets](https://github.com/hearsay-tools/cezarion/settings/secrets/actions).
    Do not put the key in chat, source control, or a repository variable.
 
+Optional permissions for the CI control plane. **Reconcile CodeRabbit
+admission** (`coderabbit-reconcile.yml`) mints its own short-lived tokens from
+the same App and degrades quietly when a permission is missing:
+
+- **Organization permissions → Projects → Read and write** lets it sync the
+  board. Without it, only the board sync skips.
+- **Repository permissions → Actions, Checks, Contents and Commit statuses →
+  Read-only** (with Pull requests above) moves its API reads onto the App's own
+  rate limit, away from the repository's `GITHUB_TOKEN` budget. Without them,
+  the reads use `GITHUB_TOKEN`. The App never needs Actions write: the targeted
+  review rerun stays on `GITHUB_TOKEN`.
+
 The release job validates the settings and mints a repository-scoped token before
 npm publication. Missing settings, failed token creation, or a mismatched bot
 login stop the job before publishing. The `existing` release mode needs no App,

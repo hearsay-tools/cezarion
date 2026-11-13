@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { discover, reconcile, eventTarget } = require('./coderabbit-reconcile.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
-const { fixture, HEAD, BASE } = require('./coderabbit.testkit.cjs');
+const { fixture, providerRead, HEAD, BASE } = require('./coderabbit.testkit.cjs');
 async function run(h, eventName = 'workflow_dispatch', extra = {}) {
   const args = { ...h, owner: 'o', repo: 'r' };
   const { numbers } = await discover({ ...args, eventName,
@@ -85,8 +85,8 @@ for (const [name, mutate] of Object.entries({
 });
 test('final native run revalidation prevents rerun when CI changes during admission read', async () => {
   const h = fixture(); let checks = 0;
-  h.s.onRead = route => {
-    if (route.endsWith('/commits/{ref}/check-runs') && ++checks === 4) h.s.run.id = 21;
+  h.s.onRead = (route, args) => {
+    if (providerRead(route, args) && ++checks === 4) h.s.run.id = 21;
   };
   assert.deepEqual(await run(h), ['changed']); assert.deepEqual(h.s.writes, []);
 });
@@ -380,7 +380,7 @@ for (const [name, mutate] of Object.entries({
   const result = await run(h);
   assert.deepEqual(h.s.writes, [30]);
   assert.deepEqual(result, ['rerun-requested']);
-  assert.equal(h.s.calls.filter(([route]) => route.endsWith('/commits/{ref}/check-runs')).length, 4,
+  assert.equal(h.s.calls.filter(([route, args]) => providerRead(route, args)).length, 4,
     'read validated live admission twice before the native rerun');
 });
 for (const conclusion of ['success', 'skipped']) test(`historical green stays unchanged for admitted ${conclusion}`, async () => {
@@ -407,14 +407,14 @@ for (const marker of ['Require fresh CodeRabbit execution and resolved threads',
     h.s.run.referenced_workflows = [{ path: 'o/r/.github/workflows/automated-code-review.yml@refs/heads/main' }];
     assert.deepEqual(await run(h), ['legacy-workflow']);
     assert.deepEqual(h.s.writes, []);
-    assert.ok(h.s.calls.every(([route]) => !route.endsWith('/commits/{ref}/check-runs')));
+    assert.ok(h.s.calls.every(([route, args]) => !providerRead(route, args)));
   });
 }
 for (const change of ['provider', 'head', 'run', 'attempt', 'policy', 'job']) test(`historical revocation refuses changed ${change} before POST`, async () => {
   const h = historicalGreen(); h.s.checks[0].status = 'queued'; h.s.checks[0].conclusion = null;
   let checks = 0;
-  h.s.onRead = route => {
-    if (!route.endsWith('/commits/{ref}/check-runs')) return;
+  h.s.onRead = (route, args) => {
+    if (!providerRead(route, args)) return;
     checks++;
     if (checks === 3 && change === 'provider') Object.assign(h.s.checks[0], { status: 'completed', conclusion: 'success' });
     if (checks === 3 && change === 'head') h.s.pr.head.sha = BASE;
@@ -430,7 +430,7 @@ for (const change of ['provider', 'head', 'run', 'attempt', 'policy', 'job']) te
 for (const historical of [false, true]) test(`admission read error revocation preserves policy direction (historical=${historical})`, async () => {
   const h = historical ? historicalGreen() : fixture();
   h.s.jobs[0].conclusion = 'success'; h.s.run.conclusion = 'success';
-  h.s.onRead = route => { if (route.endsWith('/commits/{ref}/check-runs')) throw new Error('Provider read failed'); };
+  h.s.onRead = (route, args) => { if (providerRead(route, args)) throw new Error('Provider read failed'); };
   assert.deepEqual(await run(h), [historical ? 'review-evidence-unavailable' : 'rerun-requested']);
   assert.deepEqual(h.s.writes, historical ? [] : [30]);
 });
@@ -447,4 +447,39 @@ for (const policy of ['current', 'execution-only']) test(`manual dispatch preser
     assert.deepEqual(await run(h), ['unchanged']);
     assert.deepEqual(h.s.writes, [30]);
   }
+});
+
+// Per-PR read budget (hearsay-tools/squawk CI API quota plan): the merged job
+// reads each piece of evidence once and skips reads that cannot change a decision.
+const perPrReads = h => h.s.calls.filter(([route]) => !route.startsWith('POST')).length;
+async function reconcileOnly(h, extra = {}) {
+  return reconcile({ ...h, owner: 'o', repo: 'r', pullNumber: 7, ...extra });
+}
+test('a running native review skips native proof and admission reads', async () => {
+  const h = fixture(); h.s.jobs[0].status = 'in_progress'; h.s.jobs[0].conclusion = null;
+  assert.equal(await reconcileOnly(h), 'job-not-completed-or-preflight-failed');
+  assert.equal(perPrReads(h), 4, 'PR, branch rules, head check runs, commit statuses');
+  assert.ok(h.s.calls.every(([route, args]) => !providerRead(route, args) && !route.includes('/actions/')));
+});
+test('a completed native review reads proof and admission once for an unchanged decision', async () => {
+  const h = fixture(); h.s.jobs[0].conclusion = 'success'; h.s.run.conclusion = 'success';
+  assert.equal(await reconcileOnly(h), 'unchanged');
+  // 4 head reads + 6 native proof + 5 admission (PR, provider, threads, provider, PR).
+  assert.equal(perPrReads(h) + h.s.calls.filter(([route]) => route === 'POST /graphql').length, 15);
+});
+test('unreadable head checks still reconcile, and only the board sync is skipped', async () => {
+  const h = fixture(); const logs = [];
+  h.s.onRead = route => { if (route.endsWith('/rules/branches/{branch}')) throw new Error('rules unavailable'); };
+  assert.equal(await reconcileOnly(h, { log: message => logs.push(message) }), 'rerun-requested');
+  assert.match(logs.join('\n'), /required checks unavailable; board sync skipped/);
+});
+test('reads use the read client and only the rerun POST uses the Actions token', async () => {
+  const h = fixture(), writes = [];
+  const github = { request: async (route, args) => {
+    writes.push(route);
+    return h.github.request(route, args);
+  } };
+  assert.equal(await reconcileOnly(h, { github, readGithub: h.github }), 'rerun-requested');
+  assert.deepEqual(writes, ['POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun']);
+  assert.ok(h.s.calls.filter(([route]) => !route.startsWith('POST')).length > 10);
 });

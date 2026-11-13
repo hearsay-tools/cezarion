@@ -131,7 +131,7 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
 
 ### Merge
 
-1. `pr-readiness.yml` no longer returns a PR to draft. It keeps the board in sync from the
+1. The board sync (`pr-readiness.yml`, merged into `coderabbit-reconcile.yml`) no longer returns a PR to draft. It keeps the board in sync from the
    check and thread state. A PR that opens ready has no `ready_for_review` event, so queue
    admission uses current-head CodeRabbit admission without the 180 s window, as it does
    today for such PRs.

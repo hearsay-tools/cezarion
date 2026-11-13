@@ -61,7 +61,7 @@ for preflight only and runs beside the native protected review job; `verify` req
 | Provider completes before CI, or CI before provider | Other completion reconciles once native job completes |
 | Unchanged desired outcome | No rerun; prevents feedback loops |
 | New pending review or reopened thread on same head | On the next trigger, revoke readiness and rerun green native review to red; dispatch after manual reopening |
-| Manual reopening or resolution with no event | Dispatch reconciliation with PR number; read only, then targeted rerun; dispatch PR Readiness if needed |
+| Manual reopening or resolution with no event | Dispatch Reconcile CodeRabbit admission with PR number; read only, then targeted rerun and board sync (PR Readiness merged into it) |
 | Fork PR | Reader/queue can verify it; reconciler ignores it; maintainer reruns native review job in Actions; readiness preserves author control |
 | Disabled CI, old run or 50 attempts | Stop; report manual recovery, never whole-CI dispatch fallback |
 
@@ -231,7 +231,7 @@ Eleven table-driven policy cases check this whole admission/proof helper set.
 
 The documentation correction records that GitHub Actions has no review-thread event for manual reopening or resolution. Admission and ready/draft state update on the next
 reader/trigger; maintainers dispatch reconciliation with `pr_number` after either
-manual change and dispatch PR Readiness if draft state needs refreshing. Preserve
+manual change; the same Reconcile CodeRabbit admission run refreshes the board (PR Readiness merged into it). Preserve
 the fork-author draft rule. No runtime or workflow redesign.
 
 
