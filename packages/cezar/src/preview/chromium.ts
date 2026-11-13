@@ -462,7 +462,9 @@ export async function stopChromium(proc: ChildProcess, graceMs = 0): Promise<voi
 async function killChromium(proc: ChildProcess): Promise<void> {
   const held = proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null;
   if (held && process.platform !== 'win32') {
-    try { process.kill(-proc.pid!, 'SIGKILL'); } catch { /* the group already ended */ }
+    try { process.kill(-proc.pid!, 'SIGKILL'); } catch { proc.kill('SIGKILL'); }
+  } else {
+    proc.kill('SIGKILL');
   }
   await stopChromium(proc);
 }
