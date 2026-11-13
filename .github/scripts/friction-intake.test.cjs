@@ -215,7 +215,7 @@ test('the daily digest checks whether each merged fix made its signal go quiet b
     '"came back"',
     '"quiet since <merge date>"',
     'code from before the merge does not count',
-    `once a digest has read the inbox issue dated ${INBOX.fixQuietDays} days after its merge, with no counted finding`,
+    `at the first digest that runs after the day ${INBOX.fixQuietDays} days after its merge, with no counted finding`,
   ]) assert.ok(prompt.includes(text), text);
   assert.ok(prompt.indexOf('Then run the fix check') < prompt.indexOf('4. Give each group one verdict'), 'the fix check runs before the verdicts');
   assert.ok(prompt.includes('or it holds a "came back" finding'), 'a recurrence of a merged fix always ranks as act');

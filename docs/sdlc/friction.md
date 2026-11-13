@@ -71,11 +71,11 @@ the filed issue and marks the fix `came back`. Otherwise it marks the fix
 `quiet since <merge date>`. A finding from a cockpit that still ran the code
 from before the merge does not count, and the digest says so. A fix marked
 `came back` stays so: the issue leaves the check, and the group that names it
-carries the recurrence. Any other issue leaves the check once a digest has read
-the inbox issue dated 14 days after its merge, with no counted finding; a later
-finding never counts against it. Until then, the digest comment carries its
-result forward, with its counted findings and dates, and the next digest reads
-it with the watch list.
+carries the recurrence. Any other issue leaves the check at the first digest
+that runs after the day 14 days after its merge, with no counted finding; a
+later finding never counts against it. Until then, the digest comment carries
+its result forward, with its counted findings and dates, and the next digest
+reads it with the watch list.
 
 For each Act group, the digest names the smallest fix that removes the whole
 class, and places any new rule as
@@ -144,7 +144,7 @@ An Act group has its own lifecycle across digests:
 | Filed | New evidence while the issue is open | The next digest | Stays filed; the evidence becomes a comment on the filed issue |
 | Filed | A merged pull request closes the issue | The next digest | Fix check |
 | Fix check | A finding within 14 days after the merge has the same root cause, or comes from a mechanism the pull request added | The next digest | Came back: the finding's group names the filed issue and the pull request, and the digest ranks it like any Act group |
-| Fix check | A digest has read the inbox issue dated 14 days after the merge, with no counted finding | The digest | Final |
+| Fix check | The first digest after the day 14 days after the merge runs, with no counted finding | The digest | Final |
 
 ## Categories
 
