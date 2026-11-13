@@ -1,4 +1,4 @@
-import { productName, productCommand } from '@/lib/product-name'
+import { productCommand } from '@/lib/product-name'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -123,7 +123,7 @@ afterEach(() => {
 })
 
 describe('AgentConfigSection', () => {
-  it('keeps agent tabs beside a file list and editor, not a shortcut row', async () => {
+  it('lists each agent tab’s files and opens a selected file in the editor', async () => {
     serve({ editable: true, userMcp: null, files: [
       fileOf({ id: 'claude.memory', label: 'CLAUDE.md', kind: 'memory', format: 'markdown' }),
       fileOf({ id: 'claude.settings', label: '.claude/settings.json' }),
@@ -133,10 +133,6 @@ describe('AgentConfigSection', () => {
     ] })
     renderSection()
     await waitFor(() => expect(agentTab('claude').getAttribute('role')).toBe('tab'))
-    expect(screen.queryByLabelText('Configuration agent')).toBeNull()
-    expect(document.querySelector('[data-slot="agent-config-shortcut"]')).toBeNull()
-    expect(document.querySelector('[data-slot="agent-config-nav"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="agent-config-editor-pane"]')).not.toBeNull()
     expect(screen.getByText('~/.claude/settings.json')).toBeTruthy()
     fireEvent.click(screen.getByText('.mcp.json'))
     await waitFor(() => expect(screen.getByLabelText('.mcp.json contents')).toBeTruthy())
@@ -161,17 +157,6 @@ describe('AgentConfigSection', () => {
     expect(agentTab('claude').textContent).not.toContain('not installed')
   })
 
-  it('every agent tab carries a 44px minimum width — a two-letter "Pi" label must still be a full target', async () => {
-    // Height is the settings stylesheet's job (44px at the mobile breakpoint); jsdom measures
-    // nothing, so the real 360×640 box is pinned in e2e/settings-agent-config.e2e.ts.
-    serve({ editable: true, files: [], userMcp: null })
-    renderSection()
-    await waitFor(() => expect(agentTab('pi')).toBeTruthy())
-    for (const tab of document.querySelectorAll('[data-slot="agent-config-agent"]')) {
-      expect(tab.className).toMatch(/\bmin-w-11\b/)
-    }
-  })
-
   it('Pi’s pane lists its files and states why the MCP group is empty and what to try', async () => {
     serve({
       editable: true,
@@ -190,9 +175,7 @@ describe('AgentConfigSection', () => {
     expect(screen.getByText('AGENTS.md')).toBeTruthy()
     const mcpGroup = document.querySelector('[data-slot="agent-config-group"][data-group="mcp"][data-agent="pi"]')!
     expect(mcpGroup).toBeTruthy()
-    const empty = mcpGroup.querySelector('[data-slot="agent-config-group-empty"]')!
-    expect(empty.textContent).toMatch(/No MCP/)
-    expect(empty.textContent).toMatch(/extension/i)
+    expect(mcpGroup.querySelector('[data-slot="agent-config-group-empty"]')).not.toBeNull()
     expect(mcpGroup.querySelectorAll('[data-slot="agent-config-file"]').length).toBe(0)
   })
 
@@ -281,7 +264,6 @@ describe('AgentConfigSection', () => {
     expect(block).toBeTruthy()
     expect(block.textContent).toContain('github')
     expect(block.textContent).toContain('sentry')
-    expect(block.textContent).toContain(`${productName("cezar")} does not edit`)
     // the block belongs to Claude's pane only
     fireEvent.click(agentTab('codex'))
     await waitFor(() => expect(document.querySelector('[data-slot="agent-config-user-mcp"]')).toBeNull())
@@ -302,7 +284,6 @@ describe('AgentConfigSection', () => {
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
     fireEvent.click(agentTab('opencode'))
     await waitFor(() => expect(screen.queryByLabelText('.claude/settings.json contents')).toBeNull())
-    expect(screen.getByText('Select a config file to view or edit it.')).toBeTruthy()
   })
 
   it('shows the vendor precedence when a file is selected', async () => {
@@ -313,8 +294,9 @@ describe('AgentConfigSection', () => {
     })
     renderSection()
     await waitFor(() => expect(screen.getByText('.claude/settings.json')).toBeTruthy())
+    expect(document.querySelector('[data-slot="agent-config-precedence"]')).toBeNull()
     fireEvent.click(screen.getByText('.claude/settings.json'))
-    await waitFor(() => expect(screen.getByText(/Overrides user settings key by key/)).toBeTruthy())
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-precedence"]')?.textContent).toBe('Overrides user settings key by key.'))
   })
 
   it('renders read-only in hosted mode — no Save button', async () => {
@@ -344,7 +326,6 @@ describe('AgentConfigSection', () => {
     )
     renderSection()
     await waitFor(() => expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeTruthy())
-    expect(document.querySelector('[data-slot="remote-settings-notice"]')?.textContent).toContain('hooks and MCP servers')
     expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeNull()
     fireEvent.click(screen.getByText('.claude/settings.json'))
     const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement

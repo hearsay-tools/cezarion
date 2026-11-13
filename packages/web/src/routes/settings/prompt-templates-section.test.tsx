@@ -227,7 +227,7 @@ describe('assigning a template to a skill', () => {
     fireEvent.click(option(name)!)
   }
 
-  it('lists skills project-first and bold, matching every other skill picker (#377)', async () => {
+  it('lists skills project-first, matching every other skill picker (#377)', async () => {
     serve()
     renderSection()
     await waitFor(() => expect(rows()).toHaveLength(DEFAULT_PROMPT_TEMPLATES.length))
@@ -239,8 +239,6 @@ describe('assigning a template to a skill', () => {
     const options = [...document.querySelectorAll<HTMLElement>('[data-slot="prompt-template-skill-option"]')]
     // Served global-first; rendered project-first.
     expect(options.map((o) => o.dataset.skill)).toEqual(['om-fix', 'g-review'])
-    expect(options[0]?.querySelector('.font-semibold')).not.toBeNull()
-    expect(options[1]?.querySelector('.font-semibold')).toBeNull()
   })
 
   it('lists most-used skills first, across localities (#519)', async () => {

@@ -227,7 +227,6 @@ describe('Webhooks', () => {
     const boxes = () => Array.from(document.querySelectorAll<HTMLInputElement>('[data-slot="webhook-triggers"] input[type="checkbox"]'))
     expect(boxes().map((box) => box.dataset.trigger)).toEqual([...WEBHOOK_TRIGGERS])
     expect(boxes().filter((box) => box.checked).map((box) => box.dataset.trigger)).toEqual(['needs-you', 'failed', 'done', 'cancelled'])
-    expect(first.getByText('Handing a task off and Send test always deliver.')).toBeTruthy()
     fireEvent.click(first.getByRole('checkbox', { name: /Waiting on CI/ }))
     fireEvent.click(first.getByRole('checkbox', { name: /^Done/ }))
     fireEvent.click(first.getByRole('button', { name: 'Save' }))

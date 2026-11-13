@@ -408,7 +408,7 @@ function DefaultAgentField({
       {!providerStatus.isPending &&
       !providerStatus.isError &&
       providerStatusFor(providerStatus.data, defaultRunner)?.enabled === false ? (
-        <p className="text-[13px] text-muted-foreground">
+        <p data-slot="agents-runner-disabled" className="text-[13px] text-muted-foreground">
           This provider is disabled. Enable it above or choose another provider.
         </p>
       ) : null}

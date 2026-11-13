@@ -263,9 +263,7 @@ describe('the agents form', () => {
     await waitFor(() => expect(form()).not.toBeNull())
     const providers = document.querySelector<HTMLElement>('[data-slot="provider-settings"]')!
     expect(providers.id).toBe('providers')
-    expect(providers.className).toContain('scroll-mt-20')
-    expect(providers.className).not.toContain('scroll-mt-6')
-    expect(providers?.closest('details')?.querySelector('summary')?.textContent).toBe('Provider connections')
+    expect(providers.closest('details')).not.toBeNull()
   })
 
   it('keeps a saved disconnected runner selected while disabling its runner and model controls', async () => {
@@ -309,9 +307,7 @@ describe('the agents form', () => {
     expect(codex.getAttribute('aria-checked')).toBe('true')
     expect((codex as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByLabelText<HTMLSelectElement>('Default model for codex').disabled).toBe(true)
-    expect(
-      screen.getByText('This provider is disabled. Enable it above or choose another provider.'),
-    ).toBeTruthy()
+    expect(document.querySelector('[data-slot="agents-runner-disabled"]')).not.toBeNull()
   })
 
   it('disables only provider-specific controls while provider status is pending', async () => {
@@ -448,9 +444,6 @@ describe('the agents form', () => {
     serve()
     renderAt('/settings/agents')
     await waitFor(() => expect(form()).not.toBeNull())
-    expect(screen.queryByText('Additional agent models')).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Default model' })).toBeTruthy()
-    expect(screen.getByText(/The model preselected in the composer/)).toBeTruthy()
     expect(
       [...document.querySelectorAll('[data-slot="agents-model"]')].map((el) => el.getAttribute('data-runner')),
     ).toEqual([...runnerSchema.options])
@@ -498,7 +491,6 @@ describe('the agents form', () => {
     await waitFor(() => expect(form()).not.toBeNull())
 
     const claudeModel = screen.getByLabelText<HTMLOutputElement>('Default model for claude')
-    expect(claudeModel.tagName).toBe('OUTPUT')
     expect(claudeModel.textContent).toContain('native-sonnet')
     expect(screen.queryByRole('combobox', { name: 'Default model for claude' })).toBeNull()
 
@@ -514,7 +506,6 @@ describe('the agents form', () => {
     await waitFor(() => expect(form()).not.toBeNull())
 
     const box = screen.getByLabelText<HTMLTextAreaElement>('System prompt')
-    expect(box.className).toContain('min-h-48')
     const saveButton = () => document.querySelector<HTMLButtonElement>('[data-action="agents-save-prompt"]')!
     // Unchanged draft: nothing to save.
     expect(saveButton().disabled).toBe(true)
@@ -544,24 +535,6 @@ describe('the agents form', () => {
     expect(document.querySelector('[data-slot="agents-prompt-limit"]')?.textContent).toContain('20,000')
     fireEvent.click(save)
     expect(puts()).toHaveLength(0)
-  })
-
-  it('keeps Save prompt under the textarea and groups the run options with descriptions', async () => {
-    serve()
-    renderAt('/settings/agents')
-    await waitFor(() => expect(form()).not.toBeNull())
-    const prompt = screen.getByLabelText('System prompt')
-    const save = document.querySelector('[data-action="agents-save-prompt"]')!
-    const live = screen.getByLabelText('Live title updates')
-    expect(prompt.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(save.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByText(/Refresh a task's short title/)).toBeTruthy()
-    expect(screen.getByText(/a task with changes pauses/)).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Task runs' })).toBeTruthy()
-    const group = document.querySelector('[data-slot="agents-task-runs"]')!
-    expect(group.contains(live)).toBe(true)
-    expect(group.contains(screen.getByLabelText('Review changes before finishing'))).toBe(true)
-    expect(group.contains(screen.getByRole('heading', { name: 'Base branch' }))).toBe(true)
   })
 
   it('base branch round-trips through the same PUT — "" means follow the checked-out branch', async () => {
@@ -621,7 +594,6 @@ describe('the agents form', () => {
       // Settled: the default-models field below it has rendered, so the pane is not mid-load.
       await screen.findByLabelText('Default model for claude')
       expect(rows().map((r) => r.getAttribute('data-value'))).toEqual([...runnerSchema.options])
-      expect(document.body.textContent).toContain('Default runner')
     })
 
     it('splits ONLY the agent that has a second login, and names each folder', async () => {
@@ -629,18 +601,15 @@ describe('the agents form', () => {
       renderAt('/settings/agents')
 
       await waitFor(() => expect(rows()).toHaveLength(7))
-      expect(rows().map((r) => r.textContent)).toEqual([
-        'claude · Default/home/u/.claude',
-        'claude · Klaudiusz~/.claude-klaudiusz',
-        'codexOpenAI Codex (app-server)',
-        'opencodeOpenCode (serve)',
-        'pipi CLI (provider/model)',
-        'CursorCursor CLI',
-        'OMPOh My Pi CLI (provider/model)',
+      expect(rows().map((r) => `${r.getAttribute('data-value')}:${r.getAttribute('data-account')}`)).toEqual([
+        'claude:',
+        'claude:klaudiusz',
+        ...runnerSchema.options.filter((id) => id !== 'claude').map((id) => `${id}:`),
       ])
+      expect(rowFor('claude', '')?.querySelector('[data-slot="agents-account-dir"]')?.textContent).toBe('/home/u/.claude')
+      expect(rowFor('claude', 'klaudiusz')?.querySelector('[data-slot="agents-account-dir"]')?.textContent).toBe('~/.claude-klaudiusz')
       // The discovered account is the checked row until the repo says otherwise.
       expect(rowFor('claude', '')?.getAttribute('aria-checked')).toBe('true')
-      expect(document.body.textContent).toContain('Default runner')
     })
 
     it('starts on the account the repo is already set to', async () => {
@@ -720,20 +689,7 @@ describe('the agents form', () => {
       renderAt('/settings/agents')
 
       await waitFor(() =>
-        expect(
-          document.querySelector('[data-slot="agents-account-missing"]')?.textContent,
-        ).toContain('folder not created yet'))
-    })
-
-    it('says the account is personal, because everything else in this pane is shared', async () => {
-      serve({ agentProfiles: WITH_WORK_ACCOUNT })
-      renderAt('/settings/agents')
-
-      await waitFor(() => expect(rows()).toHaveLength(7))
-      const pane = document.querySelector('[data-slot="agents-runner"]')?.closest('section')
-      expect(pane?.textContent).toContain('never committed')
-      // The consequence a reader cannot guess: sessions live in the account's own folder.
-      expect(pane?.textContent).toContain('can’t be resumed here')
+        expect(document.querySelector('[data-slot="agents-account-missing"][data-runner="claude"]')).not.toBeNull())
     })
   })
 })

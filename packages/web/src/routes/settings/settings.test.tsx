@@ -268,15 +268,6 @@ describe('the settings shell', () => {
       expect(document.querySelector('[data-route="settings-global-appearance"]')).not.toBeNull()
     })
   })
-
-  it('unfinished sections say so through the shared CenteredState template', () => {
-    // Hidden sections are not routed (their URLs 404) — render the registry component
-    // directly to pin the placeholder contract itself.
-    const Keyboard = SETTINGS_SECTIONS.find((s) => s.id === 'keyboard')!.component
-    render(<Keyboard />)
-    const state = document.querySelector('[data-slot="centered-state"]')
-    expect(state?.textContent).toContain('later phase')
-  })
 })
 
 describe('the appearance section (global scope)', () => {

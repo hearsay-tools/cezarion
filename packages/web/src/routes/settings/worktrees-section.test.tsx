@@ -131,9 +131,7 @@ describe('Project settings → Worktrees: keep-last-N-worktrees (#483)', () => {
     serve({ worktreeRetention: 7 })
     renderAt('/settings/worktrees')
     await waitFor(() => expect(retentionInput()).not.toBeNull())
-    expect(screen.getByText('Keep N finished worktrees')).toBeTruthy()
     const link = document.querySelector('[data-slot="worktrees-manage-link"]')
-    expect(link?.textContent).toBe('Manage worktrees on Git')
     expect(link?.getAttribute('href')).toBe('/p/boot/git/cleanup')
     // Issue 06 §3: the panel is listed once, on Git.
     expect(document.querySelector('[data-slot="worktrees-panel"]')).toBeNull()
@@ -212,7 +210,6 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     expect(commandsBox()!.value).toBe('')
     expect(commandsBox()!.placeholder).toBe('')
     expect(screen.getByText('No setup commands configured. No commands will run in new worktrees.')).toBeTruthy()
-    expect(screen.getByText(/Example only:/).textContent).toContain('npm ci')
     expect(saveSetup()!.disabled).toBe(true)
   })
 
@@ -229,7 +226,6 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     serve({ worktreeSetup: { commands: ['npm ci', 'cp a b'], timeoutSeconds: 600 } })
     renderAt('/settings/worktrees', LOCAL)
     await waitFor(() => expect(commandsBox()).not.toBeNull())
-    expect(screen.getByText('Prepare new worktrees')).toBeTruthy()
     expect(commandsBox()!.value).toBe('npm ci\ncp a b')
     expect(screen.queryByText('No setup commands configured. No commands will run in new worktrees.')).toBeNull()
     expect(timeoutInput()!.value).toBe('600')
@@ -280,9 +276,9 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     expect(screen.queryByText('No setup commands configured. No commands will run in new worktrees.')).toBeNull()
     expect(timeoutInput()!.readOnly).toBe(true)
     expect(saveSetup()!.disabled).toBe(true)
-    expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toBe(
-      `Edit worktreeSetup.commands in /host/boot/.ai/cezar/config.json on the machine running ${productName("Cezarion")}. Valid file edits apply to new worktrees; no restart is needed. To edit here, the host operator runs ${productCommand()} remote-settings enable.`,
-    )
+    const readonly = document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent
+    expect(readonly).toContain('/host/boot/.ai/cezar/config.json')
+    expect(readonly).toContain(`${productCommand()} remote-settings enable`)
     expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
   })
 

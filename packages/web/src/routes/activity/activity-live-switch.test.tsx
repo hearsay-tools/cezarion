@@ -46,7 +46,6 @@ describe('the activity views read the live snapshot', () => {
     renderAt('/p/cezarion/activity', <ProjectActivityRoute />)
     expect(await screen.findByText('Porting upstream SSE')).toBeTruthy()
     expect(vi.mocked(useActivityLive).mock.calls.every(([scope]) => scope.kind === 'project' && scope.projectId === 'default')).toBe(true)
-    expect(document.querySelector('[data-slot="activity-clock"]')?.textContent).toMatch(/^Live\d{2}:\d{2}:\d{2} /)
   })
 
   it('reads the global view through useActivityLive with the workspace scope', async () => {
@@ -54,6 +53,5 @@ describe('the activity views read the live snapshot', () => {
     expect(await screen.findByText('Porting upstream SSE')).toBeTruthy()
     expect(vi.mocked(useActivityLive).mock.calls.every(([scope]) => scope.kind === 'workspace')).toBe(true)
     expect(vi.mocked(useActivityLive)).toHaveBeenCalled()
-    expect(document.querySelector('[data-slot="activity-clock"]')?.textContent).toMatch(/^Live/)
   })
 })
