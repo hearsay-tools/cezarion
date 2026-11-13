@@ -46,7 +46,9 @@ jobs:
         # The engines.node floor and the release line users are on.
         node: ['24.21.0', 'lts/*']
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # The first install can wait up to 15 min for npm to serve the version, then 5 min for
+    # the install (scripts/release-smoke.mjs PUBLISH_WAIT_MS, INSTALL_WAIT_MS).
+    timeout-minutes: 40
     steps:
       - name: Check out test tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootEnv, cockpitAsset, parseArgs, run } from './release-smoke.mjs';
+import { INSTALL_WAIT_MS, PUBLISH_WAIT_MS, bootEnv, cockpitAsset, parseArgs, registryInstall, run } from './release-smoke.mjs';
 
 test('the smoke takes a package, an exact version and an optional upgrade source', () => {
   assert.deepEqual(parseArgs(['--package', '@hearsay-tools/squawk', '--version', '1.2.1-rc.1']),
@@ -29,6 +30,75 @@ test('no ambient product setting reaches the booted package', () => {
   assert.equal(env.CEZ_HOME, '/tmp/h/product');
   assert.equal(env.HOME, '/tmp/h/user');
   assert.equal(env.HSQ_DRY_RUN, '1');
+});
+
+// A fake npm on a fake clock: `npm view` shows the version from `visibleAt` on, and
+// `npm install` fails until `installableAt`.
+function fakeRegistry({ visibleAt = 0, installableAt = visibleAt, version = '1.2.1' } = {}) {
+  const calls = [];
+  let now = 0;
+  const notFound = () => Object.assign(new Error('Command failed: npm'), { stderr: `npm error code E404\nnpm error 404 No match found for version ${version}\n` });
+  return {
+    calls, logs: [], get now() { return now; },
+    options() {
+      return {
+        now: () => now, sleep: async ms => { now += ms; }, log: line => this.logs.push(line),
+        exec: args => {
+          calls.push({ at: now, command: args[0], args });
+          if (args[0] === 'view') { if (now < visibleAt) throw notFound(); return `${version}\n`; }
+          if (now < installableAt) throw Object.assign(new Error('Command failed: npm install'), { stderr: '' });
+          return null;
+        },
+      };
+    },
+  };
+}
+
+test('the smoke install waits until the registry serves a version npm is still processing', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  // The 2026-11-13 nightly appeared 6 min 12 s after npm publish returned.
+  const registry = fakeRegistry({ visibleAt: 372_000 });
+  await registryInstall(prefix, 'fake@1.2.1', registry.options());
+  const installs = registry.calls.filter(call => call.command === 'install');
+  assert.equal(installs.length, 1);
+  assert.ok(installs[0].at >= 372_000);
+  assert.ok(installs[0].args.includes('--prefer-online') && installs[0].args.includes('fake@1.2.1'));
+  assert.ok(registry.calls.filter(call => call.command === 'view').every(call => call.args.includes('--prefer-online')));
+  assert.match(registry.logs[0], /fake@1\.2\.1 is not on the registry \(attempt 1, 0 s elapsed\): npm error 404 No match found/);
+  assert.match(registry.logs.at(-1), /the registry serves fake@1\.2\.1/);
+});
+
+test('npm view must print the exact version before the install starts', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const registry = fakeRegistry();
+  const options = registry.options();
+  let views = 0;
+  const exec = (args, more) => (args[0] === 'view' && ++views < 3 ? '' : options.exec(args, more));
+  await registryInstall(prefix, 'fake@1.2.1', { ...options, exec });
+  assert.equal(views, 3);
+  assert.equal(registry.now, 30_000);
+});
+
+test('a version the registry never serves fails at the publish bound without an install', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const registry = fakeRegistry({ visibleAt: Infinity });
+  await assert.rejects(registryInstall(prefix, 'fake@1.2.1', registry.options()),
+    new RegExp(`fake@1\\.2\\.1 is not on the registry after ${PUBLISH_WAIT_MS / 1000} s`));
+  assert.equal(registry.now, PUBLISH_WAIT_MS);
+  assert.equal(registry.calls.filter(call => call.command === 'install').length, 0);
+});
+
+test('an install that keeps failing once the version is visible stops at the shorter install bound', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const registry = fakeRegistry({ installableAt: Infinity });
+  await assert.rejects(registryInstall(prefix, 'fake@1.2.1', registry.options()),
+    new RegExp(`fake@1\\.2\\.1 did not install after ${INSTALL_WAIT_MS / 1000} s`));
+  assert.equal(registry.now, INSTALL_WAIT_MS);
+  assert.equal(registry.calls.filter(call => call.command === 'view').length, 1);
 });
 
 // A package whose binary is a tiny server with the routes the smoke reads. Its project
