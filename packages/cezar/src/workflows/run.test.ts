@@ -18,7 +18,7 @@ import { type UiEvent } from '../core/ui-events.ts';
 import { RunStore, type StepState, type RunRecord } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
-import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
+import { appendTurnText, RunManager } from './run.ts';
 import { type WorkflowDef } from './types.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createWorktree } from '../git-worktree.ts';
@@ -47,30 +47,6 @@ describe('appendTurnText', () => {
     expect(appendTurnText('', 'first')).toBe('first');
     expect(appendTurnText('first', '')).toBe('first');
     expect(appendTurnText(appendTurnText('', 'first'), 'second')).toBe('first\nsecond');
-  });
-});
-
-describe('trackTurnTail', () => {
-  const completed = (item: Extract<UiEvent, { type: 'item.completed' }>['item']): UiEvent => ({ type: 'item.completed', item });
-  it('marks a non-empty top-level assistant message as a visible tail', () => {
-    expect(trackTurnTail('none', completed({ kind: 'message', id: 'm', role: 'assistant', text: 'hi' }))).toBe('visible');
-  });
-  it('marks reasoning as a silent tail even after a visible message', () => {
-    expect(trackTurnTail('visible', completed({ kind: 'reasoning', id: 'r', text: 'think' }))).toBe('silent');
-  });
-  it('marks a tool as a silent tail even after a visible message', () => {
-    expect(trackTurnTail('visible', completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe('silent');
-  });
-  it('marks a tool-only turn silent, not none', () => {
-    expect(trackTurnTail('none', completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe('silent');
-  });
-  it('ignores nested child items', () => {
-    expect(trackTurnTail('visible', completed({ kind: 'message', id: 'c', role: 'assistant', text: 'child', parentItemId: 'p' }))).toBe('visible');
-    expect(trackTurnTail('none', completed({ kind: 'reasoning', id: 'c', text: 'child', parentItemId: 'p' }))).toBe('none');
-  });
-  it('ignores empty assistant text and unrelated events', () => {
-    expect(trackTurnTail('none', completed({ kind: 'message', id: 'e', role: 'assistant', text: '  ' }))).toBe('none');
-    expect(trackTurnTail('visible', { type: 'turn.started', turnId: 't1' })).toBe('visible');
   });
 });
 

@@ -17,7 +17,6 @@ import type { QuestionAnswerSource } from './worker-questions.ts';
 
 export type { FileBlock, PastedContent, PersistedAttachment } from '../pasted-content.ts';
 
-export type TurnTail = 'none' | 'visible' | 'silent';
 
 type ReadonlyValue<T> = T extends object ? { readonly [K in keyof T]: ReadonlyValue<T[K]> } : T;
 
@@ -115,7 +114,6 @@ export type StepLoop = {
 export type SessionTurn = {
   /** The turn's v1 assistant text, read for its task-reference markers at the turn end. */
   text: string;
-  tail: TurnTail;
   /** The delay a Claude ScheduleWakeup call asked for in this turn. */
   scheduleWakeup: number | null | undefined;
   /** The fault that ended the session; an agent input error recorded before it wins. */

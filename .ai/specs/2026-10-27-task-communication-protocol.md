@@ -26,8 +26,9 @@ The evidence is host-local run history. It is not a repository fixture.
 [R1](#13-regression-scenarios) rebuilds the sequence as a self-contained test.
 
 The governed parent–worker channel was not involved. It already keeps human questions
-open when an agent message arrives (`deliverMessage`, `packages/cezar/src/workflows/run.ts:6465`:
-only `userAuthored` input reaches `applyHumanMessageDelivery`). The failure was that two
+open when an agent message arrives: agent input goes through `submitAgentInput`, and only a
+human message reaches `applyHumanMessageDelivery` (`deliverMessage`, then in
+`packages/cezar/src/workflows/run.ts`; now in `workflows/run/input-delivery.ts`). The failure was that two
 independent tasks had no governed channel, so an agent used the human one.
 
 ## Decisions
