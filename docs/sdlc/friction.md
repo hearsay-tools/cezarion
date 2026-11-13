@@ -60,6 +60,17 @@ previous digest carried forward, by root cause. It checks each group against
 | Watch | A first occurrence below that bar. The digest carries it forward with its count and first-seen date |
 | Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days |
 
+**Fix check.** A merged fix is not proof that the problem stopped. For each
+issue that a digest filed in the last 30 days and that a merged pull request
+closed, the digest reads the findings dated after the merge: those it reviews
+and the evidence of every carried-forward Act group and watch item. A finding
+counts when it has the same root cause, or when it comes from a mechanism that
+pull request added. The digest lists each counted finding under the filed issue
+and marks the fix `came back`. Otherwise it marks the fix
+`quiet since <merge date>`. A finding from a cockpit that still ran the code
+from before the merge does not count, and the digest says so. An issue leaves
+the check after 14 quiet days.
+
 For each Act group, the digest names the smallest fix that removes the whole
 class, and places any new rule as
 [Where a new agent rule goes](#where-a-new-agent-rule-goes) says. It also lists
@@ -86,7 +97,7 @@ The digest writes three things:
 
 | Output | What it holds |
 | --- | --- |
-| A comment on the newest issue it reviewed | The full record. Every group with its verdict, evidence links, fix and destination in full, the recommended groups marked, the carried-forward Act groups and the whole watch list. It stands alone: it never says "unchanged" or points to an earlier digest instead of the content |
+| A comment on the newest issue it reviewed | The full record. Every group with its verdict, evidence links, fix and destination in full, the recommended groups marked, the carried-forward Act groups, the whole watch list and each fix check result. It stands alone: it never says "unchanged" or points to an earlier digest instead of the content |
 | An HTML report, published with `hsq artifact publish` | One card per recommended group, in rank order: title, cost chips (runs, time lost), what happens, the fix, the destination, and the evidence links folded. Everything else is folded at the bottom. The report uses no scripts and no external resources |
 | A comment on each tracked issue that its evidence is new to | The new evidence links. The digest posts these without asking |
 
@@ -124,7 +135,10 @@ An Act group has its own lifecycle across digests:
 | Carried forward | The next digest runs | The schedule | Ranked again with the new evidence: recommended, carried forward again, or dropped when it is fixed or tracked |
 | Recommended | The owner approves it, or answers without leaving it out | The owner | Filed |
 | Recommended | The owner leaves it out | The owner | Carried forward |
-| Filed | None | Nothing | Final; later evidence becomes a comment on the filed issue |
+| Filed | New evidence while the issue is open | The next digest | Stays filed; the evidence becomes a comment on the filed issue |
+| Filed | A merged pull request closes the issue | The next digest | Fix check |
+| Fix check | A finding after the merge has the same root cause, or comes from a mechanism the pull request added | The next digest | Came back: the finding's group names the filed issue and the pull request, and the digest ranks it like any Act group |
+| Fix check | 14 days with no counted finding | The digest | Final |
 
 ## Categories
 

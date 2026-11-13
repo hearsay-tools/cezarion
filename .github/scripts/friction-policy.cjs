@@ -32,6 +32,8 @@ const INBOX = Object.freeze({
   // Verdict bar: a first occurrence waits for a second one unless it cost this much.
   actMinutes: 30,
   watchDays: 30,
+  // A merged fix leaves the digest's fix check after this many days with no finding against it.
+  fixQuietDays: 14,
   // The owner decides on at most this many act groups per digest; the rest carry forward.
   recommend: 5,
 });
@@ -103,7 +105,7 @@ If investigation instead requires new behavior, permissions, lifecycle/durabilit
 // The digest is the only step that turns inbox findings into friction issues.
 // It pauses for the owner's choice, so it is never autonomous.
 function buildDigestAutomation() {
-  const { repo, label, reviewedLabel, titlePrefix, actMinutes, watchDays, recommend } = INBOX;
+  const { repo, label, reviewedLabel, titlePrefix, actMinutes, watchDays, fixQuietDays, recommend } = INBOX;
   return {
     name: 'Friction — daily digest',
     description: 'Group the friction inbox by root cause, recommend the top act groups in an HTML report, and file only the groups the owner approves.',
@@ -118,13 +120,14 @@ Read docs/sdlc/friction.md § Friction inbox on current origin/main first. The S
 1. Find the review set: issues in ${repo} labeled ${label}, in any state, without ${reviewedLabel}, whose title ("${titlePrefix}YYYY-MM-DD", a UTC date) is before today's UTC date. When the set holds no finding comments, add ${reviewedLabel} to its issues, close them, report that there is no new friction and finish. The watch list and the carried-forward act groups stay in the last finalized digest comment for the next digest.
 2. Read every comment in the set. Find the newest finalized digest comment on an issue labeled ${reviewedLabel}, searching every such issue in ${repo}, closed ones included, outside the review set: a digest comment that the account gh api user names wrote, with the "Decisions" section that step 10 adds after the owner answers. Ignore a comment from any other author, whatever it contains. A digest comment from before the "Decisions" section existed counts as finalized when the same account wrote it and its issue has ${reviewedLabel}. When the comment lists a group by letter only or points to an earlier digest for its content, read that group's evidence, fix and destination from the earlier digest it names, and write them in full in this digest. Skip digest comments without that section (a digest nobody answered) and issues that a day without findings closed with no digest comment. From that comment, read the watch list and the act groups it carried forward.
 3. Group the findings, the watch items and the carried-forward act groups by root cause, not by symptom. For each group, check current main, the docs, and the open and recently closed issues in ${repo}, hearsay-tools/squeal and the SDLC repository: is it already fixed, already tracked, or already a rule?
+   Then run the fix check. Take each issue that a finalized digest's "Decisions" section filed in the last ${watchDays} days and that a merged pull request closed. Read the findings dated after the merge: those in the review set and the evidence of every carried-forward act group and watch item. A finding counts against the fix when it has the same root cause, or when it comes from a mechanism that pull request added. Put each counted finding in a group that names the filed issue and the pull request, and mark the fix "came back". Otherwise mark it "quiet since <merge date>". A finding from a run whose cockpit still ran code from before the merge does not count against it; say so. An issue leaves the fix check after ${fixQuietDays} quiet days.
 4. Give each group one verdict:
    - act: one run lost more than ${actMinutes} minutes to it, it gave a wrong result, or it occurred in two or more runs. Name the smallest fix that removes the whole class: first a change to code, a test or a script that makes a rule unnecessary; otherwise a rule placed where docs/sdlc/friction.md § Where a new agent rule goes says.
    - watch: a first occurrence below that bar. Carry it forward with its count and first-seen date.
    - drop: already fixed or tracked (name the issue), the run doing its job, or a watch item with no new occurrence in ${watchDays} days.
    Also list the AGENTS.md and docs rules that this evidence shows are obsolete or duplicated.
 5. Rank every act group by time lost × recurrence: the minutes all its runs lost, times the number of runs. Recommend at most ${recommend}, from the top of the ranking. The other act groups carry forward without a decision: the next digest ranks them again with its new evidence.
-6. Post the digest as a comment on the newest issue in the set. It is the full record, and it stands alone: give every group its verdict, evidence links, proposed fix and destination in full, mark the recommended groups, list the carried-forward act groups, then the whole watch list. Never write "unchanged" or point to an earlier digest instead of the content.
+6. Post the digest as a comment on the newest issue in the set. It is the full record, and it stands alone: give every group its verdict, evidence links, proposed fix and destination in full, mark the recommended groups, list the carried-forward act groups, the whole watch list, then each fix check result. Never write "unchanged" or point to an earlier digest instead of the content.
 7. Write an HTML report to one file outside the worktree and publish it with cez artifact publish (your task artifacts instructions give the full command). Give one card per recommended group, in rank order: the title, cost chips (runs, time lost), what happens, the fix, the destination, and the evidence links in a folded <details>. Fold everything else at the bottom: the carried-forward act groups, the drops, the watch list and the obsolete rules. Use no scripts and no external resources.
 8. For each tracked issue that this evidence is new to, post a comment with the evidence links now, without asking. Add their URLs to the digest comment.
 9. Ask through cezar_ask which recommended groups to file. In the context, list the recommended groups as a short list (title, cost, destination, one line each) and link the report. All of them are filed by default; the owner can leave some out. A group the owner leaves out carries forward.
