@@ -144,10 +144,6 @@
     ".github/scripts/coderabbit.workflow.test.cjs": [
       ".coderabbit.yaml"
     ],
-    ".github/scripts/issue-intake.workflow.test.cjs": [
-      ".github/codex/prompts/issue-intake.md",
-      ".github/schemas/issue-intake.schema.json"
-    ],
     ".github/scripts/issue-template.test.cjs": [
       ".github/ISSUE_TEMPLATE/task.yml"
     ],
