@@ -127,6 +127,8 @@ describe('DeleteBranchDialog', () => {
     fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('alertdialog')).toBeTruthy()
+    // Enter in the confirmation field submits the form; the input is not disabled while pending.
+    await act(async () => submitName())
     expect(sent).toHaveLength(1)
     await act(async () => finish(response({ deleted: [BRANCH.name], refused: [] })))
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))

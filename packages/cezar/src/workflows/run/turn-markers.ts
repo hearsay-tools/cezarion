@@ -7,7 +7,6 @@ import type { AgentEvent, RunnerId } from '../../core/agent-runner.ts';
 import { RUNNER_FACTS } from '../../core/runner-facts.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
-import type { TurnTail } from './types.ts';
 
 /** A runner's declared `nativeTimerTool` (Claude's `ScheduleWakeup`) is the backend-level
  * equivalent of a `cezar_wait` timer. Keep this recognition here, at the workflow boundary, so the
@@ -37,14 +36,6 @@ export function appendTurnText(current: string, next: string): string {
   if (!current) return next;
   if (!next) return current;
   return `${current}\n${next}`;
-}
-/** Last top-level completed item: a non-empty assistant message is a visible tail; reasoning or a tool is silent even after earlier visible text (#544). An empty turn stays `none` and never nudges. */
-export function trackTurnTail(tail: TurnTail, event: UiEvent): TurnTail {
-  if (event.type !== 'item.completed' || event.item.parentItemId !== undefined) return tail;
-  const item = event.item;
-  if (item.kind === 'message' && item.role === 'assistant' && item.text.trim() !== '') return 'visible';
-  if (item.kind === 'reasoning' || item.kind === 'tool') return 'silent';
-  return tail;
 }
 /** Emit the v2 `ask.requested` event for a human wait's card (the cockpit renders
  *  it as an ask card, #473). Returns the minted request id. */

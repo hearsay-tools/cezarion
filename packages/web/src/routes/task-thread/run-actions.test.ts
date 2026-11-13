@@ -134,6 +134,18 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
     expect(runActionFlags(run('failed', { waits: [], lastWaits: [{ ...heldWait('resolved'), phase: WAIT_PHASE.delivered }] })).cancel).toBe(false)
   })
 
+  // hearsay-tools/squawk#3360: workers outlive a failed or held root; its Stop cancels them.
+  it('offers Stop on a failed or held root only while a worker is live', () => {
+    const root = { delegation: { role: 'root' as const, permissions: [], receipts: [] } }
+    for (const record of [run('failed', root), run('waiting', { ...root, autoResumeAt: '2026-07-14T13:00:00.000Z' })]) {
+      expect(runActionFlags(record, true).cancel).toBe(true)
+      expect(archiveInComposer(record, true)).toBe(false)
+      expect(runActionFlags(record, false).cancel).toBe(false)
+    }
+    expect(runActionFlags(run('failed'), true).cancel).toBe(false)
+    expect(runActionFlags(run('done', root), true).cancel).toBe(false)
+  })
+
   it.each(['done', 'cancelled', 'review'] as const)('a %s run never offers Stop, whatever it lists', (status) => {
     expect(runActionFlags(run(status, { waits: [heldWait('resolved')] })).cancel).toBe(false)
   })

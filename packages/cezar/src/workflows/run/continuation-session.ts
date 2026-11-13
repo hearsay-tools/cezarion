@@ -480,7 +480,7 @@ export class ContinuationSession {
     const answer = this.openingAnswer(runId, state, opening);
     transitionTurnBoundary(state, { kind: 'session-open', phase: 'restore-question', session: state.liveSession.session, pending: answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) });
 
-    const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const turn: SessionTurn = { text: '', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.host.makeUiSink(runId, stepId);
     const onEvent = createSessionEventHandler(this.context, this.sessionEventHost, {
       runId, state, turn, stepId, backend, sink, tokenBase: 0,

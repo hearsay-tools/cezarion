@@ -7,7 +7,7 @@ import { readExitCode, type ExitFileRoots } from './exit-file.ts';
  * `CiWatcherSupervisor`: `watch` settles once with the first outcome, and an aborted watch never
  * settles. Node has no pidfd and the command is not Squawk's child, so it polls: the exit file
  * first (a finished command's code wins even if its PID was since reused), then the process
- * incarnation, then the deadline.
+ * incarnation, with the exit file read again after an exit, then the deadline.
  */
 export const PROCESS_POLL_MS = 5_000;
 const DIAGNOSTIC_MAX = 512;
@@ -18,11 +18,14 @@ export type ProcessWatchRequest = { pid: number; startToken?: string | undefined
 export function probeProcessWait(request: ProcessWatchRequest, now: number): ProcessWaitResult | undefined {
   const observedAt = new Date(now).toISOString();
   try {
-    if (request.exitFile !== undefined) {
-      const read = readExitCode(request.exitFile, request.roots);
-      if (read.present) return { outcome: 'exit_file', observedAt, ...(read.exitCode === undefined ? { exitFileNote: 'not-an-exit-code' as const } : { exitCode: read.exitCode }) };
-    }
-    if (!recordedProcessLive({ pid: request.pid, ...(request.startToken === undefined ? {} : { startToken: request.startToken }) })) return { outcome: 'exited', observedAt };
+    const fromExitFile = () => {
+      const read = request.exitFile === undefined ? { present: false as const } : readExitCode(request.exitFile, request.roots);
+      return read.present ? { outcome: 'exit_file' as const, observedAt, ...(read.exitCode === undefined ? { exitFileNote: 'not-an-exit-code' as const } : { exitCode: read.exitCode }) } : undefined;
+    };
+    const written = fromExitFile();
+    if (written) return written;
+    // A command writes its exit file just before it ends: read it once more after the exit.
+    if (!recordedProcessLive({ pid: request.pid, ...(request.startToken === undefined ? {} : { startToken: request.startToken }) })) return fromExitFile() ?? { outcome: 'exited', observedAt };
     if (now >= Date.parse(request.deadline)) return { outcome: 'deadline', observedAt };
     return undefined;
   } catch (error) {

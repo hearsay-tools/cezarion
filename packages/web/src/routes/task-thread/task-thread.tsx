@@ -40,6 +40,7 @@ import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
 import { isSessionOpen } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { archiveInComposer, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
+import { useWorkersLive } from './run-relationships'
 import { ArchiveButton } from './archive-action'
 import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
@@ -720,11 +721,12 @@ function ThreadComposer({
   needsAnswer, continuable, continueAction, queued, sendMessage, reply,
   providerBlocked, providerReason, sessionOpen,
 }: ThreadComposerProps) {
+  const workersLive = useWorkersLive(run)
   return (
     <Composer
       ref={composerRef}
       voiceProposal={tellProposed}
-      onStop={runActionFlags(run).cancel ? stopAction.stop : undefined}
+      onStop={runActionFlags(run, workersLive).cancel ? stopAction.stop : undefined}
       onFinish={
         offersComposerFinish(run)
           ? () => finishAction.mutateAsync().catch(() => undefined)
@@ -733,7 +735,7 @@ function ThreadComposer({
       finishing={finishAction.isPending}
       // Stop's own slot, once Stop is not offered. A failed run holding wait results offers
       // both, so the header carries its Archive and the composer is handed one control.
-      secondaryAction={archiveInComposer(run) ? <ArchiveButton run={run} compactOnMobile /> : undefined}
+      secondaryAction={archiveInComposer(run, workersLive) ? <ArchiveButton run={run} compactOnMobile /> : undefined}
       stopOnEmpty={composerStopsOnEmpty(run, attention, needsAnswer)}
       stopping={stopAction.stopping}
       retainDraftUntilSuccess

@@ -1,23 +1,16 @@
-import { testHome } from '../home/test-home.testkit.ts';
 import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
-import { observationClock } from './observation-clock.testkit.ts';
 import { fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
-import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import * as runners from './runner-factory.ts';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, onTestFinished, vi } from 'vitest';
 import type { RunRecord } from '../runs/store.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { AUTONOMOUS_CRITERIA, driveSeam, exemptionFor, promptFor, waitFor } from './harness-parity.testkit.ts';
-import { driveRun, withOwnedInputRun } from './workflow-parity.testkit.ts';
-import { handoffPath } from '../handoff.ts';
-import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from '../workflows/run.ts';
-import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
+import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
+import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RUN_EXITS } from '../runs/run-exits.ts';
 import { askErrorMessage } from '../ci-wait/errors.ts';
-import { WAIT_KIND, WAIT_PHASE, RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { WAIT_KIND, WAIT_PHASE, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
 // MAX_AUTO_CONTINUES turns and take 4.6-4.8 s alone and 5.4-5.9 s in an idle full
@@ -122,20 +115,6 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "omp A9",
     "opencode A9 fresh",
     "pi A9"
-  ],
-  "idle-close": [
-    "claude A13",
-    "claude A14",
-    "codex A13",
-    "codex A14",
-    "cursor A13",
-    "cursor A14",
-    "omp A13",
-    "omp A14",
-    "opencode A13",
-    "opencode A14",
-    "pi A13",
-    "pi A14"
   ]
 };
 
@@ -145,84 +124,6 @@ describe('autonomous turn-end parity — #426', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of AUTONOMOUS_CRITERIA) {
       const exemption = exemptionFor(row.id, backend);
-      if (row.id === 'A13' || row.id === 'A14') {
-        it(`${backend} ${row.id} ${row.name}${exemption ? ' — exemption: ordinary native idle control' : ''}`, async () => {
-          const continuation = row.id === 'A14';
-          const retainedAck = !exemption;
-          const semaphore = new WorkspaceSemaphore({ home: testHome() });
-          let repoRoot = '';
-          let clock: ReturnType<typeof observationClock>;
-          let ready: (() => void) | undefined;
-          const create = runners.createRunner;
-          vi.spyOn(runners, 'createRunner').mockImplementation((...args) => {
-            const runner = create(...args);
-            const start = runner.startSession.bind(runner);
-            vi.spyOn(runner, 'startSession').mockImplementation((spec, event, options) => {
-              ready = options?.onAgentInputReady;
-              return start(spec, event, options);
-            });
-            return runner;
-          });
-          await driveRun(backend, continuation || exemption ? 'autonomous' : row.scenario,
-            run => run?.status === (retainedAck && !continuation ? 'running' : 'waiting'), 30_000,
-            async ({ store, manager, runId }) => {
-              expect(store.getRun(runId)?.delegation?.role).not.toBe('worker');
-              if (continuation) {
-                manager.finish(runId);
-                await waitFor(() => !manager.isActive(runId));
-                store.updateRun(runId, { autonomous: retainedAck });
-                expect(manager.continueRun(runId, { text: promptFor(backend, exemption ? 'autonomous' : row.scenario) }).ok).toBe(true);
-              }
-              await waitFor(() => clock.pending > 0 && (retainedAck ? store.getRun(runId)?.status === 'running' : store.getRun(runId)?.status === 'waiting'));
-              const session = [...fixtureWork(manager).liveSessions][0]!;
-              const stepId = store.getRun(runId)!.currentStepId!;
-              const lateReady = ready;
-              const sent = vi.spyOn(session, 'sendAgentMessage');
-              if (retainedAck) {
-                expect(store.getRun(runId)?.status).toBe('running');
-                expect(semaphore.busy()).toBe(1);
-              }
-              // Advance only the product's idle clock; native exit keeps real time.
-              await clock.advance(IDLE_TIMEOUT_MS);
-              expect(store.readEvents(runId).some(event => event.type === 'lifecycle' && String(event.message).includes('of inactivity'))).toBe(true);
-              if (retainedAck) {
-                expect(manager.isActive(runId)).toBe(true);
-                expect(semaphore.busy()).toBe(1);
-                expect(store.getRun(runId)?.status).toBe('running');
-                // The mock delays SIGTERM exit: neither end() nor late readiness
-                // may release the slot or resurrect the timed-out boundary. The readiness
-                // handler runs synchronously, so its outcome is visible on return.
-                lateReady?.();
-                expect(manager.isActive(runId)).toBe(true);
-                expect(semaphore.busy()).toBe(1);
-              }
-              await waitFor(() => !manager.isActive(runId));
-              expect(sent).not.toHaveBeenCalled();
-              expect(semaphore.busy()).toBe(0);
-              expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(store.getRun(runId)?.steps.at(-1)?.status).toBe('waiting');
-              if (retainedAck) {
-                expect(readPersistedRuns(join(repoRoot, '.ai/cezar'))).toEqual(expect.arrayContaining([
-                  expect.objectContaining({ id: runId, status: RUN_STATUS.waiting, steps: expect.arrayContaining([
-                    expect.objectContaining({ id: stepId, status: STEP_STATUS.waiting }),
-                  ]) }),
-                ]));
-                // The lifecycle event below is the idle close's record; the handoff gets no line (hearsay-tools/cezarion#1809).
-                expect(readFileSync(handoffPath(join(repoRoot, '.ai/cezar'), runId), 'utf8')).not.toContain('idle-closed');
-              }
-              expect(store.readEvents(runId).some(e => e.type === 'lifecycle' && String(e.message).includes('of inactivity'))).toBe(true);
-              expect(manager.continueRun(runId, { text: promptFor(backend, 'cezar-done') }).ok).toBe(true);
-              await waitFor(() => !manager.isActive(runId) && store.getRun(runId)?.status === 'done');
-              lateReady?.();
-              expect(sent).not.toHaveBeenCalled();
-              sent.mockRestore();
-            }, { semaphore, autonomous: retainedAck && !continuation, beforeStart: context => {
-              repoRoot = context.repoRoot;
-              clock = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
-            }, beforeCleanup: () => { clock?.restore(); vi.restoreAllMocks(); } });
-        }, 30_000);
-        continue;
-      }
       if (exemption) {
         it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
           // The wire's ask scenario is a cezar_ask call, which no seam answers: the turn ends with no

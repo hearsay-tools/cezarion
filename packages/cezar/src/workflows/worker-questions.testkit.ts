@@ -2,9 +2,7 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { join } from 'node:path';
 import { afterEach, expect, vi } from 'vitest';
 import { CredentialRegistry, type Caller } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
@@ -96,7 +94,7 @@ export const answered = (runId: string) => eventsOf(runId, 'human-input-delivere
 
 export const said = (runId: string, text: string) => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(text));
 
-export async function replyAfterRestart(crashed: boolean, holdResources = false) {
+export async function replyAfterRestart(holdResources = false) {
     const f = await askedPair();
     f.close();
     const parentIdle = async () => {
@@ -107,16 +105,9 @@ export async function replyAfterRestart(crashed: boolean, holdResources = false)
       await Promise.all(bookkeeping);
     };
     await parentIdle();
-    const files = eventCheckpoint();
-    if (crashed) {
-      // #469: restore the worker's pre-cancel `starting` proof, as a real crash leaves it, with a dead controller.
-      const proof = join(root, '.ai/cezar/runs', `${f.w.id}.execution.json`), record = proof.replace(/\.execution\.json$/, '.processes.json');
-      expect(store.readWorkerExecution(f.w.id)?.phase).toBe('starting');
-      const dead = spawn(process.execPath, ['-e', '']); await new Promise(resolve => dead.once('exit', resolve));
-      files.set(proof, readFileSync(proof, 'utf8'));
-      files.set(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), controller: { pid: dead.pid, startToken: '1' } }));
-    }
-    await restart(false, undefined, files);
+    // The restart keeps the worker's `starting` execution record with a dead controller, as a crash leaves it.
+    expect(store.readWorkerExecution(f.w.id)?.phase).toBe('starting');
+    await restart(false, undefined, eventCheckpoint());
     const credentials = new CredentialRegistry();
     let releaseHolder: (() => Promise<void>) | undefined;
     try {
@@ -147,21 +138,19 @@ export async function replyAfterRestart(crashed: boolean, holdResources = false)
           return safe;
         });
       }
-      if (crashed) {
-        // This case answers after the crashed execution has no possible process
-        // holders. Inactive only proves our manager released it: the real #469
-        // scan can still see transient Git children or unreadable same-user host
-        // processes. Recovery may already have finalized the execution, but that
-        // does not prove its resources can be reused (hearsay-tools/cezarion#732).
-        // Wait for that physical precondition without finalizing the proof,
-        // suppressing any PIDs, or retrying the answer under test.
-        await until(() => {
-          const proof = store.readWorkerExecution(f.w.id);
-          const delegation = store.getRun(f.w.id)?.delegation;
-          return !!proof && delegation?.role === 'worker' &&
-            store.workerResourcesSafe(f.w.id, proof.generation, delegation.workspace.resourceId);
-        });
-      }
+      // Answer only after the crashed execution has no possible process
+      // holders. Inactive only proves our manager released it: the real #469
+      // scan can still see transient Git children or unreadable same-user host
+      // processes. Recovery may already have finalized the execution, but that
+      // does not prove its resources can be reused (hearsay-tools/cezarion#732).
+      // Wait for that physical precondition without finalizing the proof,
+      // suppressing any PIDs, or retrying the answer under test.
+      await until(() => {
+        const proof = store.readWorkerExecution(f.w.id);
+        const delegation = store.getRun(f.w.id)?.delegation;
+        return !!proof && delegation?.role === 'worker' &&
+          store.workerResourcesSafe(f.w.id, proof.generation, delegation.workspace.resourceId);
+      });
       await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
       await until(() => answered(f.w.id).length === 1);
       await until(() => said(f.w.id, 'Use the parser'));

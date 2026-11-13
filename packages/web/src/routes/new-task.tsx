@@ -30,6 +30,8 @@ import {
   skillKeywords,
 } from '@/lib/skills'
 import { submitShortcutHint } from '@/lib/use-submit-shortcut'
+import { orderProjects } from '@/lib/project-order'
+import { useProjectOrder } from '@/lib/use-project-order'
 import { cn } from '@/lib/utils'
 
 import {
@@ -309,12 +311,12 @@ function ComposerFooterStart({
 }
 
 /**
- * Rank the registry against the pill's search box.
+ * Rank the projects against the pill's search box.
  *
  * Ranked in JS with cmdk's own filtering off (#484 — cmdk's score-sort does not re-order these
- * pickers reliably). Registry order is `lastOpenedAt`, so an empty search shows the same
- * recency the sidebar does; a typed query floats name/id PREFIX matches above mid-string ones,
- * each group still in recency order.
+ * pickers reliably). `projects` arrive in the rail's order (`orderProjects`), so an empty search
+ * shows the order the rail does; a typed query floats name/id PREFIX matches above mid-string
+ * ones, each group still in rail order.
  */
 function matchProjects(
   projects: readonly ProjectListEntry[],
@@ -361,8 +363,9 @@ function ProjectPill({
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const { order } = useProjectOrder()
   const selected = projects.find((project) => project.id === projectId)
-  const matched = matchProjects(projects, search)
+  const matched = matchProjects(orderProjects(projects, order), search)
 
   return (
     <Popover

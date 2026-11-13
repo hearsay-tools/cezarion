@@ -221,10 +221,8 @@ const NATIVE_ACK = 'the timing of the runner\'s own acknowledgement or turn-star
  */
 export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioClass, string]>> = {
   baseline: ['shared', MAPPER],
-  'tool-tail': ['shared', MAPPER],
   'turn-messages': ['shared', MAPPER],
   'silent-tail': ['shared', MAPPER],
-  'silent-tail-again': ['shared', MAPPER],
   'cezar-done': ['shared', SQUAWK_TOOL],
   'cezar-ask': ['shared', SQUAWK_TOOL],
   'cezar-wait': ['shared', SQUAWK_TOOL],
@@ -288,7 +286,6 @@ export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioC
   'silent-tail-late-reply': ['runner-code', NATIVE_ACK],
   'silent-tail-late-turn-start': ['runner-code', NATIVE_ACK],
   'silent-tail-slow-done': ['runner-code', NATIVE_ACK],
-  'autonomous-readiness-idle': ['runner-code', 'a portable-answer acknowledgement retained after the turn, which only some wires have'],
 };
 
 /** A row with an exemption on any runner differs by runner, so it runs on every runner. */

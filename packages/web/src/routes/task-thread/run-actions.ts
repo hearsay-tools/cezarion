@@ -116,8 +116,9 @@ export interface RunActionFlags {
    *  read. Both halves come from `lib/read-state.ts` so the header can never offer an action
    *  whose result the marker rule would ignore. */
   markUnread: boolean
-  /** Stop an active run, or discard the wait results a failed run still holds
-   *  (hearsay-tools/cezarion#1233). Mutually exclusive with delete on every other record: the
+  /** Stop an active run, discard the wait results a failed run still holds
+   *  (hearsay-tools/cezarion#1233), or cancel the live workers of a failed or held root
+   *  (hearsay-tools/squawk#3360). Mutually exclusive with delete on every other record: the
    *  failed run has no session to stop, so Delete stays offered there as on any failed run. */
   cancel: boolean
   /** Remove the run, its transcript, worktree and branch. Terminal runs only. */
@@ -131,6 +132,13 @@ export function holdsWaitResults(run: RunRecord): boolean {
   return (run.status === 'failed' || isUsageLimitHold(run)) && (run.waits?.length ?? 0) > 0
 }
 
+/** A failed or held root whose workers outlive it (hearsay-tools/squawk#3337): Stop cancels them
+ *  and leaves the root failed, as the server's `stopFailedRun` does. `workersLive` comes from the
+ *  relationships answer (`useWorkersLive`), false while it loads or fails. */
+function stopsLiveWorkers(run: RunRecord, workersLive: boolean): boolean {
+  return workersLive && run.delegation?.role === 'root' && (run.status === 'failed' || isUsageLimitHold(run))
+}
+
 /** Only a saved original workflow that has never executed may be requeued. */
 export function isStoppedBeforeStarting(run: RunRecord): boolean {
   return run.status === 'cancelled' && run.startedAt === undefined &&
@@ -138,7 +146,7 @@ export function isStoppedBeforeStarting(run: RunRecord): boolean {
     run.steps.every(step => step.status === 'pending' && step.startedAt === undefined && !step.sessionId)
 }
 
-export function runActionFlags(run: RunRecord): RunActionFlags {
+export function runActionFlags(run: RunRecord, workersLive = false): RunActionFlags {
   const active = engineOwnsRun(run)
   const hasSession = lastSessionId(run) !== undefined
   return {
@@ -152,15 +160,16 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
     archive: !active,
     pin: !run.archived && !isOwnedWorker(run),
     markUnread: canBeUnread(run) && !isUnread(run),
-    cancel: active || holdsWaitResults(run),
+    cancel: active || holdsWaitResults(run) || stopsLiveWorkers(run, workersLive),
     deleteRun: !active,
   }
 }
 
 /** Archive in the composer's outline slot (#281). Stop takes the slot when the run offers both,
- *  on a failed run holding wait results, and the header carries Archive on the Session tab then. */
-export function archiveInComposer(run: RunRecord): boolean {
-  const flags = runActionFlags(run)
+ *  on a failed run holding wait results or live workers, and the header carries Archive on the
+ *  Session tab then. */
+export function archiveInComposer(run: RunRecord, workersLive = false): boolean {
+  const flags = runActionFlags(run, workersLive)
   // A blocker puts the same manual Archive control beside its reason in the header.
   return flags.archive && !flags.cancel && !run.archiveBlocker
 }

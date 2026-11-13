@@ -1,7 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
 import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -9,7 +7,7 @@ import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { thenSay, toolCall } from './waits-parity.testkit.ts';
-import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, semaphore, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, semaphore, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 import { productName } from '../home/display.ts';
 
 /** hearsay-tools/cezarion#1327: the single-runner paths of the park notice. The RUNNER_IDS cells
@@ -53,13 +51,10 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     manager.enqueueOwnedRun(w.id);
     await until(() => parked(w.id) && (store.getRun(w.id)?.waits ?? []).some(entry => entry.kind === 'timer' && entry.phase === 'open'), () => timeline(w.id));
     expect(notices(p.id, w.id)).toEqual([]);
-    // As a crash leaves them: the fixture's own shutdown cancels runs, which completes the worker's
-    // execution record, so it goes back with the event logs.
     expect(lostNotice.mock.calls.some(args => args[2]?.input.conversation?.senderRunId === w.id)).toBe(true);
-    const files = eventCheckpoint();
-    const execution = join(root, '.ai/cezar/runs', `${w.id}.execution.json`);
-    files.set(execution, readFileSync(execution, 'utf8'));
-    await restart(false, undefined, files);
+    // Without a live controller, recovery finalizes the parked worker's execution and then posts no
+    // notice (hearsay-tools/squawk#3502).
+    await restart(false, undefined, eventCheckpoint(), { liveController: true });
     await until(() => notices(p.id, w.id).length > 0, () => timeline(w.id));
     const [notice, ...more] = notices(p.id, w.id);
     expect(more).toEqual([]);

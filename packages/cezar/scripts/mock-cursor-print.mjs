@@ -45,8 +45,7 @@ const taggedScenarios = [
   ['resume-cezar-done', 'a0000001'], ['autonomous-cezar-ask-cap', 'a0000002'],
   ['autonomous-cap', 'a0000003'], ['silent-tail-late-turn-start', 'a0000004'],
   ['silent-tail-no-reply', 'a0000005'], ['silent-tail-late-reply', 'a0000006'],
-  ['silent-tail-slow-done', 'a0000007'], ['silent-tail-again', 'a0000008'],
-  ['silent-tail', 'a0000009'], ['tool-tail', 'a000000a'],
+  ['silent-tail-slow-done', 'a0000007'], ['silent-tail', 'a0000009'],
 ];
 const freshTag = taggedScenarios.find(([name]) => rawPrompt.includes(`mock:${name}`))?.[1];
 const id = resumeId && mode !== 'mismatch-on-resume' ? resumeId
@@ -62,7 +61,7 @@ if (freshTag) {
   writeFileSync(stateFile, JSON.stringify({ origin }));
 }
 // One process per turn: the session's opening scenario comes from its tag, not a latch.
-const silentOrigin = /^(silent-tail|tool-tail)/.test(origin ?? '');
+const silentOrigin = (origin ?? '').startsWith('silent-tail');
 const prompt = silentOrigin ? rawPrompt : answerNudge(rawPrompt);
 const frame = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const assistant = text => frame({ type: 'assistant', session_id: id,
@@ -111,7 +110,7 @@ if (mode === 'model-rejection-held') {
   rejectModel(); await waitForRelease(10_000); process.exit(1);
 }
 if (mode === 'unrelated-startup-error') { process.stderr.write('Account unavailable\n'); process.exit(1); }
-const sharedNames = ['autonomous', 'silent-tail', 'tool-tail', 'crash-stderr', 'cezar-tool', 'ci-wait',
+const sharedNames = ['autonomous', 'silent-tail', 'crash-stderr', 'cezar-tool', 'ci-wait',
   'multi-pr-refs', 'turn-messages', 'agent-echo', 'provider-error', ...PROVIDER_HOLD_SCENARIOS.map(([name]) => name), 'hold-cezar-done', 'hold-cezar-ask',
   'cezar-done', 'cezar-ask', 'busy-progress', 'no-progress', 'hold-gated', 'hold', 'deferred-turn-start'];
 // Print has no persistent input, steering, child transcript or cezar-wait reply.
@@ -166,7 +165,7 @@ function encoder(selected) {
     progress: () => assistant('working\n'),
     reply: () => prompt === 'inspect the working tree' || prompt.includes('mock:baseline') ? baselineReply() : defaultReply(),
     end(step) {
-      const empty = selected.name === 'turn-messages' || ['silent-tail', 'tool-tail'].includes(selected.name) && !prompt.includes(NO_WAIT_NUDGE_PREFIX);
+      const empty = selected.name === 'turn-messages' || selected.name === 'silent-tail' && !prompt.includes(NO_WAIT_NUDGE_PREFIX);
       result(step.error ? CURSOR_FAILURES[step.error] : empty ? '' : text, Boolean(step.error));
     },
   };
@@ -210,7 +209,7 @@ await dispatch([
   { name: 'crash-stderr' },
   { when: () => origin === 'autonomous-cezar-ask-cap' && resumeId && prompt.startsWith('Continue working autonomously until the task is fully complete.'), reply: () => finish('Still working.') },
   { name: 'autonomous', prompt: () => origin?.startsWith('autonomous') && selectScenario('autonomous') ? `${prompt} mock:${origin}` : prompt },
-  { name: 'silent-tail' }, { name: 'tool-tail' },
+  { name: 'silent-tail' },
   { when: () => origin === 'resume-cezar-done' && resumeId, reply: async () => finish(await done('Resumed work finished.')) },
   { name: 'cezar-tool' }, { name: 'ci-wait' },
   { when: () => process.env.CEZ_MOCK_CI_PR, reply: async () => finish(JSON.stringify((await (await tools()).probeCiTool('cursor', args)).response)) },

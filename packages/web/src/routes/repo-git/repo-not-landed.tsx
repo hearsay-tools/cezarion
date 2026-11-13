@@ -374,7 +374,7 @@ export function DeleteBranchDialog({ entry, onClose }: { entry: RepoBranchEntry 
         <form
           onSubmit={(event) => {
             event.preventDefault()
-            if (matches && entry) remove.mutate(entry.name)
+            if (matches && entry && !remove.isPending) remove.mutate(entry.name)
           }}
           className="flex flex-col gap-[6px]"
         >
