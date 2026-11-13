@@ -167,8 +167,8 @@ describe('the review gate on the thread', () => {
     expect(document.querySelector('[data-slot="diff-file"]')?.textContent).toContain('+2')
     expect(document.querySelector('[data-slot="diff-file"]')?.textContent).toContain('−1')
     const body = document.querySelector('[data-slot="diff-file-body"]') as HTMLElement
-    expect(body.querySelectorAll('[data-line-kind="add"]')).toHaveLength(2)
-    expect(body.querySelectorAll('[data-line-kind="del"]')).toHaveLength(1)
+    expect(body.querySelectorAll('[data-line="add"]')).toHaveLength(2)
+    expect(body.querySelectorAll('[data-line="del"]')).toHaveLength(1)
   })
 
   it('a non-diff server answer ("(no worktree — …)") renders as its own words', async () => {

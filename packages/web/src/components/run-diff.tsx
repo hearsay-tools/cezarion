@@ -175,7 +175,7 @@ function DiffFileBody({ lines }: { lines: string[] }) {
         {shown.map((line, index) => (
           <span
             key={index}
-            data-line-kind={line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : undefined}
+            data-line={line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : undefined}
             className={cn(
               'block px-4',
               line.startsWith('+') && 'bg-diff-add',
