@@ -26,14 +26,9 @@ const repoRoot = path.join(__dirname, '..', '..');
 
 // Package files that name a docs-only file near a read call without reading
 // it, as the `naming file -> docs path` pairs the scan below finds.
-const TEMP_NOTES = 'reads notes.md in a temporary repo or skill fixture, never this one';
 const mentionedOnly = [
   { file: 'packages/cezar/src/runs/store-database.test.ts', markdown: 'docs/run-history-recovery.md', reason: 'asserts that a warning names the doc' },
   { file: 'packages/cezar/src/server/checkout.test.ts', markdown: 'README.md', reason: 'reads README.md in a temporary checkout, never this one' },
-  { file: 'packages/cezar/src/skills-remote.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/workflows/run.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/workflows/system-prompt.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/workflows/team-skill-materialize.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
 ];
 
 // A call that reads a file's content. A token this many lines away still
