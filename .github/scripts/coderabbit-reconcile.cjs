@@ -7,7 +7,7 @@ const { reader, positive, validSha, REVIEW, successfulJobs } = require('./queue-
 const { readCodeRabbitAdmission, trustedCheck } = require('./coderabbit-admission.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
 const { signalTarget } = require('./review-signal.cjs');
-const { readHeadChecks, reviewCheckCompleted, boardStatus, syncBoard } = require('./pr-readiness.cjs');
+const { readHeadChecks, readHeadCheckRuns, reviewCheckCompleted, boardStatus, syncBoard } = require('./pr-readiness.cjs');
 const { DEFAULT_FLOOR, countApiCalls, checkFloor } = require('./api-budget.cjs');
 const TARGET_LIMIT = 4;
 const PULL_ACTIONS = new Set(['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
@@ -191,8 +191,10 @@ async function reconcilePull({ github, read, write, owner, repo, pr, checks, boa
     ? rerunIfChanged({ args, read, write, owner, repo, pr, proof, ...native, first, admission, now, sleep, log })
     : native.outcome;
 }
-async function headChecks(read, pr, log) {
-  try { return await readHeadChecks(read, pr.head.sha); }
+// A shed board needs only the check runs; branch rules and combined statuses
+// serve the board alone.
+async function headChecks(read, pr, log, boardReads) {
+  try { return boardReads ? await readHeadChecks(read, pr.head.sha) : { checkRuns: await readHeadCheckRuns(read, pr.head.sha) }; }
   catch {
     log(`PR ${pr.number}: required checks unavailable; board sync skipped.`);
     return null;
@@ -263,7 +265,7 @@ async function reconcile({ github, readGithub = github, projectGithub = null, ow
   const shed = Boolean(projectGithub) && !(await boardWithinBudget({ readGithub, pr, floor: boardFloor, log }));
   // The admitted event is only a wake hint. Queue only PR identity, then prove
   // the newest live head/run at the lock head; never carry historical proof.
-  const checks = await headChecks(read, pr, log);
+  const checks = await headChecks(read, pr, log, !shed);
   return reconcilePull({ github: readGithub, read, write: reader(github, owner, repo, deadline, now),
     owner, repo, pr, checks, board: Boolean(projectGithub) && !shed, releaseAppBotLogin, now, deadline, sleep, log,
     followBoard: shed ? async () => {} : admitted => followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log }) });

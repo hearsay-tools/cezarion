@@ -665,8 +665,11 @@ for (const [label, mutate, result] of [
   assert.deepEqual(board.numbers, [], 'no project read');
   assert.deepEqual(github.state.writes, result === 'rerun-requested' ? [30] : []);
   assert.match(logs.join('\n'), /PR 7: board sync skipped: core remaining 799 on the read token is under the floor of 800; a later event catches up\./);
-  // A green head keeps the rerun decision's 15 reads and drops the board's final PR read.
-  if (result === 'unchanged') assert.equal(github.calls.filter(([, route]) => route !== FREE).length, 15);
+  // Branch rules, combined statuses and the final PR read serve only the board.
+  const boardOnly = ['GET /repos/{owner}/{repo}/rules/branches/{branch}', 'GET /repos/{owner}/{repo}/commits/{ref}/status'];
+  assert.equal(github.calls.some(([, route]) => boardOnly.includes(route)), false, 'no board-only head read');
+  // A green head keeps the rerun decision's 13 reads: the 16 of a full sync minus those three.
+  if (result === 'unchanged') assert.equal(github.calls.filter(([, route]) => route !== FREE).length, 13);
 });
 for (const [label, state] of [['at the floor', { coreRemaining: 800 }], ['an unreadable quota', { coreRemaining: NaN }]]) {
   test(`board sync proceeds with ${label}`, async () => {
