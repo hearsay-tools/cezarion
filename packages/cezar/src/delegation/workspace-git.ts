@@ -1,9 +1,9 @@
 /** Owned-workspace Git primitives: the lowest layer under the workspace record, create/check and removal modules. */
-import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
+import { git } from '../git-command.ts';
 
 // Git for Windows emits forward slashes even for native absolute paths.
 export function worktreeEntries(listed: string): string[] {
@@ -24,18 +24,12 @@ export async function branchLog(repoRoot: string, workspace: WorkerWorkspace) {
   } finally { await file.close(); }
 }
 
-export function git(cwd: string, args: string[], index?: string, maxBuffer = 32 * 1024 * 1024) {
-  return new Promise<{ ok: boolean; stdout: string; overflow: boolean }>((done) => {
-    execFile('git', args, {
-      cwd, encoding: 'utf8', timeout: 30_000, maxBuffer,
-      ...(index ? { env: { ...process.env, GIT_INDEX_FILE: index } } : {}),
-    }, (error, stdout) => done({
-      ok: !error, stdout: stdout ?? '', overflow: error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
-    }));
-  });
+/** Git for the workspace layer: a 30 s bound, and `index` as a private `GIT_INDEX_FILE`. */
+export function workspaceGit(cwd: string, args: string[], index?: string, maxBuffer?: number) {
+  return git(cwd, args, { timeout: 30_000, ...(index ? { env: { GIT_INDEX_FILE: index } } : {}), ...(maxBuffer ? { maxBuffer } : {}) });
 }
 export async function checkedGit(cwd: string, args: string[], index?: string): Promise<string> {
-  const result = await git(cwd, args, index);
+  const result = await workspaceGit(cwd, args, index);
   if (!result.ok) throw new Error(`Owned workspace Git ${args[0]} failed`);
   return result.stdout.trim();
 }

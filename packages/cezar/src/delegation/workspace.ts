@@ -13,7 +13,7 @@ import { resolveTaskDiffBase } from '../git-diff-base.ts';
 import { isSafeGitRef } from '../git-refs.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
-import { branchLog, checkedGit, git, gitCommonDir, liveGitDir } from './workspace-git.ts';
+import { branchLog, checkedGit, gitCommonDir, liveGitDir, workspaceGit } from './workspace-git.ts';
 import { hash, readIdentityFile, readReceipt, receiptLocation, validateIntent, writeIdentityFile } from './workspace-record.ts';
 
 /** Reads only committed state in the server-known parent cwd; never flushes its edits. */
@@ -106,11 +106,11 @@ export async function readOwnedDiff(repoRoot: string, run: RunRecord): Promise<W
     await copyGitIndex(workerIndex, index);
     await checkedGit(workspace.path, ['add', '-N', '.'], index);
     const { base } = await resolveTaskDiffBase(
-      (args) => git(workspace.path, args, index), workspace.baselineSha,
+      (args) => workspaceGit(workspace.path, args, index), workspace.baselineSha,
       { taskBranch: workspace.branch, runStartedAt: run.startedAt },
     );
     // The cap is characters on the wire; allow four UTF-8 bytes per character.
-    const result = await git(workspace.path, ['diff', '--no-ext-diff', '--no-textconv', base, '--'], index, DIFF_CAP * 4 + 4);
+    const result = await workspaceGit(workspace.path, ['diff', '--no-ext-diff', '--no-textconv', base, '--'], index, DIFF_CAP * 4 + 4);
     if (!result.ok && !(result.overflow && result.stdout.length > DIFF_CAP)) throw new Error('Worker diff failed');
     return { workerId: run.id, baselineSha: workspace.baselineSha, diff: result.stdout.slice(0, DIFF_CAP), truncated: result.stdout.length > DIFF_CAP };
   } catch {

@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gitEnv } from './git-command.ts';
 
 export interface WorktreeGitResult { ok: boolean; stdout: string; stderr: string }
 /** `input` is written to git's stdin — what `update-ref --stdin` needs for a multi-ref transaction. */
@@ -19,7 +20,7 @@ export async function withWorktreeMutation<T>(repoRoot: string, operation: (git:
   const waitMs = options.waitMs ?? 120_000;
   if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 120_000) throw new Error('invalid worktree mutation wait budget');
   const common = await new Promise<string>((resolve, reject) => {
-    execFile('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repoRoot, encoding: 'utf8', timeout: Math.max(1, Math.min(30_000, waitMs)) }, (error, stdout, stderr) => {
+    execFile('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repoRoot, encoding: 'utf8', timeout: Math.max(1, Math.min(30_000, waitMs)), env: gitEnv() }, (error, stdout, stderr) => {
       if (error) reject(new Error(`cannot resolve Git common directory: ${stderr.trim() || error.message}`));
       else resolve(stdout.trim());
     });
@@ -31,8 +32,9 @@ export async function withWorktreeMutation<T>(repoRoot: string, operation: (git:
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     // Establish the process group before a claim or Git child can exist.
     detached: process.platform !== 'win32',
-    // Do not inherit tsx loaders or the caller's Node inspector flags.
-    env: process.env,
+    // Do not inherit tsx loaders or the caller's Node inspector flags. The keeper's Git children
+    // inherit this env, so it carries no repository location variables either.
+    env: gitEnv(),
   });
   let failure: Error | undefined;
   let stderr = '';
