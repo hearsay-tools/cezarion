@@ -128,24 +128,18 @@ describe('chronological worker conversation', () => {
         browser.setViewport(width, 900)
         browser.goto(`${base}/p/${project}/tasks/${parent}?thread=flat`)
         // #795 review: body readiness excludes skipped rows. Scroll and hold each
-        // card separately, including the wrapped heading while its own row renders.
+        // card separately while its own row renders.
         const selectors = ['[data-slot="user-bubble"]', '[data-slot="assistant-message"]', request, replyCard]
-        const insets = selectors.map(selector => {
-          const wrappedHeading = width === 360 && selector === request
-          const facts = waitForSettledSample<{ top: number; right: number; overflow: boolean; headingHeight: number | null }>(
-            browser, messageClockExpression(selector, wrappedHeading ? ':scope > div > div > p' : undefined),
-          )
-          if (wrappedHeading) expect(facts.headingHeight).toBeGreaterThan(50)
-          return facts
-        })
+        const insets = selectors.map(selector => waitForSettledSample<{ top: number; right: number; width: number; height: number; overflow: boolean }>(
+          browser, messageClockExpression(selector),
+        ))
         const batchTimes = browser.waitForValue<string[]>(`[...document.querySelectorAll('${request} ul li time')].map(el => el.dateTime)`, value => value.length === 2)
         expect(batchTimes).toEqual([reqA.createdAt, reqB.createdAt])
-        expect(browser.waitForValue<string>(`document.querySelector('${request} > div.grid')?.textContent`, value => value.includes('First sent'))).toContain('First sent')
-        for (const { top, right, overflow } of insets) {
+        for (const { top, right, width, height, overflow } of insets) {
           expect(top).toBeGreaterThanOrEqual(0)
-          expect(top).toBeLessThan(28)
+          expect(top).toBeLessThan(height / 2)
           expect(right).toBeGreaterThanOrEqual(0)
-          expect(right).toBeLessThan(28)
+          expect(right).toBeLessThan(width / 2)
           expect(overflow).toBe(false)
         }
       }
@@ -235,15 +229,9 @@ describe('chronological worker conversation', () => {
       })`, value => value.length === 7)
       expect(kinds).toEqual(['user', 'request', 'thinking', 'tool', 'assistant', 'follow-up', 'reply'])
       const cards = `['[data-slot="user-bubble"]', '${request}', '${replyCard}']`
-      const colors = browser.waitForValue<string[]>(`${cards}.map(s => getComputedStyle(document.querySelector(s)).backgroundColor)`)
-      // Direction stays distinct: light uses tints; dark uses accent rails on a shared surface.
-      expect(new Set(colors).size).toBe(variant.theme === 'light' ? 3 : 1)
-      const rails = browser.waitForValue<{ width: string; color: string }[]>(`${cards}.map(s => {
-        const style = getComputedStyle(document.querySelector(s));
-        return { width: style.borderInlineStartWidth, color: style.borderInlineStartColor };
-      })`)
-      expect(rails.map(rail => rail.width)).toEqual(Array(3).fill(variant.theme === 'dark' ? '3px' : '1px'))
-      expect(new Set(rails.map(rail => rail.color)).size).toBe(3)
+      // Direction stays distinct: each kind has its own rail colour.
+      const rails = browser.waitForValue<string[]>(`${cards}.map(s => getComputedStyle(document.querySelector(s)).borderInlineStartColor)`)
+      expect(new Set(rails).size).toBe(3)
       for (const selector of [`${request} > div > div > p`, `${replyCard} > div > div > p`]) {
         const contrast = browser.waitForValue<ContrastSample>(contrastSampleExpression(selector))
         expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)

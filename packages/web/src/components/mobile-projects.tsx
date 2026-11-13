@@ -66,7 +66,7 @@ export function DrawerIdentity({ version, latestVersion = null }: { version: str
   return (
     <div data-slot="drawer-identity" className="flex shrink-0 items-center gap-[12px] border-b border-border pt-[env(safe-area-inset-top)] pr-[14px] pb-[14px] pl-[18px]">
       <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" className="mt-[14px] size-[32px] rounded-lg" />
-      <span className="mt-[14px] text-[18px] leading-none font-bold tracking-[-0.02em] text-foreground">{productName('Cezarion')}</span>
+      <span data-slot="drawer-wordmark" className="mt-[14px] text-[18px] leading-none font-bold tracking-[-0.02em] text-foreground">{productName('Cezarion')}</span>
       {/* A nightly or preview build's version is long: it truncates (full text on hover) instead of
           pushing the Close button out of the row. */}
       {version ? <span data-slot="drawer-version" data-update-available={updateAvailable ? 'true' : undefined}

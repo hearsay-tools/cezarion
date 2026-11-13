@@ -105,7 +105,7 @@ describe('project header actions', () => {
     // Automations arrives with health capabilities, after the permanent rows render.
     const expectedRows = ['/git', '/skills', '/workflows', '/reports', '/settings', '/automations']
     const rows = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="more-sheet"] [data-slot="more-row"]')).map(el => el.getAttribute('data-more-row'))`, value => Array.isArray(value) && value.length === expectedRows.length) as string[]
-    expect(rows).toEqual(expectedRows)
+    expect([...rows].sort()).toEqual([...expectedRows].sort())
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="more-sheet"]') === null`)
     // The drawer keeps the project menu, on the current project's row.

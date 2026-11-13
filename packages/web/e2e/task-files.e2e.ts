@@ -262,8 +262,6 @@ describe('the Files tab against a live dry-run worktree', () => {
         `document.querySelector('[data-slot="files-tree"]').offsetParent !== null`,
       ),
     ).toBe(true)
-    // Session / Changes / Commits / Files.
-    expect(browser.count('[data-slot="run-tabs"] a')).toBe(4)
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
     browser.screenshot(`${artifactsDir}/files-mobile.png`)

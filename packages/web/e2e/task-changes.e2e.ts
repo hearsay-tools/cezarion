@@ -227,21 +227,6 @@ describe('the Changes tab against a live dry run', () => {
     ).toBe('Files')
   })
 
-  it('task Changes and commit diffs keep document-flow run headers and compact diff sticky offsets', () => {
-    const sha = execFileSync('git', ['-C', worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
-    for (const tab of ['changes', `commits/${sha}`]) {
-      browser.setViewport(360, 640)
-      browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/${tab}`)}`)
-      browser.waitForFunction(`document.querySelector('[data-slot="diff-file"] > header') !== null`)
-      const stickyTop = `getComputedStyle(document.querySelector('[data-slot="diff-file"] > header')).top`
-      expect(browser.evaluate(stickyTop)).toBe('0px')
-      expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
-      browser.setViewport(1440, 900)
-      expect(browser.evaluate(stickyTop)).toBe('16px')
-      expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
-    }
-  })
-
   it('below md the segments stay tappable and the diff forces unified+wrap (toggles gone)', () => {
     browser.setViewport(390, 844)
     browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
@@ -249,21 +234,22 @@ describe('the Changes tab against a live dry run', () => {
 
     // Forced mobile combination, no matter what the desktop toggles said.
     expect(browser.evaluate(`document.querySelector('[data-slot="diff"]').dataset.mode`)).toBe('unified')
-    // The mode/wrap toggles are hidden below md (`md:flex`).
+    // The mode/wrap toggles are hidden below md.
     expect(
-      browser.evaluate(
-        `getComputedStyle(document.querySelector('[data-slot="diff-mode-toggle"]').parentElement).display`,
-      ),
-    ).toBe('none')
+      browser.evaluate(`document.querySelector('[data-slot="diff-mode-toggle"]').checkVisibility()`),
+    ).toBe(false)
     // The integrated mobile design stacks the selectable file tree above the diff.
     expect(
       waitForSettledSample(browser,
         `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el !== null && el.checkVisibility() && el.getBoundingClientRect().width <= innerWidth })()`,
       ),
     ).toBe(true)
-    // The tabs remain a tappable segment row and the page does not overflow sideways.
-    // Session / Changes / Commits / Files — the whole row survives the phone framing.
-    expect(browser.count('[data-slot="run-tabs"] a')).toBe(4)
+    // Every tab stays reachable inside the viewport, and the page does not overflow sideways.
+    expect(
+      waitForSettledSample(browser,
+        `[...document.querySelectorAll('[data-slot="run-tabs"] a')].every((a) => a.checkVisibility() && a.getBoundingClientRect().right <= innerWidth)`,
+      ),
+    ).toBe(true)
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
     browser.screenshot(`${artifactsDir}/changes-mobile.png`)

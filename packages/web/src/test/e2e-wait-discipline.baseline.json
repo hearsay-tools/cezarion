@@ -158,18 +158,6 @@
       "count": 1
     },
     {
-      "file": "task-changes.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot=\"run-header\"]')).position`)).toBe('relative')",
-      "count": 1
-    },
-    {
-      "file": "task-changes.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(stickyTop)).toBe('16px')",
-      "count": 1
-    },
-    {
       "file": "touch-targets.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`(() => {",

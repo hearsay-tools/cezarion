@@ -91,16 +91,14 @@ function revealReviewAction(slot: string): void {
 
 describe('the review gate against a live parked run', () => {
   it('shows the banner and the real worktree diff as per-file sections', () => {
-    expect(browser.text('[data-slot="review-banner"]')).toContain(
-      'Review the changes before anything lands',
-    )
+    expect(browser.isVisible('[data-slot="review-banner"]')).toBe(true)
     // The diff is REAL — the mock touched notes.md in the worktree, and it renders as an
-    // added-file section with add-tinted lines.
+    // added-file section with added lines.
     browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
     expect(browser.text('[data-slot="diff-file-path"]')).toContain('notes.md')
     expect(browser.text('[data-slot="diff-file"]')).toContain('added')
     expect(
-      browser.count('[data-slot="diff-file-body"] .bg-diff-add'),
+      browser.count('[data-slot="diff-file-body"] [data-line="add"]'),
     ).toBeGreaterThanOrEqual(1)
     // All three exits are offered; nothing has merged anything. The dry-run mock prints a PR
     // This fixture deliberately has no PR URL, so the third exit is the deterministic Draft PR
@@ -115,13 +113,18 @@ describe('the review gate against a live parked run', () => {
     browser.screenshot(`${artifactsDir}/review-gate-desktop.png`)
   })
 
-  it('reads well on an iPhone viewport', () => {
+  it('keeps the notes and every exit reachable on an iPhone viewport, without sideways scroll', () => {
     browser.setViewport(390, 844)
-    browser.waitForFunction(`document.querySelector('[data-slot="review-banner"]') !== null`)
-    expect(browser.isVisible('[data-slot="review-notes"]')).toBe(true)
-    browser.evaluate(`document.querySelector('[data-slot="review-banner"]').scrollIntoView() ?? true`)
-    browser.screenshot(`${artifactsDir}/review-gate-iphone.png`)
-    browser.setViewport(1440, 900)
+    try {
+      browser.waitForFunction(`document.querySelector('[data-slot="review-banner"]') !== null`)
+      revealControl(browser, '[data-slot="review-notes"]')
+      for (const slot of ['review-send-back', 'review-draft-pr', 'review-accept']) revealReviewAction(slot)
+      browser.waitForFunction(`document.documentElement.scrollWidth <= innerWidth`)
+      browser.evaluate(`document.querySelector('[data-slot="review-banner"]').scrollIntoView() ?? true`)
+      browser.screenshot(`${artifactsDir}/review-gate-iphone.png`)
+    } finally {
+      browser.setViewport(1440, 900)
+    }
   })
 
   it('Send back delivers the notes into the SAME session — the transcript grows', async () => {

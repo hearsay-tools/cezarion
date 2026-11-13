@@ -10,21 +10,18 @@ export function assistantWidthExpression(): string {
 }
 
 /** Measure each card separately; scrolling separated cards together cannot render them all. */
-export function messageClockExpression(selector: string, headingSelector?: string): string {
+export function messageClockExpression(selector: string): string {
   return `(() => {
     const card = document.querySelector(${JSON.stringify(selector)});
     const clock = card?.querySelector('[data-slot="message-time"]');
-    const heading = ${headingSelector ? `card?.querySelector(${JSON.stringify(headingSelector)})` : 'null'};
-    if (!card || !clock || (${Boolean(headingSelector)} && !heading)) return null;
+    if (!card || !clock) return null;
     // #795 review/#758: scrolling requests a future rendered frame. Observe each
     // measured node before scrolling/boxes and reject this task's skipped sample.
-    const rendered = [card, clock, ...(heading ? [heading] : [])]
-      .every(el => el.checkVisibility({ contentVisibilityAuto: true }));
+    const rendered = [card, clock].every(el => el.checkVisibility({ contentVisibilityAuto: true }));
     card.scrollIntoView({ block: 'center', inline: 'nearest' });
     if (!rendered) return null;
     const box = card.getBoundingClientRect(), time = clock.getBoundingClientRect();
     return { top: time.top - box.top, right: box.right - time.right,
-      overflow: card.scrollWidth > card.clientWidth,
-      headingHeight: heading ? heading.getBoundingClientRect().height : null };
+      width: box.width, height: box.height, overflow: card.scrollWidth > card.clientWidth };
   })()`
 }

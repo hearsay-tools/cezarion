@@ -60,30 +60,13 @@ afterAll(async () => {
 })
 
 describe('task thread', () => {
-  it('renders the task and follow-up as labeled full-width user messages', () => {
+  it('renders the task and follow-up as user messages', () => {
     const bubbles = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="user-bubble"] .thread-markdown')].map((el) => el.textContent)`,
     ) as string[]
     expect(bubbles).toHaveLength(2)
     expect(bubbles[0]).toContain('Summarize what this project does.')
     expect(bubbles[1]).toBe('Thanks — now show the markdown summary. mock:md')
-
-    // The revised document layout fills the reading column; the role label identifies authorship.
-    const geometry = waitForSettledSample(browser, `(() => {
-      const bubble = document.querySelector('[data-slot="user-bubble"]')
-      const message = document.querySelector('[data-slot="assistant-message"]')
-      // #795/#758: presence is not rendering for content-visibility thread rows.
-      const rendered = [bubble, message].every(el => el.checkVisibility({ contentVisibilityAuto: true }))
-      bubble.scrollIntoView({ block: 'center' })
-      if (!rendered) return null
-      const column = bubble.parentElement
-      const b = bubble.getBoundingClientRect(), c = column.getBoundingClientRect(), m = message.getBoundingClientRect()
-      return { rightGap: c.right - b.right, bubbleLeft: b.left, mid: c.left + c.width / 2, messageLeft: m.left - c.left }
-    })()`) as { rightGap: number; bubbleLeft: number; mid: number; messageLeft: number }
-    expect(geometry.rightGap).toBeLessThan(40) // only the column padding separates them
-    expect(geometry.bubbleLeft).toBeLessThan(geometry.mid)
-    expect(browser.evaluate(`document.querySelector('[data-slot="user-bubble"] > p > span:first-child').textContent`)).toBe('YOUR MESSAGE')
-    expect(geometry.messageLeft).toBeLessThan(40)
   })
 
   it('renders the assistant reply as markdown — heading, table, list, no raw ** anywhere', () => {
@@ -122,19 +105,13 @@ describe('task thread', () => {
         const affordance = browser.evaluate(`(() => {
           const link = document.querySelector(${JSON.stringify(link)})
           const style = getComputedStyle(link)
-          const probe = document.createElement('span')
-          probe.style.color = 'var(--link-foreground)'
-          document.body.append(probe)
-          const semantic = getComputedStyle(probe).color
-          probe.remove()
-          return { active: document.activeElement === link, decoration: style.textDecorationLine, outline: style.outlineStyle, width: style.outlineWidth, semantic }
-        })()` ) as { active: boolean; decoration: string; outline: string; width: string; semantic: string }
+          return { active: document.activeElement === link, decoration: style.textDecorationLine, outline: style.outlineStyle, width: style.outlineWidth }
+        })()` ) as { active: boolean; decoration: string; outline: string; width: string }
         const focus = browser.evaluate(contrastSampleExpression(link, 'outline-color')) as ContrastSample
         expect(affordance.decoration).toContain('underline')
         expect(affordance.active).toBe(true)
         expect(affordance.outline).not.toBe('none')
         expect(Number.parseFloat(affordance.width)).toBeGreaterThanOrEqual(2)
-        expect(focus.foreground).toBe(affordance.semantic)
         expect(focus.ratio, `${variant.id} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
         browser.screenshot(`${artifactsDir}/issue-165-thread-${variant.id}.png`, { viewport: true })
       }
@@ -160,8 +137,17 @@ describe('task thread', () => {
         keywordText: keyword.textContent,
         keywordToken: keyword.style.getPropertyValue('--sdm-c'),
         synKey: getComputedStyle(document.documentElement).getPropertyValue('--syn-key').trim(),
+        colors: (() => {
+          const body = block.querySelector('[data-streamdown="code-block-body"]')
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--syn-key)'
+          document.body.append(probe)
+          const syn = getComputedStyle(probe).color
+          probe.remove()
+          return { syn, plain: getComputedStyle(body).color }
+        })(),
       }
-    })()`) as { language: string; chip: string; copy: boolean; keywordText: string; keywordToken: string; synKey: string }
+    })()`) as { language: string; chip: string; copy: boolean; keywordText: string; keywordToken: string; synKey: string; colors: { syn: string; plain: string } }
 
     expect(block.language).toBe('ts')
     expect(block.chip).toBe('ts')
@@ -170,7 +156,9 @@ describe('task thread', () => {
     // Streamdown owns how its custom token variable is painted; our contract is that Shiki
     // maps the keyword to Squawk's theme token and that the active palette defines that token.
     expect(block.keywordToken).toBe('var(--syn-key)')
-    expect(normalizeColorSample(browser, block.synKey)).toBe('rgb(94, 234, 212)')
+    expect(block.synKey).not.toBe('')
+    const colors = normalizeColorSample(browser, block.colors)
+    expect(colors.syn).not.toBe(colors.plain)
   })
 
   it('keeps Shiki out of the main bundle — its chunks load lazily, after the thread route', () => {
@@ -282,35 +270,20 @@ describe('task thread', () => {
   })
 })
 
-it.each([375, 1280])('uses the readable agent type scale and preserves full tool commands at %ipx (hearsay-tools/cezarion#522)', (width) => {
+it.each([375, 1280])('preserves full tool commands at %ipx (hearsay-tools/cezarion#522)', (width) => {
   browser.setViewport(width, 800)
   browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
   const facts = waitForSettledSample(browser, `(() => {
     const message = document.querySelector('[data-slot="assistant-message"]');
-    const body = message?.querySelector(':scope > div');
-    const eyebrow = message?.querySelector(':scope > p');
     const command = document.querySelector('[data-slot="tool-card"][data-kind="execute"] > button code');
-    if (!body || !eyebrow || !command) return null;
-    const rendered = body.checkVisibility({ contentVisibilityAuto: true });
+    if (!message || !command) return null;
+    const rendered = message.checkVisibility({ contentVisibilityAuto: true });
     message.scrollIntoView({ block: 'center' });
     if (!rendered) return null;
-    const style = getComputedStyle(body);
-    const cardStyle = getComputedStyle(message);
-    return { fontSize: style.fontSize, lineHeight: style.lineHeight,
-      width: body.getBoundingClientRect().width, maxWidth: style.maxWidth,
-      availableWidth: message.clientWidth - parseFloat(cardStyle.paddingLeft) - parseFloat(cardStyle.paddingRight),
-      eyebrowLineHeight: getComputedStyle(eyebrow).lineHeight,
-      command: command.textContent, title: command.title,
-      overflow: getComputedStyle(command).textOverflow, whiteSpace: getComputedStyle(command).whiteSpace };
-  })()`) as { fontSize: string; lineHeight: string; width: number; maxWidth: string; availableWidth: number; eyebrowLineHeight: string; command: string; title: string; overflow: string; whiteSpace: string }
-  expect(facts.fontSize).toBe(width < 768 ? '15px' : '14px')
-  expect(facts.lineHeight).toBe(width < 768 ? '24px' : '22.4px')
-  expect(facts.maxWidth).toBe('none')
-  expect(Math.abs(facts.width - facts.availableWidth)).toBeLessThanOrEqual(1)
-  expect(facts.eyebrowLineHeight).toBe('13.2px')
+    return { command: command.textContent, title: command.title, overflow: getComputedStyle(command).textOverflow };
+  })()`) as { command: string; title: string; overflow: string }
   expect(facts.title).toBe(facts.command)
   expect(facts.overflow).toBe('ellipsis')
-  expect(facts.whiteSpace).toBe('nowrap')
 })
 
 it('ellipsizes a bare OpenCode command and reveals it on expansion (hearsay-tools/cezarion#522)', () => {

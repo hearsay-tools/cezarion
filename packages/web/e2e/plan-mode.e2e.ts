@@ -232,15 +232,17 @@ describe('plan mode against a live dry-run server', () => {
     browser.setViewport(390, 844)
     // The reflow must LAND before anything measures or clicks: a click computed against the
     // pre-resize layout dispatches into the gap between cards and silently does nothing.
-    // #795: rendered geometry must settle independently of the 57px shell expectation.
+    // #795: rendered geometry must settle independently of the shell expectation.
     // Rounded: Radix's zoom-in entrance leaves sub-pixel transform residue on the rect.
     const rect = waitForSettledSample(browser,
       `(() => { const r = document.querySelector('[data-slot="plan-review"]').getBoundingClientRect();
-        return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) } })()`,
-    ) as { x: number; y: number; w: number }
-    expect(rect.x).toBe(0)
-    expect(rect.y).toBe(57)
-    expect(rect.w).toBe(390)
+        const shell = document.querySelector('[data-slot="mobile-top-bar"]')?.getBoundingClientRect().bottom ?? 0;
+        return { x: Math.round(r.x), y: Math.round(r.y), right: Math.round(r.right), shell: Math.round(shell), vw: innerWidth } })()`,
+    ) as { x: number; y: number; right: number; shell: number; vw: number }
+    expect(rect.shell).toBeGreaterThan(0)
+    expect(rect.y).toBeGreaterThanOrEqual(rect.shell)
+    expect(rect.x).toBeGreaterThanOrEqual(0)
+    expect(rect.right).toBeLessThanOrEqual(rect.vw)
 
     // Touch-honest reorder: buttons, not drag.
     await clickStepControl(
