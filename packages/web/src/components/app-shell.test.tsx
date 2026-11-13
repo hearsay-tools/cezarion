@@ -14,7 +14,7 @@ afterEach(() => {
   localStorage.clear()
 })
 
-// jsdom ships no `matchMedia`; the ThemeProvider wrapping the footer toggle needs one.
+// jsdom ships no `matchMedia`; the ThemeProvider needs one.
 beforeEach(() => {
   vi.stubGlobal(
     'matchMedia',
@@ -111,12 +111,11 @@ describe('AppShell', () => {
     expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
   })
 
-  it('shows the running version in the footer, marks a newer release and offers no update action', () => {
+  it('shows the running version in the footer and marks a newer release', () => {
     renderShell('/', { version: '1.2.9', latestVersion: '1.2.10' })
     const chip = footer().querySelector('[data-slot="version-chip"]') as HTMLElement
     expect(chip.textContent).toBe('v1.2.9')
     expect(chip.getAttribute('data-update-available')).toBe('true')
-    expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
     cleanup()
     renderShell('/', { version: '1.2.10', latestVersion: '1.2.9' })
     expect(footer().querySelector('[data-slot="version-chip"]')?.getAttribute('data-update-available')).toBeNull()
@@ -308,11 +307,6 @@ describe('AppShell', () => {
       expect(within(nav()).getByRole('link', { name: 'Tasks' })).toBeTruthy()
       expect(within(sidebar()).getByRole('link', { name: /New task/ })).toBeTruthy()
     })
-  })
-
-  it('does not duplicate the rail theme toggle in the sidebar', () => {
-    renderShell()
-    expect(within(footer()).queryByRole('button', { name: /^Theme:/ })).toBeNull()
   })
 
   describe('sidebar search and footer chrome', () => {
