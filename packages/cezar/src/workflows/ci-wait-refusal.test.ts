@@ -35,11 +35,10 @@ const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
 
-// hearsay-tools/cezarion#1235 phase 3a: worker waits are entries in the wait list beside CI, so the
-// R27 refusal (#713: no CI wait while a worker wait is pending or owed) is gone. These cells pin
-// the replacement on every runner's native wire: CI registers beside a pending and a settled
+// hearsay-tools/cezarion#1235 phase 3a: worker waits are entries in the wait list beside CI.
+// These cells pin that on every runner's native wire: CI registers beside a pending and a settled
 // worker wait, and the worker result is still delivered once.
-describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezarion#1235', { timeout: 30_000 }, () => {
+describe('CI registration beside worker waits — hearsay-tools/cezarion#1235', { timeout: 30_000 }, () => {
   useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
 

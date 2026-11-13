@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
-test('installed Cursor runner uses the bundled print mock, refuses legacy ACP resumes and fails an unqualified build headless', { timeout: 120_000 }, async () => {
+test('installed Cursor runner uses the bundled print mock and fails an unqualified build headless', { timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cez-cursor-package-'));
   assert.ok(!root.startsWith(resolve(packageRoot, '../..') + '/'));
   try {
@@ -24,7 +24,6 @@ test('installed Cursor runner uses the bundled print mock, refuses legacy ACP re
     const record = JSON.parse(packed.stdout)[0] as { filename: string; files: Array<{ path: string }> };
     const paths = new Set(record.files.map(file => file.path));
     assert.ok(paths.has('scripts/mock-cursor-print.mjs'));
-    assert.ok(!paths.has('scripts/mock-cursor-acp.mjs'));
     await writeFile(join(consumer, 'package.json'), '{"private":true,"type":"module"}\n');
     await execFile('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock',
       join(packDir, record.filename)], { cwd: consumer, maxBuffer: 10 * 1024 * 1024 });

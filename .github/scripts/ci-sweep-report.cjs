@@ -75,10 +75,14 @@ async function reportStepCauses(ctx,pattern) {
   // step's causes meets the sweep's evidence threshold.
   for(const occurrence of pattern.occurrences) {
     const issueCount=writer.issues.length;
-    const results=await writer.reportStep({...occurrence,causes:[occurrence.cause],labels:[labelFor(pattern.cause,available)],bodyFor:bodyForPattern});
+    // A quota step goes to the writer with its source cause, so the writer
+    // chooses from the step's records as the immediate reporter does. A step
+    // an earlier reporter recorded under the quota cause is no target here.
+    const results=await writer.reportStep({...occurrence,causes:[occurrence.sourceCause||occurrence.cause],labels:[labelFor(pattern.cause,available)],bodyFor:bodyForPattern});
     api.manifest.reports.issues+=writer.issues.length-issueCount;
     for(const result of results) {
       if(result.reported)api.manifest.reports.occurrences++;
+      if(occurrence.sourceCause && result.cause.signature!==pattern.cause.signature)continue;
       targets.set(result.issue.number,result.issue);
     }
   }

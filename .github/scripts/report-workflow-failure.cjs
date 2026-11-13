@@ -130,9 +130,11 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
     if(run.conclusion==='cancelled') {log(`Run ${run.id} was cancelled before any job reached its time limit; nothing to report.`);return {reported:0};}
     throw new Error('Failed run has no failed jobs; inspect Actions metadata');
   }
-  const writer=await createFailureWriter({github,owner,repo,log});
+  const writer=await createFailureWriter({github,owner,repo,log,since:run.created_at});
   const {reported,reports}=await reportFailedJobs({github,base,fetchImpl,run,writer,failed,log});
-  if(run.name==='CI') {
+  if(!reports.length) {
+    log(`Run ${run.id} attempt ${run.run_attempt} failed only for transient causes; nothing to report.`);
+  } else if(run.name==='CI') {
     await routeMainCiSummary({github,owner,repo,run,issues:writer.issues,reports});
   }
   return {reported};

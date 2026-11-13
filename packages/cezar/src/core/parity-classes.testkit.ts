@@ -152,7 +152,7 @@ export const PARITY_FAMILIES = {
     T4: 'each runner\'s own default deadline, on its seam',
     T7: 'the seam row: each runner applies a set spec.timeoutMs in place of its default',
   }),
-  'skill-resume': shared('inbox generation is Squawk\'s', {
+  'skill-resume': shared('the skill system prompt on Continue is composed in Squawk', {
     R53: 'the resumed skill prompt on each runner\'s wire', R54: 'the resumed skill prompt on each runner\'s wire',
     R55: 'the resumed skill prompt on each runner\'s wire', R56: 'the resumed skill prompt on each runner\'s wire',
     R57: 'the recorded session on each runner\'s wire', R59: 'reuses each runner\'s recorded session',

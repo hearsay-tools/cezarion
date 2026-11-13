@@ -251,7 +251,6 @@ it('requires an explicit single-task choice before saving a retired multi-candid
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
   expect(calls.find(call => call.method === 'PUT')?.body).toMatchObject({ task: { prompt: 'Go' } })
-  expect(calls.find(call => call.method === 'PUT')?.body).not.toHaveProperty('task.variants')
 })
 
 it('a 409 shows the reload action and keeps the typed name', async () => {

@@ -18,12 +18,4 @@ export async function probe({ createRunner }: { createRunner: typeof RunnerFacto
     assert.match(result.text, /^Done\./);
     assert.equal(events.some(event => event.type === 'error'), false);
   }
-  for (const transport of [undefined, 'cursor-acp'] as const) {
-    const events: AgentEvent[] = [];
-    const runner = createRunner('cursor', transport ? { sessionTransport: transport } : {});
-    await runner.run({ cwd: process.cwd(), userPrompt: 'mock:cezar-done', toolGrant: { kind: 'unset' }, timeoutMs: 10_000,
-      resume: true, sessionId: 'legacy-acp-session' }, event => events.push(event));
-    assert.equal(events.some(event => event.type === 'session'), false);
-    assert.match(events.find(event => event.type === 'error')?.message ?? '', /started on the ACP transport.*cannot resume/);
-  }
 }

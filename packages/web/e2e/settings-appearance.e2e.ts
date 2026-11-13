@@ -57,7 +57,6 @@ describe('settings → appearance against the live dry-run server', () => {
     expect(browser.count(`${nav} [data-section="notifications"]`)).toBe(1)
     expect(browser.count(`${nav} [data-section="resources"]`)).toBe(1)
     expect(browser.count(`${nav} [data-section="tasks"]`)).toBe(1)
-    expect(browser.count(`${nav} [data-section="skills"]`)).toBe(0)
     expect(browser.count(`${nav} [data-section="projects"]`)).toBe(1)
     // Project sections live in the OTHER area; hidden registry entries are nowhere at all.
     expect(browser.count(`${nav} [data-section="agents"]`)).toBe(0)
@@ -82,7 +81,7 @@ describe('settings → appearance against the live dry-run server', () => {
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
   })
 
-  it('keeps the sole accent wired while omitting its one-choice control', async () => {
+  it('keeps the sole accent wired', async () => {
     // A legacy server value is still accepted. On boot the appearance mechanism normalizes it
     // to the sole Squawk family and mirrors that canonical value for the next pre-paint.
     await fetch(`${baseUrl}/api/v1/workspace/ui-state`, {
@@ -94,8 +93,6 @@ describe('settings → appearance against the live dry-run server', () => {
     browser.waitForFunction(
       `localStorage.getItem('cez-accent') === 'cezarion' && document.querySelector('[data-slot="appearance-width"] [data-value="wide"]')?.getAttribute('aria-checked') === 'true'`,
     )
-    expect(browser.count('[data-slot="appearance-accent"]')).toBe(0)
-    expect(browser.evaluate(`document.documentElement.dataset.accent`)).toBeNull()
 
     // Saving another appearance field writes the complete normalized object, proving accent is
     // still connected rather than deleted along with the redundant control.

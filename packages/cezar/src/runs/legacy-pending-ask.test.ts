@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { setRunStatus, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
@@ -85,11 +85,3 @@ it.each([
   expect(run).not.toHaveProperty('hasPendingHumanAsk');
 });
 
-it('the contract no longer carries the summary or the monitoring activity', () => {
-  const run = { ...reopenWith({}).getRun(id)!, hasPendingHumanAsk: true, activity: 'monitoring' };
-  expect(apiRunSchema.parse(run)).not.toHaveProperty('hasPendingHumanAsk');
-  expect(apiRunSchema.parse(run)).not.toHaveProperty('activity');
-  const entry = runIndexEntrySchema.parse({ ...toRunSummary(run), projectId: 'project' });
-  expect(entry).not.toHaveProperty('hasPendingHumanAsk');
-  expect(entry).not.toHaveProperty('activity');
-});

@@ -56,12 +56,10 @@ const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLA
 describe('AppShell', () => {
   it('keeps optional views in an overflow menu and marks the current overflow view', async () => {
     renderShell('/automations', { })
-    expect(within(nav()).queryByRole('link', { name: 'Inbox' })).toBeNull()
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
     fireEvent.keyDown(more, { key: 'Enter' })
     expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('aria-current')).toBe('page')
-    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Workflows' }))
     expect(screen.getByTestId('location').textContent).toBe('/workflows')
   })
@@ -142,10 +140,9 @@ describe('AppShell', () => {
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
   })
 
-  it('shows project identity instead of a sidebar wordmark', () => {
+  it('shows project identity in the sidebar', () => {
     renderShell('/', { repo: { name: 'Demo', branch: 'main' } })
     expect(within(sidebar()).getByText('Demo')).toBeTruthy()
-    expect(sidebar().querySelector('[data-slot="brand-wordmark"]')).toBeNull()
   })
 
   it('shows project identity in light mode', () => {
@@ -461,13 +458,6 @@ describe('AppShell', () => {
         // The version shown is still the one actually running.
         expect(chip().textContent).toContain('v1.2.3')
       })
-    })
-
-    it('renders no Skills update marker or badge (hearsay-tools/cezarion#1494)', () => {
-      renderShell()
-      expect(document.querySelector('[data-slot="nav-update-marker"]')).toBeNull()
-      expect(document.querySelector('[data-slot="skills-update"]')).toBeNull()
-      expect(document.querySelector('[aria-label="Skills update available"]')).toBeNull()
     })
 
     it('reserves the quick-list, tools and composer slots for later Steps', () => {

@@ -36,10 +36,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
       - name: Choose the files
         id: plan
         run: node .github/scripts/mutants-weekly.cjs plan --out mutants-weekly-plan
@@ -74,7 +79,22 @@ jobs:
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
+      - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
       - name: Set up Node.js
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Set up Node.js without node-dist
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*

@@ -5,7 +5,7 @@ import type { RunModuleContext } from './run/types.ts';
 import { discoverSkills } from '../skills.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, removeFixtureRepo } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -471,12 +471,11 @@ describe('systemPrompt end-to-end (dry run)', () => {
 
 });
 
-/** Retired inbox generation stays absent while the handoff journal remains active. */
-describe('generated inbox retirement (dry run)', () => {
+/** The handoff journal and lifecycle tools ride in every session's system prompt. */
+describe('handoff journal system prompt (dry run)', () => {
   const CONFIG_PROMPT = 'CONFIG-DEFAULT: always write tests first.';
   let repoRoot: string;
   let argsFile: string;
-  let inheritedTodos: string;
   let store: RunStore;
   let manager: RunManager;
   const savedEnv: Record<string, string | undefined> = {};
@@ -484,16 +483,10 @@ describe('generated inbox retirement (dry run)', () => {
   beforeAll(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-followup-gate-'));
     argsFile = join(repoRoot, 'mock-args.ndjson');
-    inheritedTodos = join(repoRoot, 'inherited-todos.json');
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     savedEnv.CEZ_MOCK_ARGS_FILE = process.env.CEZ_MOCK_ARGS_FILE;
-    savedEnv.CEZ_TODOS_FILE = process.env.CEZ_TODOS_FILE;
-    savedEnv.CEZ_FOLLOWUPS = process.env.CEZ_FOLLOWUPS;
     process.env.CEZ_DRY_RUN = '1';
     process.env.CEZ_MOCK_ARGS_FILE = argsFile;
-    // A path inherited from an older parent process must not become an output.
-    process.env.CEZ_TODOS_FILE = inheritedTodos;
-    delete process.env.CEZ_FOLLOWUPS;
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
     await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
@@ -547,22 +540,6 @@ describe('generated inbox retirement (dry run)', () => {
     const argv = JSON.parse(lines[index] as string) as string[];
     return argv[argv.indexOf('--append-system-prompt') + 1] as string;
   };
-
-  it('omits inbox instructions and new run preferences', async () => {
-    const todosFile = join(repoRoot, '.ai/cezar/todos.json');
-    rmSync(todosFile, { force: true });
-    rmSync(inheritedTodos, { force: true });
-
-    const id = await runToEnd({ task: 'do the thing mock:cezar-done' });
-
-    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
-    expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
-    expect(existsSync(todosFile)).toBe(false);
-    // …and nothing leaked into the parent Squawk's inbox either.
-    expect(existsSync(inheritedTodos)).toBe(false);
-    // New runs do not persist the retired preference.
-    expect(store.getRun(id)?.generateFollowups).toBeUndefined();
-  }, 30_000);
 
   it('keeps the per-task handoff journal and lifecycle tools', async () => {
     const id = await runToEnd({ task: 'do the thing mock:cezar-done' });

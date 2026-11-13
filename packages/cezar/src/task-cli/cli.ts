@@ -95,8 +95,8 @@ export const OPERATIONS: Record<string, Operation> = {
       wait: { type: 'boolean', help: '               Then wait until the task needs you or ends (see wait).' },
       until: UNTIL_FLAG,
       'timeout-seconds': TIMEOUT_FLAG,
-      notify: { type: 'boolean', help: '             POST status changes to the project webhook (default when it has one).' },
-      'no-notify': { type: 'boolean', help: '          Do not notify the project webhook.' },
+      notify: { type: 'boolean', help: '             POST status changes to the project webhook (default off).' },
+      'no-notify': { type: 'boolean', help: '          Do not notify the project webhook (the default).' },
     },
   },
   list: {
@@ -257,7 +257,7 @@ export function taskHelp(operation?: string): string {
       '',
     ] : []),
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
-    `notify: with a task webhook set in ${controlLocation('general')}, start notifies it unless --no-notify;`,
+    `notify: start notifies the task webhook set in ${controlLocation('general')} only with --notify;`,
     'the webhook gets task.status, task.question and task.subscribed POSTs.',
     'Exit codes: 0 ok (wait/start --wait: done, review, or stopped for attention) · 1 task failed/cancelled',
     'or message not delivered · 2 no cockpit or refused · 3 timed out · 64 usage error.',
@@ -496,10 +496,9 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const skill = values.skill as string | undefined;
   const { runner } = runnerFlag({ runner: values.runner as string | undefined, backend: values.backend as string | undefined });
-  // `--notify` is an explicit opt-in the server may refuse (no webhook: 400 with a hint). The
-  // implicit default only opts in where the project has a webhook, so a bot on a fresh project
-  // is never blocked (#589).
-  const notify = values['no-notify'] ? false : values.notify ? true : cockpit.hasWebhook ? true : undefined;
+  // The webhook is opt-in: only `--notify` subscribes the task, and the server refuses it on a
+  // project with no webhook (400 with a hint). `--no-notify` stays accepted for older scripts.
+  const notify = values['no-notify'] ? false : values.notify ? true : undefined;
   let warning: string | undefined;
   if (skill !== undefined) {
     // Discovery is advisory: the catalog can change before a queued run executes. The server

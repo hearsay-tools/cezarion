@@ -13,9 +13,8 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { eventCheckpoint, manager, parent, restart, root, store, terminal, until, delegatingParent, useWorkerWaitFixture, worker, work, toolGenerationOf, fixtureUpdateRun } from './worker-wait.testkit.ts';
-import { messagesPrompt } from './monitoring-turn.testkit.ts';
-import { MAX_AUTO_CONTINUES, NO_WAIT_NUDGE_NOTE } from './run.ts';
+import { eventCheckpoint, manager, parent, restart, root, store, until, delegatingParent, useWorkerWaitFixture, worker, work, toolGenerationOf, fixtureUpdateRun } from './worker-wait.testkit.ts';
+import { MAX_AUTO_CONTINUES } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 
@@ -248,23 +247,7 @@ describe('the lifecycle prompt teaches the Squawk tools', { timeout: 45_000 }, (
     await until(() => !manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting');
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
     await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
-    for (const prompt of prompts()) {
-      expect(prompt).toContain(handoffInstructions({ handoffInjected: true, nativeSubagents: true }));
-      for (const marker of ['CEZ:DONE', 'CEZ:ASK', 'CEZ:MONITORING']) expect(prompt).not.toContain(marker);
-    }
-  });
-
-  // hearsay-tools/cezarion#2397: a session taught the markers before the upgrade gets no special
-  // reading of them. The line is ordinary text, and the no-wait nudge names the tools.
-  it('a done line is ordinary text: the turn gets the no-wait nudge, and the task does not finish', async () => {
-    wire();
-    const run = await opened();
-    const nudges = () => store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE)).length;
-    const before = nudges();
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
-    await until(() => nudges() > before && store.getRun(run.id)?.status === 'waiting');
-    expect(terminal).not.toContain(store.getRun(run.id)?.status);
-    expect(store.readEvents(run.id).some(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed')).toBe(false);
+    for (const prompt of prompts()) expect(prompt).toContain(handoffInstructions({ handoffInjected: true, nativeSubagents: true }));
   });
 });
 

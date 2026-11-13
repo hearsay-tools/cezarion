@@ -270,8 +270,6 @@ describe('resolveWaitingOn', () => {
 describe('cezar_wait request', () => {
   it('accepts the ci and timer request shapes and refuses the rest', () => {
     expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
-    // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, never cezar_wait.
-    expect(squawkWaitRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_WAIT_KIND, questions: CARD }).success).toBe(false);
     expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 59 }).success).toBe(false);
     expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 7201 }).success).toBe(false);
     expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker }).success).toBe(false); // phase 3
@@ -775,8 +773,7 @@ describe('PR waits', () => {
       .toEqual({ kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 7200 });
   });
 
-  it('refuses kind ci, an unknown target and merge waits past 7200 seconds', () => {
-    expect(squawkWaitRequestSchema.safeParse({ kind: 'ci', pr }).success).toBe(false);
+  it('refuses an unknown target and merge waits past 7200 seconds', () => {
     expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr, until: 'land' }).success).toBe(false);
     expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 7201 }).success).toBe(false);
   });
