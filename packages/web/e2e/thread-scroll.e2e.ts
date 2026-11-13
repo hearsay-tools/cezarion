@@ -475,25 +475,28 @@ describe('phone viewports', () => {
     // dock's DOMRect retains fractions, so allow the final subpixel rather than calling it clipping.
     const tail = () => {
       browser.evaluate(`${MAIN}.scrollTop = ${MAIN}.scrollHeight`)
-      return waitForSettledSample<{ bottomGap: number; overlap: number }>(browser, `(() => {
+      return waitForSettledSample<{ bottomGap: number; top: number; overlap: number }>(browser, `(() => {
         const dock = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect()
         const rows = document.querySelector('[data-slot="thread-rows"]').getBoundingClientRect()
-        return { bottomGap: window.innerHeight - dock.bottom, overlap: rows.bottom - dock.top }
+        return { bottomGap: window.innerHeight - dock.bottom, top: dock.top, overlap: rows.bottom - dock.top }
       })()`)
     }
     // The composer dock fits the visual viewport and follows the last row.
     const dock = tail()
     expect(dock.bottomGap).toBeGreaterThanOrEqual(-1)
+    expect(dock.top).toBeGreaterThanOrEqual(0)
     expect(dock.overlap).toBeLessThanOrEqual(1)
 
     // Document-flow controls must not float over history when the viewport inset changes.
     browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
     const lifted = tail()
     expect(lifted.bottomGap).toBeGreaterThanOrEqual(-1)
+    expect(lifted.top).toBeGreaterThanOrEqual(0)
     expect(lifted.overlap).toBeLessThanOrEqual(1)
     browser.evaluate(`document.documentElement.style.removeProperty('--kb')`)
     const restored = tail()
     expect(restored.bottomGap).toBeGreaterThanOrEqual(-1)
+    expect(restored.top).toBeGreaterThanOrEqual(0)
     expect(restored.overlap).toBeLessThanOrEqual(1)
 
     browser.screenshot(`${artifactsDir}/thread-iphone.png`, { viewport: true })
