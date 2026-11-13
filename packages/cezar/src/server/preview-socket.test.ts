@@ -13,7 +13,8 @@ import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import type { Viewer } from '../preview/session.ts';
 import { createPreviewSocket, type PreviewSocket, type PreviewSocketHost } from './preview-socket.ts';
-import { startServer, verifyWsUpgrade } from './server.ts';
+import { startServer } from './start-server.ts';
+import { verifyWsUpgrade } from './server.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
 import { CockpitOwnership } from './cockpit-ownership.ts';
 

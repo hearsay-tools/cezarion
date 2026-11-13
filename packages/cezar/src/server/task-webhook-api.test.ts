@@ -13,7 +13,8 @@ import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/con
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { workspaceConfigPath } from '../paths.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { createApp, startServer, type ServerDeps } from './server.ts';
+import { startServer } from './start-server.ts';
+import { createApp, type ServerDeps } from './server.ts';
 import { TaskWebhooks } from '../runs/webhook.ts';
 import { taskWebhooks } from '../workspace/webhooks.ts';
 import { once } from 'node:events';

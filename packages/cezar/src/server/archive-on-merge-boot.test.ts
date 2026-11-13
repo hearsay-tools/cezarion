@@ -24,7 +24,7 @@ const forgeFactory = (root: string) => ({
   discoverRepository: () => discoverRepoHandle(),
   mergedPullRequests: (identities: ArchivePullRequestIdentity[], signal: AbortSignal) => lookupMergedPullRequests(root, identities, signal),
 });
-import { startServer } from './server.ts';
+import { startServer } from './start-server.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */

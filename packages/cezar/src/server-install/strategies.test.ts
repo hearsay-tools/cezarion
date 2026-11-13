@@ -5,16 +5,22 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { availablePlatformIds, getStrategy } from './strategies.ts';
+import { availablePlatformIds, getStrategy, supportsServerMigration } from './strategies.ts';
 import { runInstall } from './engine.ts';
 import { loadServerState } from './state.ts';
 import { createAutoUi } from './ui.ts';
 import { nginxVhost } from './platforms/ubuntu-vps.ts';
-import type { Runner } from './types.ts';
+import { MIGRATABLE_PLATFORM_IDS, type Runner } from './types.ts';
 
 const noRunner: Runner = { capture: async () => ({ code: 0, stdout: '', stderr: '' }), interactive: async () => 0 };
 
 describe('registry', () => {
+  it('keeps the boot migration platform list equal to the strategy capabilities', () => {
+    expect([...MIGRATABLE_PLATFORM_IDS].sort()).toEqual(
+      availablePlatformIds().filter((id) => supportsServerMigration(getStrategy(id))).sort(),
+    );
+  });
+
   it('resolves ubuntu-vps and lists available ids', () => {
     expect(getStrategy('ubuntu-vps')?.id).toBe('ubuntu-vps');
     expect(getStrategy('nope')).toBeUndefined();

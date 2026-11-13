@@ -15,7 +15,8 @@ import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { sweepRegisteredPreviewLeftovers } from './project-context.ts';
-import { createApp, startServer } from './server.ts';
+import { startServer } from './start-server.ts';
+import { createApp } from './server.ts';
 import { createRunManager } from './run-manager.testkit.ts';
 
 // The background chain reads the registry, then sweeps preview leftovers: the sweep's argument is

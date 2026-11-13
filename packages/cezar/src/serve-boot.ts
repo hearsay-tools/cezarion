@@ -1,7 +1,7 @@
 import { productName } from './home/display.ts';
 import type { detectEnvironment } from './core/backend-detect.ts';
 import type { DelegationController } from './delegation/provision.ts';
-import type { startServer } from './server/server.ts';
+import type { startServer } from './server/start-server.ts';
 import { recoverWithProviderRuntimeAuthObservation, type ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
 import type { Home } from './home/home.ts';
 import { forwardToSessionGroups } from './core/session-process.ts';

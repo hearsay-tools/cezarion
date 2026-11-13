@@ -13,7 +13,8 @@ import type { RunManager } from '../workflows/run.ts';
 import { ProjectContexts, sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { CompletionActionCoordinator } from './completion-actions.ts';
-import { createApp, startServer, type ServerDeps } from './server.ts';
+import { startServer } from './start-server.ts';
+import { createApp, type ServerDeps } from './server.ts';
 import * as git from './git.ts';
 import { createWorkspaceProjects } from './workspace-projects.ts';
 

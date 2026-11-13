@@ -25,7 +25,7 @@ import { AutomationStore } from '../automations/store.ts';
 import { ArchiveOnMergeCoordinator } from '../server/archive-on-merge.ts';
 import { CompletionActionCoordinator } from '../server/completion-actions.ts';
 import { WorkspaceEventBus } from '../server/server.ts';
-import { startServer } from '../server/server.ts';
+import { startServer } from '../server/start-server.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { moveProjectWhenIdle } from './auto.ts';
 import { crashAt, moved, owners, TIMEOUT } from './engine.testkit.ts';

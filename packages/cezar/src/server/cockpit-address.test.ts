@@ -10,7 +10,7 @@ import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
-import { startServer } from './server.ts';
+import { startServer } from './start-server.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import { createRunManager } from './run-manager.testkit.ts';
 

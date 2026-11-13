@@ -27,7 +27,7 @@ try {
   // Seed where the built revision's cockpit reads each project, so a cockpit start moves nothing.
   const { projectPaths } = await import(new URL('project-paths.js', runtime.url));
   dataDir = projectPaths(join(root, 'cold-project')).write;
-  const { startServer } = await import(new URL('server/server.js', runtime.url));
+  const { startServer } = await import(new URL('server/start-server.js', runtime.url));
   const { RunManager } = await import(new URL('workflows/run.js', runtime.url));
   const { acquireCiResources } = await import(new URL('ci-wait/resources.js', runtime.url));
   const { resolveHome } = await import(new URL('home/resolve.js', runtime.url));

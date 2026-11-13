@@ -12,7 +12,8 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { createApp, startServer, type WorkspaceConfigResponse } from './server.ts';
+import { startServer } from './start-server.ts';
+import { createApp, type WorkspaceConfigResponse } from './server.ts';
 
 /**
  * The workspace settings API (multi-project spec, step 2.7):
