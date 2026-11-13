@@ -123,4 +123,7 @@ and `GET /fs/browse` no longer answer `409` for the mode. `hsq projects add`, `r
 `tag` work, and `hsq projects list` lists the whole registry. Background work (automations,
 archive-on-merge, the preview sweep, warm-up with recovery) covers every registered project.
 To limit it, set `HSQ_PROJECT_WARMUP=0` and `HSQ_AUTOMATIONS=0`, or unregister projects with
-`hsq projects rm <id>`. No state file changes, no data is deleted and no URL breaks.
+`hsq projects rm <id>`. The removal deletes no data and breaks no URL. Because every
+registered project is now prepared at start, the automatic move from `.ai/cezar/` to
+`.ai/squawk/` described above also runs for registered projects the mode used to hide;
+an older binary then stops seeing that project's earlier tasks.
