@@ -22,6 +22,8 @@ export const waitPartModule = (part: WaitParityPart): string => `waits-parity-${
 
 // Only the measured residual runner/part pairs use smaller row families.
 export const WAIT_PARITY_FAMILIES = {
+  cursorRegistrationWire: { runner: 'cursor', part: 'registration', family: 'wire' },
+  cursorRegistrationLimits: { runner: 'cursor', part: 'registration', family: 'limits' },
   cursorMixedWaits: { runner: 'cursor', part: 'mixed', family: 'waits' },
   cursorMixedNotices: { runner: 'cursor', part: 'mixed', family: 'notices' },
   cursorMixedMessages: { runner: 'cursor', part: 'mixed', family: 'messages' },
@@ -41,6 +43,7 @@ export type WaitParityFamily = typeof WAIT_PARITY_FAMILIES[keyof typeof WAIT_PAR
 /** The row families of each part that splits by family, keyed by the row's criterion (an entry row's
  *  second criterion, after U27). Every row of such a part is in exactly one family. */
 export const ROW_FAMILIES = {
+  registration: { wire: ['U1', 'U4', 'U26'], limits: ['U28w', 'U28r', 'U28p', 'U10', 'U16', 'U16b'] },
   mixed: { messages: ['U3w'], notices: ['U3n', 'U3r', 'U3d'], waits: ['U2w', 'U2t', 'U2c', 'U7w'] },
   asks: { opens: ['U7h', 'U7k', 'U7a'], ends: ['U9h', 'U18'], nudges: ['U5a', 'U5c', 'U5d', 'U17', 'U15'] },
   closed: { bound: ['U22c', 'U22f'], continue: ['U22k', 'U22x'], resume: ['U22r', 'U24', 'U24r', 'U25'] },
