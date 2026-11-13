@@ -488,9 +488,13 @@ describe('phone viewports', () => {
 
     // Document-flow controls must not float over history when the viewport inset changes.
     browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
-    expect(tail().overlap).toBeLessThanOrEqual(1)
+    const lifted = tail()
+    expect(lifted.bottomGap).toBeGreaterThanOrEqual(-1)
+    expect(lifted.overlap).toBeLessThanOrEqual(1)
     browser.evaluate(`document.documentElement.style.removeProperty('--kb')`)
-    expect(tail().overlap).toBeLessThanOrEqual(1)
+    const restored = tail()
+    expect(restored.bottomGap).toBeGreaterThanOrEqual(-1)
+    expect(restored.overlap).toBeLessThanOrEqual(1)
 
     browser.screenshot(`${artifactsDir}/thread-iphone.png`, { viewport: true })
     browser.setViewport(1440, 900)
