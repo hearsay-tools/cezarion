@@ -9,8 +9,9 @@ authoritative database must not expose stale legacy history.
 
 A real project context owns its store, manager and recovery. Contexts build on demand, while
 default-on post-listen warm-up also builds eligible registered projects one at a time. Warm-up
-can resume work and spend tokens; it skips another live cockpit’s projects and is disabled in
-single-project mode or with `CEZ_PROJECT_WARMUP=0`.
+can resume work and spend tokens; it skips another live cockpit’s projects and is disabled
+with `CEZ_PROJECT_WARMUP=0`. Single-project mode, which also disabled it, was removed on
+2026-11-13 (hearsay-tools/squawk#2988).
 
 Read-only SQLite may still need WAL coordination files. Cold reads accept a permission failure
 rather than bypassing them with an immutable connection that could miss live commits. A

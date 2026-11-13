@@ -505,9 +505,6 @@ export type ProjectRailProps = {
    *  rather than idle. A loaded index with no entry for a project is a project with no runs. */
   signals: ReadonlyMap<string, ProjectSignal> | null
   version: string | null
-  /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`): the server refuses add, edit, browse
-   *  and remove, so Add project and All projects go. Never inferred from the project count. */
-  singleProject: boolean
   /** Where selecting a project goes. Defaults to each project's home. */
   projectTarget?: (projectId: string) => ProjectSwitchTarget
   /** Called instead of the link's own navigation when `projectTarget(id).verify` is set. */
@@ -552,9 +549,8 @@ function RailIdentity({ expanded, resolvedTheme, version }: { expanded: boolean;
 }
 
 /** The Add project trigger: a full-width labelled row when expanded, a compact icon square when
- *  not. Absent in a single-project workspace, whose server refuses new projects. */
-function RailAddProject({ expanded, singleProject }: { expanded: boolean; singleProject: boolean }) {
-  if (singleProject) return null
+ *  not. */
+function RailAddProject({ expanded }: { expanded: boolean }) {
   return expanded ? (
     <AddProjectMenu
       origin="rail"
@@ -576,14 +572,13 @@ function RailAddProject({ expanded, singleProject }: { expanded: boolean; single
   )
 }
 
-/** The pinned bottom group: the expand toggle, All projects (multi-project only), global
- *  settings and the theme toggle. */
-function RailBottom({ roomToExpand, expanded, toggle, railId, singleProject, allProjectsActive, settingsActive }: {
+/** The pinned bottom group: the expand toggle, All projects, global settings and the theme
+ *  toggle. */
+function RailBottom({ roomToExpand, expanded, toggle, railId, allProjectsActive, settingsActive }: {
   roomToExpand: boolean
   expanded: boolean
   toggle: () => void
   railId: string
-  singleProject: boolean
   allProjectsActive: boolean
   settingsActive: boolean
 }) {
@@ -606,11 +601,9 @@ function RailBottom({ roomToExpand, expanded, toggle, railId, singleProject, all
           {expanded ? <span className={BOTTOM_LABEL}>Collapse</span> : null}
         </button>
       ) : null}
-      {!singleProject ? (
-        <RailLink to="/tasks" label="All projects" slot="rail-all-projects" active={allProjectsActive} expanded={expanded}>
-          <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
-        </RailLink>
-      ) : null}
+      <RailLink to="/tasks" label="All projects" slot="rail-all-projects" active={allProjectsActive} expanded={expanded}>
+        <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
+      </RailLink>
       <RailLink to="/settings/global/appearance" label="Global settings" slot="rail-global-settings" active={settingsActive} expanded={expanded}>
         <Settings2Icon className="size-4 shrink-0" aria-hidden="true" />
       </RailLink>
@@ -623,7 +616,7 @@ function RailBottom({ roomToExpand, expanded, toggle, railId, singleProject, all
   )
 }
 
-export function ProjectRail({ projects, signals, version, singleProject, projectTarget = homeOf, onSwitchProject, onSelectProject, canReorder = false, onReorder }: ProjectRailProps) {
+export function ProjectRail({ projects, signals, version, projectTarget = homeOf, onSwitchProject, onSelectProject, canReorder = false, onReorder }: ProjectRailProps) {
   const { pathname } = useLocation()
   const { resolvedTheme } = useTheme()
   const sidebarWidth = React.useContext(ShellSidebarWidthContext)
@@ -698,10 +691,10 @@ export function ProjectRail({ projects, signals, version, singleProject, project
             ))}
           </SortableContext>
         </DndContext>
-        <RailAddProject expanded={expanded} singleProject={singleProject} />
+        <RailAddProject expanded={expanded} />
       </div>
 
-      <RailBottom roomToExpand={roomToExpand} expanded={expanded} toggle={toggle} railId={railId} singleProject={singleProject} allProjectsActive={allProjectsActive} settingsActive={settingsActive} />
+      <RailBottom roomToExpand={roomToExpand} expanded={expanded} toggle={toggle} railId={railId} allProjectsActive={allProjectsActive} settingsActive={settingsActive} />
     </nav>
   )
 }

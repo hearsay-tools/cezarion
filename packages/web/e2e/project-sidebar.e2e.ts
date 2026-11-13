@@ -26,7 +26,6 @@ let baseUrl: string
 let bootProject: string
 let seedDir: string
 let restoreHome: () => void
-let singleProject = false
 
 let forgeAvailable = false
 let automationsAvailable = false
@@ -67,11 +66,10 @@ beforeAll(async () => {
   bootProject = await bootProjectId(baseUrl)
   const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as {
     forge: { available: boolean } | null
-    capabilities: { singleProject: boolean; automations: boolean }
+    capabilities: { automations: boolean }
   }
   forgeAvailable = health.forge?.available === true
   automationsAvailable = health.capabilities.automations
-  singleProject = health.capabilities.singleProject
 
   // `ui-state.json` too: the collapse assertion below reads it to prove nothing was written
   // there, and a developer's scratch home must not come out of this run holding a seeded map.
@@ -97,15 +95,11 @@ beforeAll(async () => {
     lastOpenedAt: '2026-07-19T12:00:00Z',
     source: 'local' as const,
   }
-  writeSharedProjects(
-    singleProject
-      ? [bootEntry, alphaEntry]
-      : [
-          bootEntry,
-          alphaEntry,
-          { ...BETA, root: makeRepo('beta'), lastOpenedAt: '2026-07-18T12:00:00Z', source: 'local' },
-        ],
-  )
+  writeSharedProjects([
+    bootEntry,
+    alphaEntry,
+    { ...BETA, root: makeRepo('beta'), lastOpenedAt: '2026-07-18T12:00:00Z', source: 'local' },
+  ])
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -151,12 +145,11 @@ function assertProject(projectId: string, path: string): void {
   // Git carries its own worktree list instead of the task list (#622); every other view keeps the task list.
   expect(browser.count('[data-slot="sidebar"] [data-slot="task-quick-list"]')).toBe(path === '/git' ? 0 : 1)
   expect(browser.count('[data-slot="sidebar"] [data-slot="git-sidebar"]')).toBe(path === '/git' ? 1 : 0)
-  expect(browser.count('[data-slot="project-groups"], [data-slot="single-project-navigation"], [data-slot="repo-chip"]')).toBe(0)
+  expect(browser.count('[data-slot="project-groups"], [data-slot="repo-chip"]')).toBe(0)
 }
 
-describe('the project sidebar in a multi-project workspace', () => {
-  it('keeps other projects on the rail and one scoped header and tab row in the sidebar', ({ skip }) => {
-    if (singleProject) skip()
+describe('the project sidebar', () => {
+  it('keeps other projects on the rail and one scoped header and tab row in the sidebar', () => {
     browser.goto(baseUrl + scoped(bootProject, '/'))
     browser.waitForFunction(`document.querySelector('${mark(BETA.id)}') !== null`)
     assertProject(bootProject, '/')
@@ -165,8 +158,7 @@ describe('the project sidebar in a multi-project workspace', () => {
     browser.screenshot(`${artifactsDir}/sidebar-projects.png`)
   })
 
-  it('switches every tab to the rail-selected project without inheriting its sibling forge', ({ skip }) => {
-    if (singleProject) skip()
+  it('switches every tab to the rail-selected project without inheriting its sibling forge', () => {
     browser.goto(baseUrl + scoped(bootProject, '/git'))
     assertProject(bootProject, '/git')
     browser.click(mark(ALPHA.id))
@@ -187,8 +179,7 @@ describe('the project sidebar in a multi-project workspace', () => {
     assertProject(bootProject, '/git')
   })
 
-  it('ignores legacy collapse pins so the current project stays available after reload', ({ skip }) => {
-    if (singleProject) skip()
+  it('ignores legacy collapse pins so the current project stays available after reload', () => {
     browser.goto(baseUrl + scoped(ALPHA.id, '/'))
     browser.evaluate(`localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ '${ALPHA.id}': true, '${bootProject}': false }))`)
     try {
@@ -199,43 +190,5 @@ describe('the project sidebar in a multi-project workspace', () => {
     } finally {
       browser.evaluate(`localStorage.removeItem('cez-sidebar-collapsed')`)
     }
-  })
-})
-
-describe('the constrained single-project workspace', () => {
-  it('keeps the project header and tab navigation and removes every multi-project affordance', ({ skip }) => {
-    if (!singleProject) skip()
-
-    browser.goto(baseUrl + scoped(bootProject, '/'))
-    browser.waitForFunction(
-      `document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]') !== null`,
-    )
-    // Health resolves after the shell's first paint; before that the safe default preserves the
-    // ordinary Add-project control. Wait for the capability-driven repaint, not merely the nav.
-    browser.waitForFunction(`document.querySelector('button[aria-label="Add project"]') === null`)
-
-    // The scratch registry still holds the two sibling rows seeded in beforeAll. The process
-    // capability, rather than destructive fixture trimming, must collapse every UI consumer.
-    expect(readSharedProjects().map((project) => project.id)).toEqual([bootProject, ALPHA.id])
-    expect(browser.count('[data-slot="project-groups"]')).toBe(0)
-    expect(browser.isVisible('[data-slot="sidebar"] nav[aria-label="Main"]')).toBe(true)
-    expect(browser.count('button[aria-label="Add project"]')).toBe(0)
-
-    browser.goto(`${baseUrl}/settings/global`)
-    browser.waitForFunction(`document.querySelector('[data-slot="settings-nav"]') !== null`)
-    browser.waitForFunction(
-      `document.querySelector('[data-slot="settings-nav"] [data-section="projects"]') === null`,
-    )
-    expect(browser.count('[data-slot="settings-nav"] [data-section="projects"]')).toBe(0)
-
-    browser.goto(`${baseUrl}/settings/global/projects`)
-    browser.waitForFunction(`document.querySelector('[data-route="not-found"]') !== null`)
-    expect(browser.count('[data-route="settings-global-projects"]')).toBe(0)
-
-    browser.goto(baseUrl + scoped(bootProject, '/new'))
-    browser.waitForFunction(`document.querySelector('[data-route="new"]') !== null`)
-    expect(browser.count('[data-slot="project-pill"]')).toBe(0)
-
-    browser.screenshot(`${artifactsDir}/sidebar-single-project-constrained.png`)
   })
 })

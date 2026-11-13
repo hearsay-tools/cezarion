@@ -74,17 +74,13 @@ function project(id: 'boot' | 'demo') {
 /** Seeds everything the page reads: the route gates, the registry, and the workspace cap the
  *  concurrency select names in its "Inherit workspace (N)" option.
  *
- *  `singleProject` flips the capability the registry half of the page is gated on, and
  *  `registry` overrides the seeded entries — a folder that has gone missing, or a workspace
  *  holding only the boot project. */
-function seededClient({
-  singleProject = false,
-  registry,
-}: { singleProject?: boolean; registry?: ProjectListEntry[] } = {}) {
+function seededClient({ registry }: { registry?: ProjectListEntry[] } = {}) {
   const client = createQueryClient()
   client.setQueryData(queryKeys.health, {
     bootProject: 'boot',
-    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject },
+    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false },
   })
   client.setQueryData(workspaceQueryKeys.projects, {
     projects: registry ?? [project('boot'), project('demo')],
@@ -135,8 +131,8 @@ afterEach(() => {
 })
 
 describe('the General page', () => {
-  it('keeps task archiving available for an unregistered boot project in single-project mode', async () => {
-    renderAt('/settings', { singleProject: true, registry: [] })
+  it('keeps task archiving available for an unregistered boot project', async () => {
+    renderAt('/settings', { registry: [] })
     await waitFor(() => expect(document.querySelector('[data-route="settings"]')).not.toBeNull())
     expect(await screen.findByLabelText('Archive tasks after PRs merge')).not.toBeNull()
     expect(document.querySelector('[data-action="project-general-remove"]')).toBeNull()
@@ -229,36 +225,5 @@ describe('the General page', () => {
     // "folder not found" alone does not say what to do about it; the hint points at the Remove
     // field rendered directly below.
     expect(status.textContent).toContain('remove it below')
-  })
-
-  it('single-project mode keeps what describes the project and drops what manages the registry', async () => {
-    // `CEZ_SINGLE_PROJECT=1` makes PATCH and DELETE `/api/v1/projects/:id` answer 409 (server.ts)
-    // and drops the whole global Projects section from the nav registry. Offering the same two
-    // controls here would be a knob whose every change is refused; what the project IS stays true.
-    renderAt('/settings', { singleProject: true, registry: [project('boot')] })
-    await waitFor(() => {
-      expect(general()).not.toBeNull()
-    })
-    expect(document.querySelector('[data-slot="project-facts"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="project-location-path"]')?.textContent).toBe(BOOT_ROOT)
-    expect(screen.queryByLabelText('Max parallel tasks for cezar')).toBeNull()
-    expect(document.querySelector('[data-action="project-general-remove"]')).toBeNull()
-  })
-
-  it('sends a missing folder to the path when there is no Remove button to point at', async () => {
-    // The other half of the gate: single-project mode took the Remove field away, so the hint
-    // must not send the reader "below" to a control that is not rendered.
-    renderAt('/settings', {
-      singleProject: true,
-      registry: [{ ...project('boot'), status: 'missing' }],
-    })
-    const status = await waitFor(() => {
-      const el = document.querySelector('[data-slot="project-general-status"]')
-      expect(el).not.toBeNull()
-      return el!
-    })
-    expect(status.textContent).toContain('folder not found')
-    expect(status.textContent).toContain('restore the folder at the path above')
-    expect(status.textContent).not.toContain('remove it below')
   })
 })

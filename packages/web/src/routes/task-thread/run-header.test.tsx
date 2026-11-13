@@ -1023,7 +1023,7 @@ describe('Preview header toggle (#781)', () => {
   })
   const health = (preview: boolean) => () =>
     jsonResponse({
-      capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, tokenMetrics: true, preview },
+      capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, preview },
     })
   const withWorktree = (servers: number[] = []) =>
     run('done', { worktreePath: '/tmp/wt', previewServers: servers.map(server) })

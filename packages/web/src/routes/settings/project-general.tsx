@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 
 import { useProjects, useWorkspaceConfig } from '@/api/queries'
-import type { Capabilities, ProjectListEntry } from '@open-mercato/cezar-api-client'
+import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { Button } from '@/components/ui/button'
 import { useActiveProjectId } from '@/lib/project-router'
 import { ProjectFolderField } from './project-location'
@@ -29,15 +29,6 @@ import { ProjectWebhooksField } from './webhooks/webhooks-section'
  * Reuse over restatement: the folder row, the concurrency select, and the removal wording+dialog
  * are the same components the registry table uses. Two pages disagreeing about what "Remove"
  * does is exactly the failure this page could otherwise introduce.
- *
- * Split in two halves, because `CEZ_SINGLE_PROJECT=1` treats them differently. DESCRIBING the
- * project (folder, registry facts) stays true in every mode. MANAGING the registry — the
- * concurrency ceiling, Remove — is what single-project mode takes away: `PATCH`/`DELETE
- * /api/v1/projects/:id` both answer 409 there (server.ts), and `visibleSettingsSections` already
- * drops the whole global Projects section for the same reason. Rendering those two fields anyway
- * would offer a knob that can only fail, which is the opposite of what capabilities.ts asks for
- * ("the UI hides what the server says isn't there, and the matching endpoints refuse as defense
- * in depth").
  */
 
 /** `2026-07-20T…` → a full local date. Unlike the registry table's compact `Jul 20`, this page has
@@ -49,7 +40,7 @@ function fullDate(iso: string): string {
   return at.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilities, 'singleProject'> | undefined }) {
+export function ProjectGeneral() {
   const projectId = useActiveProjectId()
   const projects = useProjects()
   const config = useWorkspaceConfig()
@@ -78,51 +69,43 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
   // No registry entry for this URL (an unscoped mount, or an id the registry does not have):
   // there is nothing true to say about a project that isn't one.
   if (!registry || !project) return null
-  // See the header comment: single-project mode keeps the description, drops the management.
-  const managesRegistry = capabilities?.singleProject !== true
 
   return (
     <div data-slot="project-general" className="flex w-full flex-col gap-5">
       <section className="flex flex-col gap-5 rounded-lg border border-border bg-card p-5 [&_select]:min-h-11 [&_select]:w-full">
       <h2 className="text-lg font-semibold">General</h2>
       <ProjectFolderField />
-      <ProjectFacts project={project} canRemove={managesRegistry} />
-      {managesRegistry ? (
-        <>
-          <SettingsField
-            title="Max parallel tasks"
-            hint={
-              config.data
-                ? `The workspace limit (${config.data.resources.maxParallel}) still applies as an overall ceiling.`
-                : "How many of this project's tasks may run at once. The workspace limit still applies as an overall ceiling."
-            }
-          >
-            {config.data ? (
-              <MaxParallelSelect project={project} workspaceMax={config.data.resources.maxParallel} />
-            ) : (
-              // The select's "Inherit workspace (N)" option has to name N, and guessing it would be
-              // the one thing this control must not do.
-              <p className="text-[13px] text-soft-foreground">Loading the workspace limit…</p>
-            )}
-          </SettingsField>
-          <ProjectWebhooksField key={project.id} project={project} />
-        </>
-      ) : null}
+      <ProjectFacts project={project} />
+      <SettingsField
+        title="Max parallel tasks"
+        hint={
+          config.data
+            ? `The workspace limit (${config.data.resources.maxParallel}) still applies as an overall ceiling.`
+            : "How many of this project's tasks may run at once. The workspace limit still applies as an overall ceiling."
+        }
+      >
+        {config.data ? (
+          <MaxParallelSelect project={project} workspaceMax={config.data.resources.maxParallel} />
+        ) : (
+          // The select's "Inherit workspace (N)" option has to name N, and guessing it would be
+          // the one thing this control must not do.
+          <p className="text-[13px] text-soft-foreground">Loading the workspace limit…</p>
+        )}
+      </SettingsField>
+      <ProjectWebhooksField key={project.id} project={project} />
       </section>
-      {managesRegistry ? <section className="rounded-lg border border-border bg-card p-5"><RemoveProject project={project} bootProject={registry.bootProject} /></section> : null}
+      <section className="rounded-lg border border-border bg-card p-5"><RemoveProject project={project} bootProject={registry.bootProject} /></section>
     </div>
   )
 }
 
-/** The registry entry, read out: what Squawk probed about this folder the last time it looked.
- *  `canRemove` is whether the Remove field is rendered below — the missing-folder hint points at
- *  it, and must not point at a field single-project mode took away. */
-function ProjectFacts({ project, canRemove }: { project: ProjectListEntry; canRemove: boolean }) {
+/** The registry entry, read out: what Squawk probed about this folder the last time it looked. */
+function ProjectFacts({ project }: { project: ProjectListEntry }) {
   return <dl data-slot="project-facts" className="grid grid-cols-1 gap-4 text-[13px] sm:grid-cols-3">
     <div><dt className="text-[11px] text-muted-foreground">Project</dt><dd className="mt-1 font-medium">{project.name}</dd></div>
     <div><dt className="text-[11px] text-muted-foreground">Branch</dt><dd className="mt-1 break-all">{project.branch ?? '—'}</dd></div>
     <div><dt className="text-[11px] text-muted-foreground">Status</dt><dd data-slot="project-general-status" className={project.status === 'missing' ? 'mt-1 text-danger' : 'mt-1'}>
-      {STATUS_LABEL[project.status]}{project.status === 'missing' ? canRemove ? ' — remove it below, or restore the folder' : ' — restore the folder at the path above' : null}
+      {STATUS_LABEL[project.status]}{project.status === 'missing' ? ' — remove it below, or restore the folder' : null}
     </dd></div>
     <div><dt className="text-[11px] text-muted-foreground">Added</dt><dd className="mt-1">{fullDate(project.addedAt)}<span className="text-soft-foreground">{project.source === 'checkout' ? ' · cloned from GitHub' : ' · opened locally'}</span></dd></div>
     <div><dt className="text-[11px] text-muted-foreground">Last opened</dt><dd className="mt-1">{fullDate(project.lastOpenedAt)}</dd></div>

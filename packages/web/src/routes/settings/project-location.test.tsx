@@ -49,7 +49,7 @@ function seededClient() {
   const client = createQueryClient()
   client.setQueryData(queryKeys.health, {
     bootProject: 'boot',
-    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, automations: false },
+    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, automations: false },
   })
   client.setQueryData(workspaceQueryKeys.projects, {
     projects: [

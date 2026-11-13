@@ -39,7 +39,6 @@ export const capabilitiesSchema = z.object({
   settingsAdmin: z.boolean(),
   /** `true` when `settingsAdmin` comes from the host switch on a remote cockpit, not from a local one. */
   remoteSettingsAdmin: z.boolean(),
-  singleProject: z.boolean(),
   /**
    * `true` by default; only `CEZ_AUTOMATIONS=0` disables automations. When disabled,
    * the whole feature is absent: no `Automations` nav item anywhere it is rendered, the

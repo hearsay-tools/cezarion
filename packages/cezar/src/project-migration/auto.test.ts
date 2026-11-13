@@ -271,7 +271,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const ownership = new CockpitOwnership();
     owners.push(ownership);
     const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
-      listProjects: () => listProjects(undefined, testHome()) });
+      listProjects: () => listProjects(testHome()) });
     const bootStore = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const server = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership,
@@ -299,7 +299,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const bootId = (await registerProject(boot, undefined, testHome())).id!;
     const ownership = new CockpitOwnership();
     owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, listProjects: () => listProjects(undefined, testHome()) });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, listProjects: () => listProjects(testHome()) });
     // The boot project's store lives outside it, so the boot project holds no legacy state to move:
     // the legacy project is the preparation's last real work.
     const bootData = mkdtempSync(join(realpathSync(tmpdir()), 'cez-auto-move-boot-data-'));

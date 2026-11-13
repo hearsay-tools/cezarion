@@ -3,7 +3,6 @@ import { BellIcon, BotIcon, FoldersIcon, GaugeIcon, KeyRoundIcon, PaletteIcon } 
 import { BookmarkIcon, FileCogIcon, FileTextIcon, FolderGit2Icon, KeyboardIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 
-import type { Capabilities } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { AccountsSection } from './accounts-section'
 import { AgentConfigSection } from './agent-config-section'
@@ -187,14 +186,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
  * entirely, and so does everything belonging to the OTHER scope. The two areas are rendered by
  * the same shell, so this filter is the only thing keeping them apart.
  */
-export function visibleSettingsSections(
-  scope: SettingsScope,
-  capabilities?: Pick<Capabilities, 'singleProject'>,
-): SettingsSection[] {
-  return SETTINGS_SECTIONS.filter(
-    (section) =>
-      !section.hidden &&
-      section.scope === scope &&
-      !(capabilities?.singleProject === true && section.id === 'projects'),
-  )
+export function visibleSettingsSections(scope: SettingsScope): SettingsSection[] {
+  return SETTINGS_SECTIONS.filter((section) => !section.hidden && section.scope === scope)
 }

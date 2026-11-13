@@ -2,7 +2,7 @@ import * as React from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
-import { useHealth, useProjects, useRunsIndex } from '@/api/queries'
+import { useProjects, useRunsIndex } from '@/api/queries'
 import { runsIndexSync } from '@/api/runs-index-sync'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { canPersistProjectOrder, orderProjects } from '@/lib/project-order'
@@ -14,8 +14,6 @@ export type WorkspaceSignals = {
   projects: readonly ProjectListEntry[]
   /** Null while the runs index has not loaded: activity is then unknown, not idle. */
   signals: ReadonlyMap<string, ProjectSignal> | null
-  /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`). Never inferred from the project count. */
-  singleProject: boolean
   /** The workspace ui-state has loaded, so a reorder can be written without dropping its siblings,
    *  and the registry fits the stored order whole (`canPersistProjectOrder`). */
   canReorder: boolean
@@ -43,7 +41,6 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   const canReorder = uiStateLoaded && registered !== undefined && canPersistProjectOrder(registered.length)
   const projects = React.useMemo(() => (registered ? orderProjects(registered, order) : undefined), [registered, order])
   const index = useRunsIndex().data
-  const singleProject = useHealth().data?.capabilities.singleProject === true
   const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
 
   // The stream patches the index row by row, and none of its frames fire when the registry
@@ -69,7 +66,7 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   }, [queryClient, registry])
 
   return React.useMemo(
-    () => (projects ? { projects, signals, singleProject, canReorder, onReorder: setOrder } : null),
-    [projects, signals, singleProject, canReorder, setOrder],
+    () => (projects ? { projects, signals, canReorder, onReorder: setOrder } : null),
+    [projects, signals, canReorder, setOrder],
   )
 }

@@ -30,7 +30,7 @@ export default defineConfig({
     // One browser session, one server: parallel specs would fight over both.
     fileParallelism: false,
     sequence: { sequencer: CliCockpitTestSequencer },
-    // Pins the shared env's workspace registry to the single-project shape before any spec runs,
+    // Pins the shared env's workspace registry to the one-project shape before any spec runs,
     // and restores it afterwards — otherwise whatever the operator last registered in the
     // gitignored `.ai/qa/cez-home` decides whether the sidebar renders its flat or its grouped
     // shell, and every spec asserting flat-shell selectors becomes a coin flip. See the module.

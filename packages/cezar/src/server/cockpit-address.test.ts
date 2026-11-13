@@ -20,7 +20,7 @@ import { createRunManager } from './run-manager.testkit.ts';
  * cockpit and never probes ports. A project built after listening gets it too.
  */
 describe('startServer cockpit address', () => {
-  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN, warmup: process.env.CEZ_PROJECT_WARMUP, single: process.env.CEZ_SINGLE_PROJECT };
+  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN, warmup: process.env.CEZ_PROJECT_WARMUP };
   let home: string;
   let bootRoot: string;
   let otherRoot: string;
@@ -33,14 +33,13 @@ describe('startServer cockpit address', () => {
     useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_PROJECT_WARMUP;
-    delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     for (const dir of [home, bootRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    for (const [key, value] of [['CEZ_HOME', saved.home], ['CEZ_DRY_RUN', saved.dryRun], ['CEZ_PROJECT_WARMUP', saved.warmup], ['CEZ_SINGLE_PROJECT', saved.single]] as const) {
+    for (const [key, value] of [['CEZ_HOME', saved.home], ['CEZ_DRY_RUN', saved.dryRun], ['CEZ_PROJECT_WARMUP', saved.warmup]] as const) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
@@ -50,7 +49,7 @@ describe('startServer cockpit address', () => {
     const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
     const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome())});
     const setCockpitAddress = vi.fn();
     const server = startServer({ home: testHome(),
       repoRoot: bootRoot,

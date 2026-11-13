@@ -28,8 +28,6 @@ export type MobileProjectNav = {
   projects: readonly ProjectListEntry[]
   /** Null while the runs index has not loaded: activity is then unknown, not idle. */
   signals: ReadonlyMap<string, ProjectSignal> | null
-  /** `capabilities.singleProject`: All projects and Add project go, as on the rail. */
-  singleProject: boolean
 }
 
 /** Every project but the current one, summed. Null while activity is unknown. */
@@ -168,21 +166,19 @@ export function DrawerProjects({ nav, currentProjectId, onNavigate }: {
           />
         ))}
       </div>
-      {!nav.singleProject ? (
-        <div data-slot="drawer-workspace" className="flex flex-col gap-[2px] border-t border-border px-[8px] py-[8px]">
-          <RouterLink to="/tasks" onClick={onNavigate} data-slot="drawer-all-projects" className={ROW_CLASS}>
-            <LayersIcon aria-hidden="true" />
-            All projects · task overview
-          </RouterLink>
-          <AddProjectMenu
-            origin="mobile"
-            icon={FolderPlusIcon}
-            iconClassName="size-[18px]"
-            label="Add project"
-            triggerClassName={cn(ROW_CLASS, 'h-[48px] justify-start p-0 px-[10px] text-foreground')}
-          />
-        </div>
-      ) : null}
+      <div data-slot="drawer-workspace" className="flex flex-col gap-[2px] border-t border-border px-[8px] py-[8px]">
+        <RouterLink to="/tasks" onClick={onNavigate} data-slot="drawer-all-projects" className={ROW_CLASS}>
+          <LayersIcon aria-hidden="true" />
+          All projects · task overview
+        </RouterLink>
+        <AddProjectMenu
+          origin="mobile"
+          icon={FolderPlusIcon}
+          iconClassName="size-[18px]"
+          label="Add project"
+          triggerClassName={cn(ROW_CLASS, 'h-[48px] justify-start p-0 px-[10px] text-foreground')}
+        />
+      </div>
     </div>
   )
 }

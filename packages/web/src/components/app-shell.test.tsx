@@ -300,13 +300,6 @@ describe('AppShell', () => {
       renderShell()
       expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
     })
-
-    it('is omitted in single-project mode while normal navigation remains', () => {
-      renderShell('/')
-      expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
-      expect(within(nav()).getByRole('link', { name: 'Tasks' })).toBeTruthy()
-      expect(within(sidebar()).getByRole('link', { name: /New task/ })).toBeTruthy()
-    })
   })
 
   describe('sidebar search and footer chrome', () => {

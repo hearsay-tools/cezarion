@@ -678,7 +678,7 @@ export function createApp(deps: ServerDeps) {
   const { providerStatus, providerActionError, invalidateHostModels } =
     createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
-  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot, bootProjectId, bindHost, home: deps.home });
+  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot, bootProjectId, home: deps.home });
   const { resolveBootProject } = workspaceProjects;
   // Health's workspace garnish: id+name ONLY — never `root` (#431, see the
   // health route). Reads only the registry file; no per-root status probes,
@@ -690,11 +690,10 @@ export function createApp(deps: ServerDeps) {
     try {
       const registry = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projects;
       const bootProject = await resolveBootProject(registry);
-      const visible = await workspaceProjects.visibleProjects(registry, bootProject);
       return {
         // Explicit picks, not a spread: the registry schema passes unknown
         // keys through, and `root` must never ride along onto health.
-        projects: visible.map((p) => ({
+        projects: registry.map((p) => ({
           id: p.id,
           name: p.name || basename(p.root),
         })),
@@ -707,9 +706,6 @@ export function createApp(deps: ServerDeps) {
   // Hosted-mode gate (spec §"Deployment modes") — read per request so
   // CEZ_REMOTE flips take effect live (and tests can toggle it).
   const capabilities = () => resolveCapabilities(process.env, bindHost, deps.squawkPort?.(), deps.home);
-  const singleProjectRefusal = (
-    action: 'adding projects' | 'editing projects' | 'removing projects' | 'folder browsing',
-  ) => ({ error: `single-project mode is enabled; ${action} is disabled` });
   // Inbox live updates (spec 007). Opt-in (#471): no capability, no watcher —
   // and since step 2.3 the per-dataDir watch is created lazily by the first
   // SSE subscription (and torn down with the last), nothing to start here.
@@ -725,7 +721,7 @@ export function createApp(deps: ServerDeps) {
   // Non-boot projects build lazily on first scoped request; their managers
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
-    listProjects: () => workspaceProjects.listVisibleProjects(),
+    listProjects: () => workspaceProjects.listProjects(),
     squawkPort: deps.squawkPort,
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
@@ -784,14 +780,13 @@ export function createApp(deps: ServerDeps) {
     | { error: string; status: 404 | 409 };
   /**
    * Read-modify-write one project's webhook list (hearsay-tools/cezarion#1576), with the PATCH
-   * route's guards: single-project mode refuses, an unknown project 404s without a write, and a
+   * route's guards: an unknown project 404s without a write, and a
    * failed write (a read-only home) answers 500 having persisted nothing.
    */
   const editProjectWebhooks = async (
     raw: string,
     edit: (webhooks: StoredProjectWebhook[]) => WebhookEdit,
   ): Promise<{ body: ProjectWebhookResponse } | { error: string; status: 400 | 404 | 409 | 500 }> => {
-    if (capabilities().singleProject) return { ...singleProjectRefusal('editing projects'), status: 409 };
     const resolved = await workspaceProjects.resolveProjectId(raw);
     if ('error' in resolved) return { ...resolved, status: 404 };
     const { id } = resolved;
@@ -1998,7 +1993,7 @@ export function createApp(deps: ServerDeps) {
       let projectsDir = defaultWorkspaceConfig().projectsDir;
       try {
         projectsDir = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projectsDir;
-        projects = await workspaceProjects.listVisibleProjects();
+        projects = await workspaceProjects.listProjects();
       } catch {
         // unreadable workspace — degrade to the empty registry + defaults
       }
@@ -2018,9 +2013,6 @@ export function createApp(deps: ServerDeps) {
     })
 
     .delete('/projects/:projectId', async (c) => {
-      if (capabilities().singleProject) {
-        return c.json(singleProjectRefusal('removing projects'), 409);
-      }
       const raw = c.req.param('projectId');
       // Same gate the scoped-route resolver applies, and the same 404 wording —
       // a malformed id is an unknown project, not a validation essay.
@@ -2099,9 +2091,6 @@ export function createApp(deps: ServerDeps) {
     // `~/.cezar/agent-accounts.json` beside the accounts it names, so a Squawk version that has
     // never heard of accounts cannot drop it (see workspace/agent-accounts.ts).
     .patch('/projects/:projectId', jsonZodValidator(updateProjectInputSchema), async (c) => {
-      if (capabilities().singleProject) {
-        return c.json(singleProjectRefusal('editing projects'), 409);
-      }
       const raw = c.req.param('projectId');
       // Same gate + 404 wording as DELETE: a malformed id is an unknown project.
       const resolved = await workspaceProjects.resolveProjectId(raw);
@@ -2174,11 +2163,7 @@ export function createApp(deps: ServerDeps) {
 
     // "Send test" (#589): one `task.test` delivery to the STORED webhook, now, with the timeout
     // the real deliveries use and no retries — the settings page wants the answer, not a queue.
-    // Refused in single-project mode like every other registry edit route.
     .post('/projects/:projectId/webhook/test', async (c) => {
-      if (capabilities().singleProject) {
-        return c.json(singleProjectRefusal('editing projects'), 409);
-      }
       const raw = c.req.param('projectId');
       const entry = await workspaceProjects.resolveRegistryEntry(raw);
       if (!entry) return c.json({ error: `unknown project: ${raw}` }, 404);
@@ -2191,8 +2176,8 @@ export function createApp(deps: ServerDeps) {
 
     // ---- project webhooks (hearsay-tools/cezarion#1576) ----
     // Several webhooks per project, each with its own task-state selection and an explicit
-    // "Expose to agents" switch. Registry edits like the PATCH above: refused in single-project
-    // mode, 404 on an unknown project or webhook, and a write that names nothing else leaves the
+    // "Expose to agents" switch. Registry edits like the PATCH above:
+    // 404 on an unknown project or webhook, and a write that names nothing else leaves the
     // rest of the entry alone. The first write stores `webhooks` and drops the old `webhook` key.
     .post('/projects/:projectId/webhooks', jsonZodValidator(createProjectWebhookInputSchema), async (c) => {
       const input = c.req.valid('json');
@@ -2237,9 +2222,6 @@ export function createApp(deps: ServerDeps) {
 
     // "Send test" for one webhook: one `task.test` delivery, now, no retries.
     .post('/projects/:projectId/webhooks/:webhookId/test', paramZodValidator(projectWebhookParamsSchema), async (c) => {
-      if (capabilities().singleProject) {
-        return c.json(singleProjectRefusal('editing projects'), 409);
-      }
       const { projectId, webhookId } = c.req.valid('param');
       const entry = await workspaceProjects.resolveRegistryEntry(projectId);
       if (!entry) return c.json({ error: `unknown project: ${projectId}` }, 404);
@@ -2252,9 +2234,6 @@ export function createApp(deps: ServerDeps) {
     .get('/projects/checkout/:checkoutId/progress', paramZodValidator(checkoutProgressParamsSchema), c => c.json({ progress: checkoutProgress.get(c.req.valid('param').checkoutId) }))
 
     .post('/projects/checkout', jsonZodValidator(() => checkoutSchema, { message: 'url must be a GitHub repository' }), async (c) => {
-      if (capabilities().singleProject) {
-        return c.json(singleProjectRefusal('adding projects'), 409);
-      }
       const parsed = { data: c.req.valid('json') };
       const { url, name, checkoutId } = parsed.data;
       const result = await checkoutRepo({
@@ -2308,9 +2287,6 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/projects/create', jsonZodValidator(() => createProjectInputSchema, { message: 'project name must be a valid GitHub repository name — letters, digits, ".", "-" and "_" only, no spaces' }), async (c) => {
-      if (capabilities().singleProject) {
-        return c.json(singleProjectRefusal('adding projects'), 409);
-      }
       const { name, github, checkoutId } = c.req.valid('json');
       if (github && !capabilities().localHandoff) {
         return c.json({ error: HOSTED_GITHUB_CREATE_REFUSAL }, 409);
@@ -2398,9 +2374,6 @@ export function createApp(deps: ServerDeps) {
     | { status: 200; body: RegisterProjectResponse }
     | { status: 400 | 409 | 500; body: RegisterProjectResponse | { error: string } }
   > => {
-    if (capabilities().singleProject) {
-      return { status: 409, body: singleProjectRefusal('adding projects') };
-    }
     // `~` is expanded for the same reason `/api/fs/browse` expands it: the
     // dialog hands back absolute paths, but a hand-written body (curl, a
     // future CLI) spells home the way a shell does.
@@ -2678,9 +2651,6 @@ export function createApp(deps: ServerDeps) {
       '/fs/browse',
       queryZodValidator(browseQuerySchema),
       async (c) => {
-        if (capabilities().singleProject) {
-          return c.json(singleProjectRefusal('folder browsing'), 409);
-        }
         const query = c.req.valid('query');
         const root = resolveBrowseRoot(await workspaceBrowseRoot());
         const result = await browseDirectory({
@@ -4804,7 +4774,7 @@ export function createApp(deps: ServerDeps) {
   }>> => {
     let projects: ProjectListEntry[] = [];
     try {
-      projects = await workspaceProjects.listVisibleProjects();
+      projects = await workspaceProjects.listProjects();
     } catch {
       // unreadable workspace — no rows, never a 500. The palette degrades to the active
       // project's own run list, which it holds either way.

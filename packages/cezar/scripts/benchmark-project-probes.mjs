@@ -51,7 +51,7 @@ async function serveFixture() {
     return (Number(fields[13]) + Number(fields[14])) * 1000 / hz;
   };
   const server = createServer((_request, response) => {
-    listProjects(undefined, home).then((projects) => {
+    listProjects(home).then((projects) => {
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(projects));
     }).catch((error) => { response.statusCode = 500; response.end(String(error)); });
   });

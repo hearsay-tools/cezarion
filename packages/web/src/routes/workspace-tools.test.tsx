@@ -3,15 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceToolsRoute } from './workspace-tools'
 
-const mocks = vi.hoisted(() => ({ refetch: vi.fn(), copy: vi.fn(), singleProject: false, allAvailable: false }))
+const mocks = vi.hoisted(() => ({ refetch: vi.fn(), copy: vi.fn(), allAvailable: false }))
 vi.mock('@/api/queries', () => ({
-  useHealth: () => ({ data: { version: '1.2.3', repoRoot: '/local/repo', checks: [{ name: 'git', available: true, version: '2.50' }, mocks.allAvailable ? { name: 'codex', available: true, version: '0.9' } : { name: 'codex', available: false, hint: 'Install the Codex CLI' }], capabilities: { singleProject: mocks.singleProject } }, refetch: mocks.refetch, isFetching: false, isError: false }),
+  useHealth: () => ({ data: { version: '1.2.3', repoRoot: '/local/repo', checks: [{ name: 'git', available: true, version: '2.50' }, mocks.allAvailable ? { name: 'codex', available: true, version: '0.9' } : { name: 'codex', available: false, hint: 'Install the Codex CLI' }], capabilities: {} }, refetch: mocks.refetch, isFetching: false, isError: false }),
   useProjects: () => ({ data: { projectsDir: '/local/projects' } }),
 }))
 vi.mock('@/components/add-project-dialog', () => ({ AddProjectDialog: () => <div role="dialog" aria-label="Choose local folder" /> }))
 vi.mock('@/components/clone-project-dialog', () => ({ CloneProjectDialog: () => <div role="dialog" aria-label="Clone repository" /> }))
 vi.mock('@/components/create-project-dialog', () => ({ CreateProjectDialog: () => <div role="dialog" aria-label="New project" /> }))
-afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.singleProject = false; mocks.allAvailable = false; vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.allAvailable = false; vi.unstubAllGlobals() })
 
 describe('Workspace tools', () => {
   it('opens both existing project flows from the shared workspace page', () => {
@@ -37,13 +37,6 @@ describe('Workspace tools', () => {
     await waitFor(() => expect(mocks.copy).toHaveBeenCalledTimes(1))
     expect(JSON.parse(mocks.copy.mock.calls[0]![0])).toEqual({ version: '1.2.3', checks: [{ name: 'git', available: true, version: '2.50' }, { name: 'codex', available: false, hint: 'Install the Codex CLI' }] })
     expect(screen.getByText('Not installed')).toBeTruthy()
-  })
-
-  it('respects single-project mode without hiding diagnostics', () => {
-    mocks.singleProject = true
-    render(<MemoryRouter><WorkspaceToolsRoute /></MemoryRouter>)
-    expect(screen.queryByRole('button', { name: 'Clone from GitHub' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Recheck tools' })).toBeTruthy()
   })
 
   it('says whether each tool is installed and explains the missing one', () => {

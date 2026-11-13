@@ -29,7 +29,7 @@ const DAMAGED = 'not a database '.repeat(100);
 const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 describe('a project whose run store cannot be opened', () => {
-  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN, single: process.env.CEZ_SINGLE_PROJECT };
+  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN };
   let home: string;
   let bootRoot: string;
   let otherRoot: string;
@@ -50,17 +50,16 @@ describe('a project whose run store cannot be opened', () => {
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-unavailable-other-'));
     useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
-    delete process.env.CEZ_SINGLE_PROJECT;
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
-    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome())});
   });
 
   afterEach(() => {
     contexts.disposeAll();
     for (const store of stores.splice(0)) store.close();
     for (const dir of [home, bootRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    for (const [key, value] of [['CEZ_HOME', saved.home], ['CEZ_DRY_RUN', saved.dryRun], ['CEZ_SINGLE_PROJECT', saved.single]] as const) {
+    for (const [key, value] of [['CEZ_HOME', saved.home], ['CEZ_DRY_RUN', saved.dryRun]] as const) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }

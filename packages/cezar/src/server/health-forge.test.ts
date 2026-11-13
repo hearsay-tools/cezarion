@@ -25,7 +25,6 @@ interface HealthBody {
   capabilities: {
     localHandoff: boolean;
     followups: boolean;
-    singleProject: boolean;
     automations: boolean;
     tokenMetrics: boolean;
     tokenUsageMetrics: boolean;
@@ -38,7 +37,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
   let store: RunStore;
   const savedRemote = process.env.CEZ_REMOTE;
   const savedFollowups = process.env.CEZ_FOLLOWUPS;
-  const savedSingleProject = process.env.CEZ_SINGLE_PROJECT;
   const savedAutomations = process.env.CEZ_AUTOMATIONS;
   const savedHideTokenMetrics = process.env.CEZ_HIDE_TOKEN_METRICS;
   const savedHideTokenUsage = process.env.CEZ_HIDE_TOKEN_USAGE;
@@ -52,7 +50,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     // #471: the inbox is opt-in, so an ambient CEZ_FOLLOWUPS on the dev box
     // must not decide what these assertions see.
     delete process.env.CEZ_FOLLOWUPS;
-    delete process.env.CEZ_SINGLE_PROJECT;
     // #801: clear any ambient automation opt-out so the suite sees the default.
     delete process.env.CEZ_AUTOMATIONS;
     delete process.env.CEZ_HIDE_TOKEN_METRICS;
@@ -70,8 +67,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
     else process.env.CEZ_FOLLOWUPS = savedFollowups;
-    if (savedSingleProject === undefined) delete process.env.CEZ_SINGLE_PROJECT;
-    else process.env.CEZ_SINGLE_PROJECT = savedSingleProject;
     if (savedAutomations === undefined) delete process.env.CEZ_AUTOMATIONS;
     else process.env.CEZ_AUTOMATIONS = savedAutomations;
     if (savedHideTokenMetrics === undefined) delete process.env.CEZ_HIDE_TOKEN_METRICS;
@@ -107,7 +102,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       localHandoff: true,
       settingsAdmin: true,
       remoteSettingsAdmin: false,
-      singleProject: false,
       automations: true,
       preview: false,
       voice: false,
@@ -159,7 +153,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       localHandoff: false,
       settingsAdmin: false,
       remoteSettingsAdmin: false,
-      singleProject: false,
       automations: true,
       preview: false,
       voice: false,
@@ -190,7 +183,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       localHandoff: false,
       settingsAdmin: false,
       remoteSettingsAdmin: false,
-      singleProject: false,
       automations: true,
       preview: false,
       voice: false,
@@ -206,8 +198,6 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       localHandoff: true,
 settingsAdmin: true,
 remoteSettingsAdmin: false,
-
-      singleProject: false,
       automations: true,
       preview: false,
       voice: false,
@@ -234,7 +224,6 @@ remoteSettingsAdmin: false,
       localHandoff: true,
       settingsAdmin: true,
       remoteSettingsAdmin: false,
-      singleProject: false,
       automations: true,
       preview: false,
       voice: false,
@@ -250,7 +239,6 @@ remoteSettingsAdmin: false,
       localHandoff: true,
       settingsAdmin: true,
       remoteSettingsAdmin: false,
-      singleProject: false,
       automations: true,
       preview: false,
       voice: false,

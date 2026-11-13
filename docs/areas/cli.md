@@ -29,8 +29,8 @@ and preparation or its first CLI write records the same Git marker as a complete
 Every CLI operation that touches project data checks the migration fence
 ([project routes](project-routes.md#project-migration-fence)) and exits 1 with a
 one-line `ProjectMigrationFencedError` message. `serve` checks in its ownership claim
-before the listener and before any directory is created. `run`, `init` and a
-single-project `projects` listing check in `cli-dispatch.ts` (`admitProjectCommand`);
+before the listener and before any directory is created. `run` and `init` check in
+`cli-dispatch.ts` (`admitProjectCommand`);
 Every CLI write that follows an await re-checks admission right before it runs
 (`admittedWrite`): `init` before its directories, each starter file and `.gitignore`; the
 headless store open before `.gitignore` and the open (later store writes pass the store's
@@ -42,7 +42,7 @@ the run lookup of a fenced project. `task`, `automation`, `webhook`, `worker`,
 cockpit, whose project routes refuse. `backup`, the managed install commands and
 `server-*` touch no project data. Git excludes also cover `.ai/squawk-migration.lock*`.
 
-Before that check, `serve`, `run`, `init`, the single-project `projects` listing,
+Before that check, `serve`, `run`, `init`,
 `artifact publish` and `versions` finish an unfinished migration journal
 ([early recovery](project-routes.md#project-migration-command-and-early-recovery)); a
 journal that cannot finish ends the command with its cause, exit 1. No CLI write targets a

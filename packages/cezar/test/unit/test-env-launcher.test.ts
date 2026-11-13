@@ -504,7 +504,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   const fixture = makeFixture(false);
   const env = {
     ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1',
-    CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '1', CEZ_FOLLOWUPS: '1', CEZ_SINGLE_PROJECT: '1', CEZ_TASK_ID: 'ambient',
+    CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '1', CEZ_FOLLOWUPS: '1', CEZ_TASK_ID: 'ambient',
   };
   prebuildE2e(fixture, env);
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
@@ -520,7 +520,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   boot();
   assert.deepEqual(appEnv(), ['CEZ_DRY_RUN=1']);
   const plain = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as { environment: unknown };
-  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home', serverUserProfile: '.ai/qa/server-home' });
+  assert.deepEqual(plain.environment, { serverEnv: 'none', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home', serverUserProfile: '.ai/qa/server-home' });
 
   const opted = boot('--server-env=CEZ_FOLLOWUPS=1', '--server-env=CEZ_AUTOMATIONS=1');
   assert.match(opted.stdout, /TEST_ENV_REUSED=0/);
@@ -529,11 +529,6 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   assert.match(descriptor(fixture.root).app.startCommand, /^CEZ_AUTOMATIONS=1 CEZ_FOLLOWUPS=1 CEZ_DRY_RUN=1 /);
   // Order does not matter; the same set reuses the running server.
   assert.match(boot('--server-env=CEZ_AUTOMATIONS=1', '--server-env=CEZ_FOLLOWUPS=1').stdout, /TEST_ENV_REUSED=1/);
-
-  const single = boot('--server-env=CEZ_SINGLE_PROJECT=1');
-  assert.match(single.stdout, /TEST_ENV_REUSED=0/);
-  assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment,
-    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home', serverUserProfile: '.ai/qa/server-home' });
 
   for (const bad of [
     ['--server-env=CEZ_HOME=/elsewhere'], ['--server-env=PATH=/x'], ['--server-env=CEZ_X=a b'],

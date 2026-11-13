@@ -125,7 +125,7 @@ function health(forgeAvailable: boolean, automations = false): HealthResponse {
     checks: [],
     defaultRunner: 'claude',
     forge: forgeAvailable ? { kind: 'github', available: true } : null,
-    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations, preview: false, voice: false },
+    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, automations, preview: false, voice: false },
   }
 }
 
@@ -515,7 +515,7 @@ describe('Projects group', () => {
     localStorage.clear()
   })
 
-  it('renders no Projects group in a single-project workspace — there is nowhere to switch to', async () => {
+  it('renders no Projects group in a one-project workspace — there is nowhere to switch to', async () => {
     renderPalette({ projects: [project({ id: 'cezar' })], entry: '/p/cezar/' })
     openWith({ metaKey: true })
     await screen.findByRole('dialog')
@@ -979,7 +979,7 @@ describe('Tasks across projects', () => {
     expect(location()).toBe('/p/cezar/tasks/r-boot')
   })
 
-  it('asks for no index at all in a single-project workspace', async () => {
+  it('asks for no index at all in a one-project workspace', async () => {
     renderPalette({
       projects: [project({ id: 'cezar' })],
       entry: '/p/cezar/',
@@ -1336,7 +1336,7 @@ describe('server search past the window', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="shop-old"]')).not.toBeNull())
   })
 
-  it('searches the server in a single-project cockpit too', async () => {
+  it('searches the server in a one-project cockpit too', async () => {
     renderPalette({
       projects: [project({ id: 'cezar' })],
       extraRoutes: {

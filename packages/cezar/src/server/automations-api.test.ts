@@ -914,7 +914,7 @@ describe('GitHub automation API', () => {
     writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
     const startRun = vi.fn();
     const fired = vi.spyOn(ScheduleRunner.prototype, 'fire');
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome()),
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome()),
       prepareManager: ({ store: projectStore, manager }) => {
         const launch = vi.spyOn(manager, 'startRun').mockImplementation((workflow, input) => {
           startRun();

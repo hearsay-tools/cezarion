@@ -12,7 +12,6 @@ function fixture(args: string[] = []) {
     process: processStub,
     console: { log: vi.fn(), error: vi.fn() },
     parseArgs: vi.fn(defaultCliDeps.parseArgs),
-    productEnv: vi.fn(() => undefined as string | undefined),
     operatorHomeEntry: vi.fn(defaultCliDeps.operatorHomeEntry),
     resolveCliHome: vi.fn(() => home),
     prepareOperatorHome: vi.fn(() => home),
@@ -24,7 +23,6 @@ function fixture(args: string[] = []) {
     serverCommand: vi.fn().mockResolvedValue(undefined),
     runCommand: vi.fn().mockResolvedValue(undefined),
     initCommand: vi.fn(),
-    initWorkspace: vi.fn().mockResolvedValue('boot-id'),
   };
   const run = () => main(deps as unknown as CliDeps);
   return { home, processStub, deps, run };
@@ -109,28 +107,12 @@ describe('main dispatch', () => {
     expect(f.deps.initCommand).toHaveBeenCalledExactlyOnceWith('/work');
   });
 
-  it.each([{ args: [] }, { args: ['list'] }])('registers the boot project for a single-project listing: $args', async ({ args: projectArgs }) => {
+  it.each([{ args: [] }, { args: ['list'] }, { args: ['add', '/other'] }, { args: ['remove', 'project-id'] }])('forwards projects $args to the registry command', async ({ args: projectArgs }) => {
     const f = fixture(['projects', ...projectArgs]);
-    f.deps.productEnv.mockReturnValue('1');
     f.deps.runProjectsCommand.mockResolvedValue(3);
     await f.run();
-    expect(f.deps.productEnv).toHaveBeenCalledWith('SINGLE_PROJECT');
-    expect(f.deps.initWorkspace).toHaveBeenCalledWith('/work', f.home);
-    expect(f.deps.initWorkspace).toHaveBeenCalledBefore(f.deps.runProjectsCommand);
-    expect(f.deps.runProjectsCommand).toHaveBeenCalledWith(projectArgs, { defaultRoot: '/work', bootProjectId: 'boot-id', home: f.home });
+    expect(f.deps.runProjectsCommand).toHaveBeenCalledWith(projectArgs, { defaultRoot: '/work', home: f.home });
     expect(f.processStub.exitCode).toBe(3);
-  });
-
-  it.each([
-    { mode: undefined, args: [] },
-    { mode: '1', args: ['add', '/other'] },
-    { mode: '1', args: ['remove', 'project-id'] },
-  ])('leaves registration to normal guards for projects $args in mode $mode', async ({ mode, args }) => {
-    const f = fixture(['projects', ...args]);
-    f.deps.productEnv.mockReturnValue(mode);
-    await f.run();
-    expect(f.deps.initWorkspace).not.toHaveBeenCalled();
-    expect(f.deps.runProjectsCommand).toHaveBeenCalledWith(args, { defaultRoot: '/work', bootProjectId: undefined, home: f.home });
   });
 
   it('forwards all server-install flags and distinguishes an omitted port from its default', async () => {

@@ -55,7 +55,7 @@ describe('GET /api/v1/workspace/events', () => {
     }
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome())});
     bus = new WorkspaceEventBus();
     bootId = (await registerProject(repoRoot, undefined, testHome())).id;
     app = createApp({ home: testHome(),

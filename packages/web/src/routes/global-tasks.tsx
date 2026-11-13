@@ -198,7 +198,7 @@ export function GlobalTasksRoute() {
   // columns off everywhere, and a cross-project view is not an exception.
   const health = useHealth()
   const metrics = usageMetricVisibility(health.data)
-  // Always enabled here — unlike the ⌘K palette, which parks it in a single-project workspace:
+  // Always enabled here — unlike the ⌘K palette, which parks it in a one-project workspace:
   // this page IS the index, so there is nothing else for it to fall back to. The interval is this
   // page's alone (see `useRunsIndex`), and it is now a BACKSTOP rather than the mechanism: any
   // project's run event invalidates this index through the one workspace stream, so a task that

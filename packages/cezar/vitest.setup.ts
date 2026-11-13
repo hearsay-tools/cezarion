@@ -104,7 +104,6 @@ const HOST_BIN_AND_MODE_KEYS = [
   'CEZ_AUTOMATIONS', // Restore default-on automations unless the test opts out.
   'CEZ_PREVIEW', // Keep preview capabilities and tool registration opt-in for each test.
   'CEZ_VOICE', // Keep voice mode opt-in for each test (hearsay-tools/cezarion#1470).
-  'CEZ_SINGLE_PROJECT', // Keep multi-project mode unless the test opts into one project.
   'CEZ_HIDE_TOKEN_METRICS', // Keep token and cost metrics shown unless the test hides them.
   'CEZ_HIDE_TOKEN_USAGE',
   'CEZ_HIDE_COST',

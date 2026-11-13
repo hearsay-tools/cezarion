@@ -11,7 +11,7 @@ export type LoadedProject = Pick<ProjectContext, 'id' | 'root' | 'store' | 'mana
 export interface ActivitySourceDeps {
   bootContext: LoadedProject;
   contexts: { peek(projectId: string): LoadedProject | undefined };
-  workspaceProjects: Pick<WorkspaceProjects, 'listVisibleProjects' | 'resolveBootProject' | 'projectFailure'>;
+  workspaceProjects: Pick<WorkspaceProjects, 'listProjects' | 'resolveBootProject' | 'projectFailure'>;
   /** The check progress of a loaded project's own CI watchers. */
   ciOf?: (project: LoadedProject) => CiProgressSource | undefined;
 }
@@ -35,17 +35,17 @@ export function createActivitySources({ bootContext, contexts, workspaceProjects
     };
   };
   /** The registry, or undefined when it cannot be read. */
-  const visibleProjects = () => workspaceProjects.listVisibleProjects().catch(() => undefined);
+  const registeredProjects = () => workspaceProjects.listProjects().catch(() => undefined);
   const projectName = (projects: readonly { id: string; name: string }[] | undefined, id: string, root: string) =>
     projects?.find((project) => project.id === id)?.name ?? basename(root);
   return {
     loadedSource,
     /** One loaded project, named from the registry. */
     project: async (project: LoadedProject): Promise<LiveActivitySource> =>
-      loadedSource(project, projectName(await visibleProjects(), project.id, project.root)),
-    /** Every visible project; the ones this process has not loaded answer `loaded: false`. */
+      loadedSource(project, projectName(await registeredProjects(), project.id, project.root)),
+    /** Every registered project; the ones this process has not loaded answer `loaded: false`. */
     workspace: async (): Promise<LiveActivitySource[]> => {
-      const projects = await visibleProjects();
+      const projects = await registeredProjects();
       const bootId = await workspaceProjects.resolveBootProject(projects);
       const sources = (projects ?? []).map((entry): LiveActivitySource => {
         const owned = entry.id === bootId ? { ...bootContext, id: bootId } : contexts.peek(entry.id);

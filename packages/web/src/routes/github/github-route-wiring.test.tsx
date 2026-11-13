@@ -105,7 +105,6 @@ function stubServer(kind: 'issue' | 'pr') {
             tokenMetrics: false,
             tokenUsageMetrics: false,
             costMetrics: false,
-            singleProject: true,
             automations: false,
           },
           projects: [{ id: 'boot', name: 'r' }],
