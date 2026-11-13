@@ -179,7 +179,7 @@ describe('ProjectRail pills', () => {
     // Their corner geometry and per-theme inks resolve in project-rail.e2e.ts.
     renderRail({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, inMotion: 1 })]]) })
     const pills = [pill('toolkit-dev', 'top'), pill('toolkit-dev', 'bottom')] as HTMLElement[]
-    expect(pills.map((el) => el.getAttribute('aria-hidden'))).toEqual(['true', 'true'])
+    expect(pills.map((el) => [el.className.includes('pointer-events-none'), el.getAttribute('aria-hidden')])).toEqual([[true, 'true'], [true, 'true']])
   })
 })
 
