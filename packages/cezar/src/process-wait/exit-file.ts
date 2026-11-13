@@ -37,9 +37,11 @@ export function confineExitFile(path: string, roots: ExitFileRoots): { ok: true;
 }
 
 /**
- * Whether the exit file exists and, when its first line is a 32-bit integer, the code. Reads at
- * most 64 bytes. Throws when the path now resolves outside the roots (a symlink swapped in after
- * registration), so the caller reports an error instead of reading it.
+ * Whether the exit file holds anything yet and, when its first line is a 32-bit integer, the code.
+ * An empty file reads as absent: a shell's `echo $? > file` creates the file before it writes the
+ * code (hearsay-tools/squawk#2904). Reads at most 64 bytes. Throws when the path now resolves
+ * outside the roots (a symlink swapped in after registration), so the caller reports an error
+ * instead of reading it.
  */
 export function readExitCode(path: string, roots: ExitFileRoots): { present: false } | { present: true; exitCode?: number } {
   if (!existsSync(path)) return { present: false };
@@ -52,6 +54,7 @@ export function readExitCode(path: string, roots: ExitFileRoots): { present: fal
     if (!fstatSync(fd).isFile()) return { present: true };
     const buffer = Buffer.alloc(EXIT_FILE_READ_MAX);
     const read = readSync(fd, buffer, 0, EXIT_FILE_READ_MAX, 0);
+    if (read === 0) return { present: false };
     const text = buffer.subarray(0, read).toString('utf8');
     // A file longer than the read has no line end inside it: the first line is not all here.
     const newline = text.indexOf('\n');

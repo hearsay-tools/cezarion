@@ -101,9 +101,9 @@ export const timerWaitEntrySchema = z.object({
 export type TimerWaitEntry = z.infer<typeof timerWaitEntrySchema>;
 
 /**
- * How a process wait ended (hearsay-tools/cezarion#1446): the exit file appeared (`exitCode` when
- * its first line is an integer, else `exitFileNote`), the process is gone with no exit file
- * (`exited`, code unknown), it still ran at the deadline, or the check failed (`error`).
+ * How a process wait ended (hearsay-tools/cezarion#1446): the exit file has content (`exitCode`
+ * when its first line is an integer, else `exitFileNote`), the process is gone with no exit file
+ * or an empty one (`exited`, code unknown), it still ran at the deadline, or the check failed (`error`).
  */
 export const processWaitResultSchema = z.object({
   outcome: z.enum(['exit_file', 'exited', 'deadline', 'error']),
