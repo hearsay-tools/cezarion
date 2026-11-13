@@ -176,6 +176,8 @@ function serve({
       if (url === '/api/v1/projects') return json(registry)
       if (url === '/api/v1/health') return json(health)
       if (url === '/api/v1/providers/status') return json(PROVIDERS)
+      // The rail's hand-picked order, opposite to registry order.
+      if (url === '/api/v1/workspace/ui-state' && method === 'GET') return json({ sidebar: { projectOrder: [OTHER, BOOT] } })
 
       // Split the scope off the path so each route is written once.
       const scoped = url.startsWith(`/api/v1/p/${OTHER}/`)
@@ -247,7 +249,7 @@ const sourceRefs = () =>
 // ---- the pill itself -------------------------------------------------------------------------
 
 describe('the new-task project pill', () => {
-  it('is preselected from the URL scope and lists the registry with branches', async () => {
+  it('is preselected from the URL scope and lists the registry in rail order with branches', async () => {
     serve()
     renderAt(`/p/${OTHER}/new`)
     await composerReady()
@@ -255,9 +257,12 @@ describe('the new-task project pill', () => {
     expect(projectPill().textContent).toContain('shop-frontend')
     fireEvent.click(projectPill())
     await screen.findByPlaceholderText('search projects…')
-    const options = [...document.querySelectorAll(String.raw`[data-slot="project-option"]`)]
-    expect(options.map((o) => o.getAttribute('data-project-id'))).toEqual([BOOT, OTHER])
-    expect(options[1]!.textContent).toContain('develop')
+    const options = () => [...document.querySelectorAll('[data-slot="project-option"]')]
+    await waitFor(() => expect(options().map((o) => o.getAttribute('data-project-id'))).toEqual([OTHER, BOOT]))
+    expect(options()[0]!.textContent).toContain('develop')
+    // A query both match mid-string ranks them equal, so they keep the rail's order.
+    fireEvent.change(screen.getByPlaceholderText('search projects…'), { target: { value: 'e' } })
+    await waitFor(() => expect(options().map((o) => o.getAttribute('data-project-id'))).toEqual([OTHER, BOOT]))
   })
 
   it('stays hidden when single-project mode pins the registry to the boot project', async () => {

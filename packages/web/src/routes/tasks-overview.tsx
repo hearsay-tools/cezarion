@@ -227,7 +227,7 @@ export function TasksOverview({
           onMarkAllRead={() => onMarkAllRead(originAutomationFlag(origin))}
           onArchiveFinished={() => onArchiveFinished(originAutomationFlag(origin))}
         />
-        <div className="relative order-first w-full md:w-auto md:flex-1">
+        <div className="relative order-first w-full md:w-auto md:min-w-64 md:flex-1">
           <SearchIcon
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-soft-foreground"
             aria-hidden="true"
@@ -648,7 +648,7 @@ function TasksEmptyState({ view, query, origin = 'all', onShowAll }: { view: Lis
           subtitle="Describe a task to get started."
           actions={
             <Button asChild>
-              <Link to="/new">
+              <Link to="/new" data-new-task-action>
                 <PlusIcon aria-hidden="true" />
                 New task
               </Link>

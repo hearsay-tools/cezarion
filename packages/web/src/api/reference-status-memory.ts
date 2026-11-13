@@ -47,6 +47,17 @@ export interface ReferenceStatusEntry {
 export type ReferenceStatusLookup = (ref: ReferenceStatusRequest) => ReferenceStatusEntry
 
 /**
+ * Persist last-known reference values in best-effort sessionStorage, scoped to this tab’s
+ * lifetime. A live answer replaces them; unavailable forge data remains labelled last known.
+ */
+export const REMEMBERED_STORAGE_KEY = 'cez.reference-statuses.v1'
+/** The conflict axis, under its own key rather than inside the payload above: the status file's
+ *  format is read by every bundle that has ever run in this tab, and widening its entries would
+ *  make an older one discard every status it found there. A key it has never heard of it simply
+ *  never reads. */
+export const REMEMBERED_CONFLICTS_STORAGE_KEY = 'cez.reference-conflicts.v1'
+
+/**
  * Remember last-known status per reference across changing batch keys. Only forge answers
  * populate it; failures retain the prior value and its stale indication.
  */
@@ -89,17 +100,6 @@ export function rememberConflict(key: string, conflicting: boolean): void {
   }
   scheduleRememberedSave()
 }
-
-/**
- * Persist last-known reference values in best-effort sessionStorage, scoped to this tab’s
- * lifetime. A live answer replaces them; unavailable forge data remains labelled last known.
- */
-export const REMEMBERED_STORAGE_KEY = 'cez.reference-statuses.v1'
-/** The conflict axis, under its own key rather than inside the payload above: the status file's
- *  format is read by every bundle that has ever run in this tab, and widening its entries would
- *  make an older one discard every status it found there. A key it has never heard of it simply
- *  never reads. */
-export const REMEMBERED_CONFLICTS_STORAGE_KEY = 'cez.reference-conflicts.v1'
 
 /** Exported for tests: it runs once at module load, which is not a moment a test can observe. */
 export function restoreRememberedStatuses(): [string, ReferenceStatus][] {
