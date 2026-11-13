@@ -51,7 +51,7 @@ export async function checkoutRoot(dir: string, signal?: AbortSignal): Promise<s
   return realpathOr(top ?? dir);
 }
 
-interface Candidate { origin: string; projects: Array<{ id: string; root: string; hasWebhook: boolean }>; bootProject: string }
+interface Candidate { origin: string; projects: Array<{ id: string; root: string }>; bootProject: string }
 
 /** Health first (cheap, and it proves this is a Squawk), then the registry with its roots. */
 async function probe(origin: string, timeoutMs: number, signal?: AbortSignal): Promise<Candidate | undefined> {
@@ -61,15 +61,15 @@ async function probe(origin: string, timeoutMs: number, signal?: AbortSignal): P
     const registry = await fetchJson(`${origin}/api/v1/projects`, { timeoutMs, ...(signal ? { signal } : {}) });
     const parsed = projectsResponseSchema.safeParse(registry.data);
     if (registry.status !== 200 || !parsed.success) return undefined;
-    const projects = await Promise.all(parsed.data.projects.map(async (entry) => ({ id: entry.id, root: await realpathOr(entry.root), hasWebhook: entry.webhook !== undefined })));
+    const projects = await Promise.all(parsed.data.projects.map(async (entry) => ({ id: entry.id, root: await realpathOr(entry.root) })));
     return { origin, projects, bootProject: parsed.data.bootProject };
   } catch {
     return undefined;
   }
 }
 
-function cockpitFor(origin: string, projectId: string, hasWebhook: boolean): Cockpit {
-  return { origin, projectId, api: `${origin}/api/v1/p/${encodeURIComponent(projectId)}`, hasWebhook };
+function cockpitFor(origin: string, projectId: string): Cockpit {
+  return { origin, projectId, api: `${origin}/api/v1/p/${encodeURIComponent(projectId)}` };
 }
 
 export interface DiscoverOptions {
@@ -96,14 +96,14 @@ export async function discoverCockpit(options: DiscoverOptions): Promise<Cockpit
     // A remote cockpit's roots are its own paths, so no match is the ordinary case there.
     const match = found.projects.find((entry) => entry.root === root);
     const id = match?.id ?? found.bootProject;
-    return cockpitFor(origin, id, found.projects.some((entry) => entry.id === id && entry.hasWebhook));
+    return cockpitFor(origin, id);
   }
   const ports = options.ports ?? COCKPIT_PORTS;
   const candidates = await Promise.all(ports.map((port) => probe(`http://127.0.0.1:${port}`, timeoutMs, options.signal)));
   // `ports` is ascending, so the first match is the lowest port serving this checkout.
   for (const candidate of candidates) {
     const match = candidate?.projects.find((entry) => entry.root === root);
-    if (candidate && match) return cockpitFor(candidate.origin, match.id, match.hasWebhook);
+    if (candidate && match) return cockpitFor(candidate.origin, match.id);
   }
   throw new TaskCliError(2, { code: 'no-cockpit', error: `no running cockpit serves ${root}`, hint });
 }

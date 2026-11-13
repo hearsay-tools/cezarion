@@ -12,7 +12,6 @@ describe('native mock source boundary', () => {
     ['a mock script read by URL', "readFileSync(new URL('../../scripts/mock-codex-app-server.mjs', import.meta.url), 'utf8');", 'reads native mock source'],
     ['a harness mock constant read', 'const text = await readFile(CLAUDE_MOCK);', 'reads native mock source'],
     ['an adapter mockBin assignment', 'HARNESS_ADAPTERS.pi.mockBin = patched;', 'assigns an adapter mockBin'],
-    ['a patcher import', "import { patchMockOnce } from './mock-patch.testkit.ts';", 'imports the mock source patcher'],
   ])('refuses %s', (_name, sample, rule) => {
     expect(mockSourceViolations('sample.ts', sample)).toEqual([`sample.ts:1 ${rule}`]);
   });

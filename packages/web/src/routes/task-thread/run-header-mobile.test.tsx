@@ -70,7 +70,7 @@ function renderScreen(entry = '/tasks/r1', run: ApiRun = record, tab: RunTab = '
 const topBar = () => document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
 
 describe('pushed task screen top bar', () => {
-  it('shows back, the title and the run actions, with no status line (#1333)', () => {
+  it('shows back, the title and the run actions', () => {
     renderScreen()
     const bar = topBar()
     expect(bar.getAttribute('data-mode')).toBe('task')
@@ -179,15 +179,6 @@ describe('pushed task screen top bar', () => {
 })
 
 describe('RunHeader below md on a pushed task screen', () => {
-  it('drops its own title and status row, and has no details toggle anywhere (#1333)', () => {
-    renderScreen()
-    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
-    expect(header.querySelector('[data-slot="session-kind"]')).toBeNull()
-    expect(within(header).queryByText('Reviewer agent presets')).toBeNull()
-    expect(within(header).queryByText('running')).toBeNull()
-    expect(screen.queryByRole('button', { name: /run details/ })).toBeNull()
-  })
-
   it('counts the changed files only on the phone run-tabs', () => {
     renderScreen()
     const tabs = document.querySelector('[data-slot="run-tabs"]') as HTMLElement

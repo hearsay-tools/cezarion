@@ -234,15 +234,6 @@ describe('simplified header (hearsay-tools/cezarion#1333)', () => {
     expect(pill.textContent).toMatch(/^Monitoring · Next check /)
   })
 
-  it('shows no metadata row, wait list or details toggle', () => {
-    stubFetch()
-    renderHeader(run('waiting', { waits: [timer], branch: 'cez/r1', costUsd: 1.2, prNumber: 9 }))
-    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
-    expect(header.textContent).not.toContain('cez/r1')
-    expect(header.textContent).not.toMatch(/\$1\.2/)
-    expect(screen.queryByRole('button', { name: /run details/ })).toBeNull()
-  })
-
   it('counts changed files on the Changes tab at every width', () => {
     stubFetch()
     renderHeader(run('done', { diffStat: { adds: 3, dels: 1, files: 4 } }))

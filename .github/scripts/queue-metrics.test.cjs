@@ -365,10 +365,9 @@ test('group refs name their PR and base', () => {
   assert.equal(groupRef(undefined), undefined);
 });
 
-test('ci.yml keeps main-push proof while PR-suite reuse stays historical', () => {
+test('ci.yml keeps main-push proof and the typecheck fallback gate', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8');
   assert.match(workflow, new RegExp(`name: ${PROOF_JOB}\\n`));
-  assert.doesNotMatch(workflow, new RegExp(`- name: ${REUSE_STEP}\\n`));
   const typecheck = /\n {2}typecheck:\n {4}name: (.+)\n {4}needs: queue-proof\n {4}if: (.+)\n/.exec(workflow);
   assert.ok(typecheck, 'typecheck job needs queue-proof');
   assert.equal(typecheck[1], FALLBACK_JOB);

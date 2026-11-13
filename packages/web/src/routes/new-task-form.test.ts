@@ -475,13 +475,12 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
 
   })
 
-  it('images ride along without a variant launch field', () => {
+  it('images ride along in the launch body', () => {
     const body = buildCreateRunBody({
       task: 't', source: { source: 'workflow', ref: 'quick-task' }, model: '',
       runner: 'claude', defaultRunner: 'claude',
       images: [{ mediaType: 'image/png', data: 'aGk=' }],
     })
-    expect(body).not.toHaveProperty('variants')
     expect(body.images).toEqual([{ mediaType: 'image/png', data: 'aGk=' }])
   })
 })

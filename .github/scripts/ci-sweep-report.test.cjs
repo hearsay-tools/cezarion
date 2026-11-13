@@ -91,3 +91,4 @@ test('successful issue creation remains counted when its first evidence write fa
  h.github.request=async(route,args)=>{if(route==='POST /repos/{owner}/{repo}/issues/{issue_number}/comments')throw new Error('temporary failure');return original(route,args);};
  const m=await report(h);assert.equal(m.complete,false);assert.equal(h.state.issues.length,1);assert.equal(m.reports.issues,1);
 });
+
