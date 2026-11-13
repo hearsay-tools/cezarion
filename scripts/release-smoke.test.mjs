@@ -165,13 +165,14 @@ test("npm's own output from a failed install attempt cannot become the filed cau
     if (args[0] !== 'install') return options.exec(args, more);
     assert.equal(more.quiet, true, 'npm install output is captured, not inherited');
     if (++installs > 1) return 'added 1 package in 1s\n';
-    throw Object.assign(new Error('Command failed: npm install'), { status: 1, signal: null, stderr:
+    throw Object.assign(new Error('Command failed: npm install'), { status: 1, signal: null, stdout: 'npm http fetch GET 404 https://registry.example/fake\n', stderr:
       'npm error code ETARGET\nnpm error notarget No matching version found for fake@1.2.1.\nnpm error Error: EPERM: operation not permitted\n' });
   };
   await registryInstall(prefix, 'fake@1.2.1', { ...options, exec });
   assert.ok(registry.logs.some(line => line === 'release-smoke: npm: notarget No matching version found for fake@1.2.1.'));
   assert.ok(registry.logs.some(line => line === 'release-smoke: npm: Error - EPERM: operation not permitted'));
   assert.ok(registry.logs.includes('release-smoke: npm: added 1 package in 1s'));
+  assert.ok(registry.logs.includes('release-smoke: npm: npm http fetch GET 404 https://registry.example/fake'), 'a failed attempt keeps its stdout');
   const failure = failureLine(new Error('The booted server registered no project'));
   assert.deepEqual(filed([...registry.logs, failure]), [sanitize(failure)]);
 });

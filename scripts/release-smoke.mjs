@@ -146,6 +146,7 @@ export async function registryInstall(prefix, spec, { exec = runNpm, now = Date.
     try {
       relay(exec(['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { quiet: true, timeout }), log);
     } catch (error) {
+      relay(error.stdout, log);
       relay(error.stderr, log);
       throw error;
     }
