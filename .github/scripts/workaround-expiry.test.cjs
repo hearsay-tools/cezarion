@@ -56,6 +56,8 @@ test('only markers that end a line count; prose that names a marker does not', (
     'Rule <!-- until: a/b#9 --> and more prose',
     '[link](url "`") <!-- until: a/b#10 --> `code`',
     'Ends in a span `<!-- until: a/b#11 -->`',
+    '<`example`!-- until: a/b#12 -->',
+    'Escaped \\` <!-- until: a/b#13 --> `code`',
   ].join('\n');
   assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]),
     [[3, 'a/b#3'], [4, 'a/b#4'], [4, 'a/b#5'], [5, 'a/b#6'], [6, 'a/b#8']]);
