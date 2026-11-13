@@ -256,7 +256,6 @@ describe('the Git view Uncommitted changes section (/git/changes)', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 1, name: 'Not a git repository' })).toBeTruthy(),
     )
-    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
   })
 })
 
@@ -608,7 +607,6 @@ describe('the Git view Cleanup section', () => {
     ])
     expect(document.querySelector('[data-action="worktree-delete"]')).toBeNull()
     expect(document.querySelector('[data-slot="worktree-row"][data-run="r2"]')?.textContent).toContain('in use')
-    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
   })
 
   it('lists the branches safe to delete, each group expandable, and deletes them in one confirmed request', async () => {

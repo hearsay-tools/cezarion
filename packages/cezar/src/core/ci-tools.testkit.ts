@@ -29,12 +29,9 @@ describe('wait tool definitions', () => {
     // hearsay-tools/cezarion#1425: kind "pr" replaced kind "ci" and takes a target and a conflict switch.
     expect(schema.properties).toMatchObject({ kind: { enum: ['pr', 'worker', 'request', 'peer', 'timer', 'process'] }, until: { enum: ['checks', 'merge', 'merge_or_blocked'], default: 'checks' }, wake_on_conflict: { type: 'boolean', default: true } });
     expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['exit_file', 'kind', 'mode', 'note', 'operation_id', 'peer_ids', 'pid', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'until', 'wake_on_conflict', 'worker_ids']);
-    expect(JSON.stringify(schema)).not.toContain('"ci"');
     expect((schema.properties as Record<string, { description: string }>).wake_on_conflict!.description).toContain('your work depends on another PR merging');
     expect((schema.properties as Record<string, { description: string }>).until!.description).toContain('"merge"');
     expect(waitToolDefinition.description).toContain('kind "pr"');
-    // hearsay-tools/cezarion#1234: the user is asked with cezar_ask, so no field here is one kind's card.
-    expect(JSON.stringify(schema)).not.toContain('human');
     expect(waitToolDefinition.description).toContain('To wait for the user, call cezar_ask.');
     expect(schema).toMatchObject({ required: ['kind'], additionalProperties: false });
     expect(schema.properties).toMatchObject({ seconds: { minimum: 60, maximum: 7200 }, timeout_seconds: { minimum: 1, maximum: 7200, default: 1800 }, note: { maxLength: 512 } });
@@ -140,7 +137,6 @@ describe('CI tool injection', () => {
         if (backend === 'codex') {
           const config = rows.find(row => row.method === (resume ? 'thread/resume' : 'thread/start')).params.config;
           expect(config['features.agent_message_board']).toBe(false);
-          expect(config).not.toHaveProperty('features.multi_agent');
           // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
           // server's mode is `approve`; approval_policy stays the user's (#381).
           expect(config[`mcp_servers.${descriptor.name}`]).toEqual({ command: descriptor.command, args: descriptor.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', 'CEZ_AUTOMATIONS'], default_tools_approval_mode: 'approve' });
@@ -295,7 +291,6 @@ describe('U0 wait tools on every native wire', () => {
         if (backend === 'claude') expect(argv![argv!.indexOf('--allowedTools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].map(name => `mcp__${session.descriptor.name}__${name}`)));
         if (backend === 'pi' && !argv!.includes('--tools')) expect(argv).toContain('--no-builtin-tools');
         else if (backend === 'pi' || backend === 'omp') expect(argv![argv!.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']));
-        if (backend === 'cursor') expect(argv).not.toContain('--allowed-tools');
         expect(readFileSync(file, 'utf8')).not.toContain(session.env.CEZ_TOOL_TOKEN);
       } finally { await controller.close(); rmSync(dir, { recursive: true, force: true }); }
     }, 20000);

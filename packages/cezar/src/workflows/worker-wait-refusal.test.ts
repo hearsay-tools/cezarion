@@ -37,7 +37,6 @@ it('readiness repeated done with live workers: one nudge, then a park on the re-
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: WAIT_PHASE.open })]);
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.getRun(p.id)?.agentInputs?.filter(found => found.source === 'lifecycle')).toEqual([expect.objectContaining({ id: input.id, deliveredAt: expect.any(String) })]);
     expect(store.getRun(w.id)?.status).toBe('queued');

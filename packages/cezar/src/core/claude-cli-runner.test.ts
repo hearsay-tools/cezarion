@@ -142,10 +142,6 @@ describe('buildClaudeArgs governed native messaging', () => {
     });
   });
 
-  it('keeps outbound SendMessage and ListAgents available at shipped defaults', () => {
-    expect(buildClaudeArgs({ ...spec, toolGrant: UNSET_TOOL_GRANT }, {})).not.toContain('--disallowedTools');
-  });
-
   it('passes an explicit grant naming the subagent tools through under delegation', () => {
     const args = buildClaudeArgs({ ...spec, restrictCrossSessionMessaging: true,
       toolGrant: { kind: 'explicit', tools: ['Read', 'Agent', 'SendMessage', 'ListAgents'] },

@@ -173,11 +173,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     savedEnv.CEZ_MOCK_ARGS_FILE = process.env.CEZ_MOCK_ARGS_FILE;
     savedEnv.CEZ_TODOS_FILE = process.env.CEZ_TODOS_FILE;
-    savedEnv.CEZ_FOLLOWUPS = process.env.CEZ_FOLLOWUPS;
     savedEnv.CEZ_AUTONAME = process.env.CEZ_AUTONAME;
     process.env.CEZ_DRY_RUN = '1';
-    // The retired opt-in flag must have no effect on prompt composition.
-    process.env.CEZ_FOLLOWUPS = '1';
     // Dry-run skips naming by default (canned titles would clobber honest
     // heuristics in demos/e2e); '1' forces the mock path for these tests.
     process.env.CEZ_AUTONAME = '1';

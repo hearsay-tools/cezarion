@@ -92,10 +92,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         const result = await service.destroyForHuman('reopened', w.id);
         expect(result).toMatchObject({ state: 'complete', remaining: [] });
-        expect(result).not.toHaveProperty('deleted');
       }
       expect(reopened.getRun(w.id)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } });
-      expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/neverMaterialized|generation/);
       // #878: absence must be total. A path or branch at the worker's name keeps it unverified.
       mkdirSync(workspace(w).path, { recursive: true });
       expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });

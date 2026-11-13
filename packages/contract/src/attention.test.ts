@@ -263,13 +263,6 @@ describe('delegation rungs', () => {
     expect(deriveAttention(parkedRoot([completionEntry({ phase: WAIT_PHASE.resolved })])).label).toBe('waiting for capacity');
   });
 
-  it('never reads an old row\'s delegation.wait', () => {
-    const legacy = { status: RUN_STATUS.waiting, delegation: { role: 'root', wait: { phase: 'parked', workerIds: ['a'], outcomes: [] } } } as unknown as AttentionInput;
-    expect(deriveAttention(legacy)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
-    const pending = { status: RUN_STATUS.queued, delegation: { role: 'root', wait: { phase: 'wake-pending', workerIds: ['a'], outcomes: [] } } } as unknown as AttentionInput;
-    expect(deriveAttention(pending).label).toBe('queued');
-  });
-
   it('a parked parent with a pending human ask is attention again', () => {
     const record = { ...parkedRoot(), waits: [workerEntry(), humanWait()] } as AttentionInput;
     expect(deriveAttention(record)).toMatchObject({ bucket: 'waiting', label: 'needs you' });

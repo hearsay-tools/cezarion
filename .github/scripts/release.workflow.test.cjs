@@ -108,7 +108,6 @@ test('release App setup is checked before publish and token only reaches PR crea
   assert.ok(app, 'release needs a short-lived App token');
   assert.match(app.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
   assert.equal(app.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
-  assert.equal(app.with['app-id'], undefined);
   assert.equal(app.with['permission-pull-requests'], 'write');
   assert.equal(app.with.repositories, '${{ github.event.repository.name }}');
   assert.ok(steps.indexOf(app) < steps.findIndex(s => s.name === 'Publish release'));

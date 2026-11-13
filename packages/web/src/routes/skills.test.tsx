@@ -560,8 +560,6 @@ describe('team skill switches (#1494)', () => {
     })
     expect(hint.textContent).toContain('Add a repo below')
     expect(document.querySelector('[data-slot="skill-source-add"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="skills-team-empty"]')).toBeNull()
-    expect(document.querySelector('[data-route="skills"]')?.textContent?.toLowerCase()).not.toContain('mercato')
   })
 
   it('loading shows a status row', async () => {

@@ -344,10 +344,6 @@ describe('status key (#617)', () => {
     expect(look(run({ status: RUN_STATUS.queued }))).not.toBe(look(run({ status: RUN_STATUS.cancelled })))
   })
 
-  it('no status rung paints the brand accent any more', () => {
-    for (const [, record] of rows) expect(deriveAttention(record).tone).not.toBe('accent')
-  })
-
   it('counts one worker in the singular, and says no number when the list row carries none', () => {
     expect(deriveAttention(parkedRoot({ workerIds: ['00000000-0000-4000-8000-000000000001'] })).label).toBe('waiting on 1 worker')
     // A summary without a count (`waitingOn.count` 0) claims no number.

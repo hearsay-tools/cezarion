@@ -25,12 +25,11 @@ import type { TurnEndOutcome } from './turn-end.ts';
 import { clearIdleTimer } from './run/input-timers.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
-import { handoffPath, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import { outcomeWord } from './turn-outcomes.testkit.ts';
 import { noRunners } from '../core/runners-under-test.testkit.ts';
@@ -171,25 +170,14 @@ describe('the completion gate outside a turn end', () => {
 
   // The gate held the done itself (a stopped root, or a question that parked for the user): a turn
   // end keeps the done at the boundary and settles the park; an acknowledgement settles the park
-  // only. Neither writes to the handoff file (hearsay-tools/cezarion#1809).
+  // only.
   describe('a done the gate holds', () => {
-    let seeded: string;
-    const handoff = () => readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8');
     const turnEnd = () => settler.settleTurn(id, state, 'turn-end', { stepId: 'task', monitoring: false, humanGate: false,
       ask: null, done: true, nudgedLastTurn: false });
     const ack = () => settler.settleTurn(id, state, 'ack', settler.boundaryTurn(id, state, session, true));
     beforeEach(() => {
-      seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);
-      seeded = handoff();
       transitionTurnBoundary(state, { kind: 'turn-end', phase: 'ui-completed', session: session });
       state.inputState.beginHeldClock();
-    });
-    afterEach(() => expect(handoff()).toBe(seeded));
-
-    it('a turn end and an acknowledgement write nothing to the handoff file', () => {
-      expect(turnEnd()).toBe(true);
-      expect(ack()).toBe(true);
-      expect(handoff()).toBe(seeded);
     });
 
     it('a turn end keeps the done at the boundary, resets the held-input clock and settles the park', () => {

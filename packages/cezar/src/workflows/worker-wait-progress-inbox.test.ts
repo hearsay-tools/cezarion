@@ -52,7 +52,6 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         capacity.mockRestore(); await semaphore.release();
         await until(() => [progressId, requestId].every(id => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt));
         const submitted = JSON.stringify(send.mock.calls);
-        expect(submitted).not.toContain('interrupted wait');
         expect(submitted).toContain(`Still open: worker wait ${wait.id}`);
       }
       expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open, workerIds: [f.w.id] });

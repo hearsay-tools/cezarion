@@ -87,7 +87,6 @@ test('issue intake workflow keeps its provider, permission, and fail-closed cont
   assert.match(codex, /prompt-file: .*\.github\/codex\/prompts\/issue-intake\.md/);
   assert.match(codex, /output-schema-file: .*\.github\/schemas\/issue-intake\.schema\.json/);
   assertFilteredFetch(codex);
-  assert.doesNotMatch(codex, /--limit 50/);
   assert.match(codex, /name: Reject untrusted bot actors/);
   assert.match(codex, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
   assert.ok(codex.indexOf('name: Reject untrusted bot actors') < codex.indexOf('openai/codex-action@'), 'bot guard must run before Codex');

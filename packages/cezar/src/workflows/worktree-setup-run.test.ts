@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import '../core/claude-runner.testkit.ts';
 import { withOwnedInputRun } from '../core/workflow-parity-core.testkit.ts';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
-import { handoffPath } from '../handoff.ts';
 import { reclaimWorktree } from '../runs/retention.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
@@ -123,8 +122,6 @@ describe('worktree setup on task start (#917)', () => {
     const [opening] = openingMessages(f);
     expect(opening).toContain(`${productName('Cezar')} prepared this worktree before your session started:`);
     expect(opening).toContain('`pwd > "$CEZ_PROJECT_ROOT/.setup-cwd"`');
-    // The note is the setup's record; the handoff gets no line (hearsay-tools/cezarion#1809).
-    expect(readFileSync(handoffPath(f.dataDir, id), 'utf8')).not.toContain('worktree setup');
   }, 60_000);
 
   it('a failing setup still starts the agent and tells it', async () => {

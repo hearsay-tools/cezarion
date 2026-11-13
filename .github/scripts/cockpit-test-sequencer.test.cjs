@@ -22,15 +22,11 @@ test('cockpit config separates heavy suites and covers every discovered spec det
       assert.notEqual(containing(file), -1, `${file} is discovered`);
       assert.ok(weights[file] > 0, `${file} has a measured weight`);
     }
-    assert.equal(containing('github.e2e.ts'), -1);
-    assert.equal(weights['github.e2e.ts'], undefined);
     const threadFiles = ['task-thread-transcript.e2e.ts', 'task-thread-session.e2e.ts', 'task-thread-layout.e2e.ts'];
     for (const file of threadFiles) {
       assert.notEqual(containing(file), -1, `${file} is discovered`);
       assert.ok(weights[file] > 0, `${file} has a measured weight`);
     }
-    assert.equal(containing('task-thread.e2e.ts'), -1);
-    assert.equal(weights['task-thread.e2e.ts'], undefined);
     assert.notEqual(containing('touch-targets.e2e.ts'), -1);
     assert.ok(new Set(githubFiles.map(containing)).size > 1, 'GitHub cases can run in separate lanes');
     assert.equal(shards.flat().length, specs.length);

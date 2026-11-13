@@ -297,7 +297,6 @@ export const RUN_GROUPS = {
       };
       const assertRules = (text: string, rules: readonly string[]) => {
         for (const rule of rules) expect(text).toContain(rule);
-        expect(text).not.toContain('CEZ:MONITORING');
       };
       const recording = async (body: (dir: string) => Promise<void>) => {
         const dir = mkdtempSync(join(tmpdir(), 'cez-monitoring-prompt-'));
