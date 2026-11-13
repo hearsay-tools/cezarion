@@ -248,7 +248,7 @@ export function AppShell({
           }
         }} />
 
-        <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
+        <div className="group/shell grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
           <MobileTopBar title={current?.label ?? productName('cezar')} pushed={pushed ? { onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <DesktopBreadcrumb breadcrumb={breadcrumb} repo={repo} label={current?.label} newTask={newTask} />
 

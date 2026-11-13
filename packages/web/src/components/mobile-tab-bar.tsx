@@ -73,11 +73,13 @@ export function MobileTabBar({
     <>
       {showNewTask ? (
         // Above the bar rather than inside it: `bottom-full` measures from the row's top edge, so
-        // the 16px gap holds whatever safe-area inset the row is padding itself with.
+        // the 16px gap holds whatever safe-area inset the row is padding itself with. Hidden while
+        // the page shows its own New task action (`data-new-task-action`, the empty Tasks state):
+        // two buttons for one action, and this one would cover that page's text.
         <Link
           to="/new"
           data-slot="mobile-new-task"
-          className="absolute right-4 bottom-full z-30 mb-4 flex h-12 items-center gap-2 rounded-[24px] bg-foreground px-[18px] text-[14px] font-semibold text-background shadow-[0_8px_24px_#00000055] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="group-has-[[data-new-task-action]]/shell:hidden absolute right-4 bottom-full z-30 mb-4 flex h-12 items-center gap-2 rounded-[24px] bg-foreground px-[18px] text-[14px] font-semibold text-background shadow-[0_8px_24px_#00000055] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <PlusIcon aria-hidden="true" className="size-[18px]" />
           New task
