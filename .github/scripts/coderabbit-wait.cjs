@@ -11,7 +11,7 @@ async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log =
   for (let attempt = 0; attempt < MAX_READS && now() < deadline; attempt++) {
     admission = undefined;
     try {
-      admission = await readCodeRabbitAdmission({ ...args, now, deadline: Math.min(deadline, now() + 60000) });
+      admission = await readCodeRabbitAdmission({ ...args, now, sleep, deadline: Math.min(deadline, now() + 60000) });
     } catch (error) {
       if (now() >= deadline) break;
       // A provider can finish between the snapshot's two reads. Discard mixed

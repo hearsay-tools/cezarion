@@ -206,3 +206,64 @@ for (const fork of [false, true]) test(`queue admits opened-ready PR without a r
   const h = fixture(fork); h.s.firstReady = null;
   assert.equal((await h.run()).head, HEAD);
 });
+
+// hearsay-tools/squawk#3359: one transient GitHub answer dropped a green PR from the queue.
+const httpError = (status, message, headers = {}) => Object.assign(new Error(message), { name: 'HttpError', status, response: { headers } });
+function failFirst(h, matches, error) {
+  const original = h.github.request; let failed = 0;
+  const github = { request: async (route, args) => {
+    if (matches(route, args) && failed++ === 0) { h.s.calls.push(route); throw error; }
+    return original(route, args);
+  } };
+  const sleeps = [];
+  const run = () => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group, sleep: async ms => { sleeps.push(ms); } });
+  return { run, sleeps };
+}
+const { mergeQueueAdmission } = require('./merge-queue-admission.cjs');
+for (const [label, matches] of Object.entries({
+  rules: route => route.endsWith('/rules/branches/{branch}'),
+  'queue GraphQL': (route, args) => args.query?.includes('mergeQueue('),
+  'run jobs': route => route.endsWith('/runs/{run_id}/jobs'),
+  'CodeRabbit check runs': route => route.endsWith('/check-runs'),
+  'review threads': (route, args) => args.query?.includes('reviewThreads'),
+})) test(`one transient 500 on the ${label} read is retried and admits`, async () => {
+  const h = fixture();
+  const { run, sleeps } = failFirst(h, matches, httpError(500, 'The operation was aborted due to timeout'));
+  assert.equal((await run()).pullNumber, 7);
+  assert.deepEqual(sleeps, [1000]);
+});
+test('a secondary rate limit waits for its retry-after, then admits', async () => {
+  const h = fixture();
+  const { run, sleeps } = failFirst(h, route => route.endsWith('/pulls/{pull_number}'),
+    httpError(403, 'You have exceeded a secondary rate limit', { 'retry-after': '2' }));
+  assert.equal((await run()).pullNumber, 7);
+  assert.deepEqual(sleeps, [2000]);
+});
+test('a real refusal fails at once, and a lasting 5xx fails after three attempts', async () => {
+  for (const [error, attempts] of [[httpError(403, 'Resource not accessible by integration'), 1], [httpError(404, 'Not Found'), 1], [httpError(502, 'Bad Gateway'), 3]]) {
+    const calls = []; const sleeps = [];
+    const github = { request: async route => { calls.push(route); throw error; } };
+    await assert.rejects(() => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: fixture().s.group, sleep: async ms => { sleeps.push(ms); } }),
+      new RegExp(error.message));
+    assert.equal(calls.length, attempts, error.message);
+    assert.deepEqual(sleeps, [1000, 2000].slice(0, attempts - 1));
+  }
+});
+test('a retry wait that would pass the deadline fails instead', async () => {
+  const h = fixture(); let clock = 0;
+  const github = { request: async () => { clock = 119500; throw httpError(500, 'Server Error'); } };
+  await assert.rejects(() => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group, now: () => clock,
+    sleep: async () => assert.fail('no wait past the deadline') }), /Server Error/);
+});
+test('a PR turned draft during admission is refused by the final PR read', async () => {
+  const h = fixture(); let reads = 0;
+  h.s.onRead = route => { if (route.endsWith('/pulls/{pull_number}') && ++reads === 3) h.s.pr.draft = true; };
+  await assert.rejects(h.run, /Queue or PR changed/);
+});
+test('one admission reads each record once, apart from the race re-reads', async () => {
+  const h = fixture(); await h.run();
+  // rules, queue, PR, workflow, runs, run, jobs; CodeRabbit: PR, checks, threads, checks, PR;
+  // first ready; final run, runs, queue, PR.
+  assert.equal(h.s.calls.length, 17);
+  assert.equal(h.s.calls.filter(route => route.endsWith('/rules/branches/{branch}')).length, 1);
+});

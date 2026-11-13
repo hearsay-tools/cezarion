@@ -25,8 +25,22 @@ const SKIPPABLE_SURFACES = ['docs-only', 'infra-only'];
 const QUEUE_BASE = /^gh-readonly-queue\/main\/pr-[1-9][0-9]*-([a-f0-9]{40})$/;
 const validSha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const positive = value => Number.isSafeInteger(value) && value > 0;
-function reader(github, owner, repo, deadline, now) {
-  return async (route, args = {}) => {
+// GitHub fails a read now and then with a 5xx (a timed-out fetch is one too) or
+// with a rate limit that names its wait. Such a read runs again, at most
+// READ_ATTEMPTS times in all and only inside the deadline. A real refusal fails
+// at once. A write never runs twice: its failure does not prove it did not land.
+const READ_ATTEMPTS = 3;
+const isRead = (route, args) => route.startsWith('GET ')
+  || (route === 'POST /graphql' && !/^\s*mutation\b/.test(args.query ?? ''));
+function retryDelay(error, attempt) {
+  if (error?.status >= 500) return 1000 * attempt;
+  if (![403, 429].includes(error?.status)) return null;
+  const after = Number(error.response?.headers?.['retry-after']);
+  if (Number.isFinite(after)) return after * 1000;
+  return /secondary rate limit/i.test(error.message) ? 60000 : null;
+}
+function reader(github, owner, repo, deadline, now, sleep = delay) {
+  const once = async (route, args) => {
     const remaining = deadline - now();
     if (remaining <= 0) throw new Error('deadline');
     // github-script v9's fetch transport ignores numeric request.timeout.
@@ -35,6 +49,17 @@ function reader(github, owner, repo, deadline, now) {
       request: { timeout: budget, signal: AbortSignal.timeout(budget), retries: 0 } });
     if (now() > deadline) throw new Error('deadline');
     return result.data;
+  };
+  return async (route, args = {}) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await once(route, args);
+      } catch (error) {
+        const wait = attempt < READ_ATTEMPTS && isRead(route, args) ? retryDelay(error, attempt) : null;
+        if (wait === null || now() + wait >= deadline) throw error;
+        await sleep(wait);
+      }
+    }
   };
 }
 async function pages(read, route, args, field) {

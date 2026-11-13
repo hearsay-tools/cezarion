@@ -34,3 +34,13 @@ for (const remaining of [60000, 25]) {
     await assert.rejects(() => reader(github, 'o', 'r', remaining, () => 0)('GET /test'), { name: 'TimeoutError' });
   });
 }
+
+test('a write and a GraphQL mutation run once, even on a 5xx', async () => {
+  for (const [route, args] of [['POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun', { job_id: 1 }],
+    ['POST /graphql', { query: ' mutation { resolveReviewThread(input: {}) { clientMutationId } }' }]]) {
+    let calls = 0;
+    const github = { request: async () => { calls++; throw Object.assign(new Error('Bad Gateway'), { status: 502 }); } };
+    await assert.rejects(() => reader(github, 'o', 'r', 60000, () => 0, async () => assert.fail('no retry'))(route, args), /Bad Gateway/);
+    assert.equal(calls, 1, route);
+  }
+});
