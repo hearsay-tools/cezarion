@@ -165,7 +165,7 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
 4. Every reader of the shard job names changes with the count in the same change: the
    required and skipped rosters in `.github/scripts/queue-ci-proof.cjs` (with four-shard
    names it rejects the queue proof, and `main` repeats the full verification),
-   `.github/scripts/fetch-ci-results.cjs`, the `--shards` count of the
+   the `--shards` count of the
    `vitest-coverage-merge` job (`merge-vitest-coverage.mjs` reads shards 1 to N and
    ignores the rest), `.github/scripts/ci-coverage.workflow.test.cjs` and the workflow
    parity tests that expand the matrices.

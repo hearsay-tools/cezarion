@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { pickPullRequestRun } = require('./fetch-ci-results.cjs');
 const { compatibilityEntry, COMPATIBILITY_ENTRIES } = require('../../packages/cezar/src/release/compatibility.ts');
 const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 const positive = n => Number.isSafeInteger(n) && n > 0;
@@ -36,9 +35,10 @@ function verifiedPull(pull, number, run, repository) {
     && ['main', 'develop'].includes(pull.base?.ref);
 }
 
-// The workflow run to trust is the one pickPullRequestRun picks for this head.
+// The workflow run to trust is the newest pull_request_target run for this head.
 function selectedSnapshotRun(runs, run) {
-  const selected = pickPullRequestRun(runs.map(r => ({ ...r, databaseId: r.id, headSha: r.head_sha })), run.head_sha);
+  const selected = runs.filter(r => r.event === 'pull_request_target' && r.head_sha === run.head_sha)
+    .sort((a, b) => b.id - a.id)[0];
   return selected?.id === run.id && selected.run_attempt === run.run_attempt;
 }
 

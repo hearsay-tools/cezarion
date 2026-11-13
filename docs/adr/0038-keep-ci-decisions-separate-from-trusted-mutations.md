@@ -2,8 +2,7 @@
 
 Untrusted issue and PR content is input to automation, not authority to change other objects.
 CI decision producers return bounded structured output. Trusted applicators validate it and
-own GitHub mutations. The `claude` intake provider is an exception: it can close or edit the
-triggering issue itself, with tools scoped to that issue number. Publishing decisions resolve repository facts from GitHub rather than
+own GitHub mutations. Publishing decisions resolve repository facts from GitHub rather than
 trusting an uploaded artifact’s metadata.
 
 ## Consequences
