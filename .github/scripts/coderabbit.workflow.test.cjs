@@ -164,11 +164,14 @@ async function runJob(jobName, { s, github, env, tokens = {} }) {
   const context = { repo: { owner: 'o', repo: 'r' }, eventName: 'workflow_dispatch',
     payload: { repository: { full_name: 'o/r' }, inputs: { pr_number: '7' } } };
   let error;
+  // The scripts call reconcile without `now`, so the fixture clock replaces the
+  // wall clock: the 30-day rerun window must not depend on the day the test runs.
+  test.mock.timers.enable({ apis: ['Date'], now: s.clock });
   try {
     await new AsyncFunction('require', 'github', 'context', 'core', 'getOctokit', 'process', step.with.script)(
       p => require(path.resolve(__dirname, '../..', p)), github, context, core, value => tokens[value],
       { env: { ...step.env, ...env } });
-  } catch (caught) { error = caught; }
+  } catch (caught) { error = caught; } finally { test.mock.timers.reset(); }
   return { info, outputs, error, s };
 }
 test('discovery logs one call count per token and counts the App when it serves the reads', async () => {
@@ -212,6 +215,7 @@ test('the per-PR job syncs the board above the floor and counts its project call
     tokens: { board } });
   assert.equal(job.error, undefined);
   assert.equal(job.info.some(line => /board sync skipped: core remaining/.test(line)), false);
+  assert.ok(job.info.includes('"rerun-requested"'));
   const [reads, boardLine] = job.info.slice(-2);
   assert.match(reads, /^GITHUB_TOKEN: GitHub API calls: \d+ \(core remaining \d+\)$/, 'without the App, GITHUB_TOKEN serves reads and the write');
   assert.match(boardLine, /^Release App token \(board\): GitHub API calls: [1-9]\d* \(core remaining unknown\)$/);
