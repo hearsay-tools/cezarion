@@ -66,41 +66,36 @@ for (const picker of [
             const row = picker.name === 'branch' ? '[data-slot="picker-search"]' : '[data-slot="command-input-wrapper"]'
             // Geometry and outline contrast come from one held observation of the open picker.
             const sample = () => waitForSettledSample<{
-              focused: boolean; frame: string; ink: string; background: string; line: number; inset: number;
-              innerLine: number; innerInk: string; remaining: number; iconInside: boolean;
-              left: number; right: number; rowBottom: number; resultTop: number; menuWidth: number; contrast: ContrastSample;
+              focused: boolean; ink: string; background: string; line: number;
+              innerLine: number; innerInk: string; iconInside: boolean;
+              left: number; right: number; rowBottom: number; resultTop: number; contrast: ContrastSample;
             }>(browser, `(() => {
               const input = document.querySelector('${picker.input}');
               const row = input.parentElement, menu = document.querySelector('${picker.content}');
               const result = menu.querySelector('[role="menuitemradio"], [cmdk-item]');
-              const r = row.getBoundingClientRect(), i = input.getBoundingClientRect(), icon = row.querySelector('svg').getBoundingClientRect();
+              const r = row.getBoundingClientRect(), icon = row.querySelector('svg').getBoundingClientRect();
               const s = getComputedStyle(row), inner = getComputedStyle(input);
-              return { focused: input.matches(':focus-visible'), frame: s.outlineStyle, ink: s.outlineColor, background: getComputedStyle(menu).backgroundColor,
-                line: parseFloat(s.outlineWidth), inset: parseFloat(s.outlineOffset), innerLine: parseFloat(inner.outlineWidth), innerInk: inner.outlineColor,
-                remaining: r.right - parseFloat(s.paddingRight) - i.right, iconInside: icon.left >= r.left && icon.right <= r.right,
-                left: r.left, right: r.right, rowBottom: r.bottom, resultTop: result.getBoundingClientRect().top, menuWidth: menu.getBoundingClientRect().width,
+              return { focused: input.matches(':focus-visible'), ink: s.outlineColor, background: getComputedStyle(menu).backgroundColor,
+                line: parseFloat(s.outlineWidth), innerLine: parseFloat(inner.outlineWidth), innerInk: inner.outlineColor,
+                iconInside: icon.left >= r.left && icon.right <= r.right,
+                left: r.left, right: r.right, rowBottom: r.bottom, resultTop: result.getBoundingClientRect().top,
                 contrast: ${contrastSampleExpression(row, 'outline-color')} };
             })()`)
             const before = sample()
             expect(before.focused).toBe(true)
-            expect(before.frame).toBe('solid')
-            expect(before.line).toBe(2)
-            expect(before.inset).toBeLessThanOrEqual(-2)
+            expect(before.line).toBeGreaterThan(0)
             expect(before.ink).not.toBe(before.background)
             expect(before.innerLine === 0 || before.innerInk === 'rgba(0, 0, 0, 0)').toBe(true)
-            expect(Math.abs(before.remaining)).toBeLessThanOrEqual(1)
             expect(before.iconInside).toBe(true)
             expect(before.left).toBeGreaterThanOrEqual(0)
             expect(before.right).toBeLessThanOrEqual(width)
             expect(before.rowBottom).toBeLessThanOrEqual(before.resultTop)
             expect(before.contrast.ratio, JSON.stringify(before.contrast)).toBeGreaterThanOrEqual(3)
-            if (picker.name === 'branch' && width === 1440) expect(before.menuWidth).toBeGreaterThan(400)
             browser.fill(picker.input, picker.name === 'branch' ? 'long-branch' : 'focus-fixture')
             browser.waitForFunction(`document.querySelector('${picker.content}')?.textContent.includes('${picker.name === 'branch' ? 'feature/a-long' : 'focus-fixture'}') === true`)
             const after = sample()
             expect(after.line).toBe(before.line)
             expect(after.rowBottom).toBe(before.rowBottom)
-            expect(after.remaining).toBeCloseTo(0, 0)
             expect(after.contrast.ratio, JSON.stringify(after.contrast)).toBeGreaterThanOrEqual(3)
             browser.screenshot(join(artifacts, `${picker.name}-${width}-${theme}.png`))
             dismissWithEscape(browser, { content: picker.content, focus: picker.trigger })

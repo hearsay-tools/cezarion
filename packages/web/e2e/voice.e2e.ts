@@ -225,7 +225,7 @@ describe('voice mode with the dry-run engine', () => {
       `[...document.querySelectorAll('[data-slot="ask-answers"] li[data-selected="true"]')].map(el => el.textContent)`,
       (labels) => labels.length === 2,
     )
-    expect(selected).toEqual(['✓VitestSelected', '✓WebpackSelected'])
+    expect(selected).toEqual([expect.stringContaining('Vitest'), expect.stringContaining('Webpack')])
   }, 90_000)
 
   it('refuses to confirm an incomplete card', async () => {

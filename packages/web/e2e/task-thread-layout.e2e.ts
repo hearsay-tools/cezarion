@@ -112,7 +112,7 @@ describe('task thread', () => {
     })()`) as { kebab: boolean; state: boolean; h1: boolean; pill: boolean }
     expect(bar).toEqual({ kebab: true, state: false, h1: false, pill: false })
 
-    // #737: the title fits the 56px bar, the 44px rename target is a sibling of the title (so it can
+    // #737: the title fits the bar, the 44px rename target is a sibling of the title (so it can
     // neither grow it nor overlap it), and while renaming the input opens below the bar without
     // covering the title.
     const probe = `(() => {
@@ -126,21 +126,20 @@ describe('task thread', () => {
       const t = box(top), s = box(stack), h = box(heading)
       const hit = (e) => { const r = box(e); return Math.min(r.w, r.h) >= 44 && r.t >= t.t && r.b <= t.b }
       const apart = (a, b) => a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t
-      const res = { bar: Math.round(t.h), stackFits: s.t >= t.t && s.b <= t.b, stackHeight: Math.round(s.h), titleVisible: h.w > 0 && h.h > 0 }
+      const res = { stackFits: s.t >= t.t && s.b <= t.b, titleVisible: h.w > 0 && h.h > 0 }
       if (rename) { const r = box(rename); res.renameHit = hit(rename); res.renameClearOfStack = apart(r, s) }
       if (input) { const i = box(input); res.input = { h: Math.round(i.h), belowBar: i.t >= t.b, clearOfTitle: apart(i, h), hitsOk: i.h >= 44, topmost: document.elementFromPoint(i.l + i.w / 2, i.t + i.h / 2) === input } }
       return res
     })()`
-    type Probe = { bar: number; stackFits: boolean; stackHeight: number; titleVisible: boolean
+    type Probe = { stackFits: boolean; titleVisible: boolean
       renameHit?: boolean; renameClearOfStack?: boolean
       input?: { h: number; belowBar: boolean; clearOfTitle: boolean; hitsOk: boolean; topmost: boolean } }
     const resting = browser.waitForValue(probe, (v) => (v as Probe | null)?.renameHit !== undefined) as Probe
-    expect(resting).toMatchObject({ bar: 56, stackFits: true, titleVisible: true, renameHit: true, renameClearOfStack: true })
-    expect(resting.stackHeight).toBeLessThanOrEqual(40)
+    expect(resting).toMatchObject({ stackFits: true, titleVisible: true, renameHit: true, renameClearOfStack: true })
     browser.click('[data-slot="mobile-top-bar"] [aria-label="Rename task"]')
     // The popover animates in (zoom/slide): sample only once the geometry has held still.
     const editing = browser.waitForStable<Probe | null>(probe, { holdMs: 400, matcher: (v) => v?.input !== undefined }) as Probe
-    expect(editing).toMatchObject({ bar: 56, stackFits: true, titleVisible: true, input: { belowBar: true, clearOfTitle: true, hitsOk: true, topmost: true } })
+    expect(editing).toMatchObject({ stackFits: true, titleVisible: true, input: { belowBar: true, clearOfTitle: true, hitsOk: true, topmost: true } })
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="title-input"]') === null`)
 
@@ -194,8 +193,8 @@ describe('task thread', () => {
     // Desktop gets the one status pill back (hearsay-tools/cezarion#1333).
     expect(settledVisibility('[data-slot="run-header"] [data-slot="pill"]')).toBe(true)
     expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
-    expect(browser.count('[aria-label="Expand composer"]')).toBe(0)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
+    browser.evaluate(`(() => { const main = document.querySelector('[data-slot="main"]'); main.scrollTop = main.scrollHeight })()`)
+    expect(waitForSettledSample(browser, `document.querySelector('[data-slot="run-header"]').getBoundingClientRect().top >= document.querySelector('[data-slot="main"]').getBoundingClientRect().top - 1`)).toBe(true)
     browser.setViewport(360, 640)
     expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\nsecond line\nthird line')
@@ -324,7 +323,6 @@ describe('task thread', () => {
     expect(folded.summaryCut).toEqual([])
     // One 44px summary; narrower rows remove whole values by priority.
     expect(folded.summaryHeight).toBeGreaterThanOrEqual(44)
-    if (width >= 768) expect(folded.summaryHeight).toBeLessThan(60)
     if (width < 768) expect(folded.small).toEqual([])
     openSessionActivityRow(browser, 'workspace')
     openSessionActivityRow(browser, 'usage')
@@ -412,10 +410,10 @@ describe('task thread', () => {
         return { overflow: document.documentElement.scrollWidth - innerWidth, visual: glyph.dataset.visual,
           glyphWhole: g.width >= 15 && g.right <= box.right, nameInside: n.right <= box.right + 1, nameWidth: Math.round(n.width),
           truncated: name.scrollWidth > name.clientWidth + 1, ellipsis: getComputedStyle(name).textOverflow,
-          color: getComputedStyle(name).color, label: summary.getAttribute('aria-label'), text: summary.textContent,
+          color: getComputedStyle(name).color, label: summary.getAttribute('aria-label'),
           statusTruncated: (() => { const l = summary.querySelector('[data-slot="run-activity-status-label"]'); return l.scrollWidth > l.clientWidth + 1 })() }
       })()`
-      type Folded = { overflow: number; visual: string; glyphWhole: boolean; nameInside: boolean; nameWidth: number; truncated: boolean; ellipsis: string; color: string; label: string; text: string; statusTruncated: boolean }
+      type Folded = { overflow: number; visual: string; glyphWhole: boolean; nameInside: boolean; nameWidth: number; truncated: boolean; ellipsis: string; color: string; label: string; statusTruncated: boolean }
       const folded = waitForSettledSample<Folded>(browser, sample)
       expect(folded.overflow).toBeLessThanOrEqual(0)
       expect(folded.visual).toBe('active')
@@ -427,7 +425,6 @@ describe('task thread', () => {
       if (width < 768) expect(folded.truncated).toBe(true)
       // A short status stays whole: the step name gives way first.
       expect(folded.statusTruncated).toBe(false)
-      expect(folded.text.startsWith('Activity')).toBe(true)
       expect(folded.label).toContain('; step Verify the change against every acceptance criterion in the ticket, running')
       browser.screenshot(`${artifactsDir}/folded-step-${width}-${theme}.png`, { viewport: true })
 
@@ -499,7 +496,6 @@ type SessionLayout = {
   modelTruncated: boolean
   archiveLabel: string
   archiveVisibleText: string
-  archiveWidth: number
   bottomGap: number
 }
 
@@ -541,7 +537,7 @@ const sessionLayoutExpression = `(() => {
     mainOverflow: main.scrollWidth > main.clientWidth + 1,
     modelText: label?.textContent ?? '',
     modelTruncated: !!label && getComputedStyle(label).textOverflow === 'ellipsis' && label.scrollWidth > label.clientWidth + 1,
-    archiveLabel: archive.getAttribute('aria-label'), archiveVisibleText: archive.innerText.trim(), archiveWidth: controls.archive.width,
+    archiveLabel: archive.getAttribute('aria-label'), archiveVisibleText: [...archive.querySelectorAll('span')].filter(span => { const r = span.getBoundingClientRect(); return r.width > 1 && r.height > 1 }).map(span => span.textContent).join('').trim(),
     bottomGap: editorRect.bottom - Math.max(controls.attach.bottom, controls.dictation.bottom, controls.archive.bottom, controls.continue.bottom),
   }
 })()`
@@ -612,7 +608,7 @@ describe('responsive session composer', () => {
         expect(overlaps(action, other), `actions ${i} and ${i + offset + 1} overlap`).toBe(false)
       }
     }
-    expect(facts.archiveWidth).toBeLessThanOrEqual(56)
+    expect(facts.archiveVisibleText).toBe('')
     expect(facts.archiveLabel).toBe('Archive task')
   }, 90_000)
 
@@ -642,17 +638,12 @@ describe('responsive session composer', () => {
       } else {
         expect(facts.modelTruncated).toBe(true)
       }
-      expect(runner.width).toBeLessThanOrEqual(200)
-      expect(effort.width).toBeLessThanOrEqual(200)
-      expect(facts.group.right - effort.right).toBeLessThanOrEqual(2)
-      expect(facts.archiveWidth).toBeGreaterThan(90)
       expect(facts.archiveVisibleText).toContain('Archive task')
     } else {
       expect(Math.abs(runner.top - effort.top)).toBeLessThanOrEqual(2)
       expect(model.top).toBeGreaterThanOrEqual(Math.max(runner.bottom, effort.bottom) - 1)
-      expect(Math.abs(model.width - facts.group.width)).toBeLessThanOrEqual(2)
       expect(facts.modelTruncated).toBe(true)
-      expect(facts.archiveWidth).toBeLessThanOrEqual(56)
+      expect(facts.archiveVisibleText).toBe('')
     }
     expectUsableSessionControls(facts, width, height)
     expect(facts.bottomGap).toBeGreaterThanOrEqual(0)

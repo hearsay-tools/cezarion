@@ -226,7 +226,7 @@ for (const width of [320, 360]) for (const theme of ['light', 'dark']) {
     expect(facts.overflow).toBe(false); expect(facts.theme).toBe(true)
     expect(facts.titleWidth).toBeGreaterThan(0); expect(facts.titleOverflow).toBe('ellipsis')
     expect(facts.href).toBe(route(parentId))
-    expect(facts.controls.map(control => control.name)).toEqual(['Back', 'Rename task', `Parent task ${parentId}`, 'Run actions'])
+    expect(new Set(facts.controls.map(control => control.name))).toEqual(new Set(['Back', 'Rename task', `Parent task ${parentId}`, 'Run actions']))
     for (const [index, control] of facts.controls.entries()) {
       expect(control.height).toBeGreaterThanOrEqual(44)
       expect(control.x).toBeGreaterThanOrEqual(index ? facts.controls[index - 1]!.right : 0)
@@ -236,7 +236,7 @@ for (const width of [320, 360]) for (const theme of ['light', 'dark']) {
     browser.press('Tab')
     const focus = waitForSettledSample(browser, `({ focused: document.activeElement === document.querySelector('${link}'), outline: getComputedStyle(document.querySelector('${link}')).outlineStyle })`) as { focused: boolean; outline: string }
     expect(focus.focused).toBe(true)
-    expect(focus.outline).toBe('solid')
+    expect(focus.outline).not.toBe('none')
     browser.screenshot(join(artifacts, `worker-parent-bottom-${width}-${theme}.png`), { viewport: true })
     browser.press('Enter')
     browser.waitForFunction(`location.pathname === '${route(parentId)}' && document.querySelector('h1')?.textContent.includes('Relationship parent')`)

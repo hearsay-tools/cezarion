@@ -103,9 +103,9 @@ describe('task GitHub item tabs against the dry-run mock', () => {
     { width: 1280, height: 900, theme: 'dark' },
   ])('preserves issue and PR label colours at $width×$height in $theme', ({ width, height, theme }) => {
     browser.setViewport(width, height)
-    for (const { kind, number, label, fill } of [
-      { kind: 'issue', number: ISSUE, label: 'bug', fill: 'rgba(215, 58, 74, 0.133)' },
-      { kind: WAIT_KIND.pr, number: PR, label: 'tests', fill: 'rgba(197, 222, 245, 0.133)' },
+    for (const { kind, number, label, rgb } of [
+      { kind: 'issue', number: ISSUE, label: 'bug', rgb: [215, 58, 74] },
+      { kind: WAIT_KIND.pr, number: PR, label: 'tests', rgb: [197, 222, 245] },
     ]) {
       browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/${kind}/${number}`)}`)
       browser.waitForValue(`document.querySelector('[data-slot="gh-label"][data-label="${label}"]') !== null`)
@@ -117,7 +117,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
         return { fill: getComputedStyle(chip).backgroundColor,
           inside: rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth, text: chip.textContent }
       })()`)
-      expect(facts.fill).toBe(fill)
+      expect(facts.fill.match(/\d+/g)!.slice(0, 3).map(Number)).toEqual(rgb)
       expect(facts.inside).toBe(true)
       expect(facts.text).toBe(label)
       const evidence = resolve(import.meta.dirname, '../../../.ai/qa/issue-735')

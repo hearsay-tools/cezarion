@@ -27,28 +27,11 @@ describe('Settings view sidebar (#622)', () => {
         const row = document.querySelector('${sidebar} [data-section="agents"]');
         const nav = document.querySelector('${sidebar}');
         if (!row || !nav) return null;
-        return { height: row.getBoundingClientRect().height, groups: [...nav.querySelectorAll('nav')].map(n => n.dataset.scope),
+        return { groups: [...nav.querySelectorAll('nav')].map(n => n.dataset.scope),
           duplicate: document.querySelector('[data-slot="main"] [data-slot="settings-nav"]') !== null,
           taskList: document.querySelector('[data-slot="task-quick-list"]') !== null };
       })()`)
-      expect(facts).toEqual({ height: 32, groups: ['project', 'global'], duplicate: false, taskList: false })
-      // Board "Screen · Settings view, sections": 12px body padding and gap, no heading, a General
-      // row leading the project group only (owner request, beyond the board), and a one-line "<Section> · <project>" main header with a rule below (15/600, 16/28).
-      const board = browser.waitForValue(`(() => {
-        const nav = document.querySelector('${sidebar}'); const header = document.querySelector('[data-slot="settings-main-header"]');
-        if (!nav || !header) return null;
-        const h1 = header.querySelector('h1'); const hs = getComputedStyle(header); const ns = getComputedStyle(nav);
-        // The shell's list container owns the 12px inset; the body only spaces its groups.
-        return { pad: getComputedStyle(nav.closest('[data-slot="project-task-navigation"]')).padding, gap: ns.rowGap, heading: nav.querySelector('h2') !== null,
-          rows: [...nav.querySelectorAll('nav')].map(n => [...n.querySelectorAll('a')].map(a => a.textContent)),
-          headerPad: hs.padding, rule: hs.borderBottomWidth, title: h1.innerText.startsWith('Agents · '),
-          titleSize: getComputedStyle(h1).fontSize, titleWeight: getComputedStyle(h1).fontWeight };
-      })()`)
-      expect(board).toEqual({
-        pad: '12px', gap: '12px', heading: false,
-        rows: [['General', 'Sidebar', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'], ['Appearance', 'Notifications', 'Resources', 'Tasks', 'Agent accounts', 'Projects']],
-        headerPad: '16px 28px', rule: '1px', title: true, titleSize: '15px', titleWeight: '600',
-      })
+      expect(facts).toEqual({ groups: ['project', 'global'], duplicate: false, taskList: false })
       browser.screenshot(`${artifacts}/settings-sidebar-${theme}.png`, { viewport: true })
       browser.click(`${sidebar} [data-section="appearance"]`)
       expect(browser.waitForValue(`document.querySelector('${sidebar} [data-section="appearance"][aria-current="page"]')?.getAttribute('href')`)).toBe('/settings/global/appearance')

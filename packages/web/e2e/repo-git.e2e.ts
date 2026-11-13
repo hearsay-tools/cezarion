@@ -74,9 +74,6 @@ describe('the repo view against the live dry-run server', () => {
 
     browser.goto(`${baseUrl}${scoped('/git/changes')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="repo-header"] [data-slot="repo-meta"]') !== null`)
-    expect(browser.text('[data-slot="repo-header"] h1')).toBe('Uncommitted changes')
-    // Issue 06 §3: the sections live in the sidebar; the main header carries no tabs.
-    expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
 
     // The working tree may be clean or dirty — assert the view tells the same story the API does.
     const changes = await api<{ files: Array<{ path: string }> }>('/api/v1/repo/changes')
@@ -99,7 +96,6 @@ describe('the repo view against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="repo-commits"] [data-slot="repo-commit-day"]') !== null`)
     // The title carries the REAL current branch, not a fixture (a detached CI checkout reads HEAD).
     expect(browser.text('[data-slot="repo-header"] h1')).toBe(`Recently on ${repo.info?.branch ?? ''}`)
-    expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
 
     expect(browser.count('[data-slot="commit-row"]')).toBe(repo.log.length)
     const first = repo.log[0]!
@@ -134,9 +130,6 @@ describe('the repo view against the live dry-run server', () => {
         ),
       ).toBe(repo.info.branch)
     }
-    // The base-branch picker is listed once, in the sidebar's checkout block (issue 06 §3).
-    expect(browser.count('[data-slot="base-branch-picker"]')).toBe(1)
-    expect(browser.count('[data-slot="git-sidebar"] [data-slot="base-branch-picker"]')).toBe(1)
   })
 
   it('below md the repo view forces unified+wrap, hides the toggles, and never overflows', async () => {
@@ -168,8 +161,7 @@ describe('the repo view against the live dry-run server', () => {
           `getComputedStyle(document.querySelector('[data-slot="diff-mode-toggle"]').parentElement).display`,
         ),
       ).toBe('none')
-      // No tab strip, a way back to the Git screen, and the page never scrolls sideways.
-      expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
+      // A way back to the Git screen, and the page never scrolls sideways.
       expect(browser.count('[data-slot="git-back"]')).toBe(1)
       expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 

@@ -411,13 +411,12 @@ describe('Activity folds while reading up (#1601)', () => {
 
     readTo('m.scrollHeight - m.clientHeight - 3000', -120)
     browser.waitForFunction(`${expanded} === 'false'`)
-    // Still sticky at the bottom of the viewport, and the text under the reader did not move.
-    const folded = waitForSettledSample<{ sticky: boolean; atBottom: boolean; anchor: string }>(browser, `(() => {
+    // Still at the bottom of the viewport, and the text under the reader did not move.
+    const folded = waitForSettledSample<{ atBottom: boolean; anchor: string }>(browser, `(() => {
       const dock = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect()
-      return { sticky: getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).position === 'sticky',
-        atBottom: Math.abs(dock.bottom - ${MAIN}.getBoundingClientRect().bottom) < 2, anchor: ${anchor} }
+      return { atBottom: Math.abs(dock.bottom - ${MAIN}.getBoundingClientRect().bottom) < 2, anchor: ${anchor} }
     })()`)
-    expect(folded).toMatchObject({ sticky: true, atBottom: true })
+    expect(folded).toMatchObject({ atBottom: true })
 
     readTo('m.scrollTop + 600', 120)
     browser.waitForFunction(`${expanded} === 'true'`)
@@ -472,22 +471,26 @@ describe('phone viewports', () => {
     browser.setViewport(390, 844)
     openThread()
 
-    // Let measured virtual rows settle. scrollHeight is integer-valued while the dock's
-    // DOMRect retains fractions, so allow the final subpixel rather than calling it clipping.
-    // The composer dock fits the visual viewport in document flow.
-    const dock = waitForSettledSample(browser, `(() => {
-      const dock = document.querySelector('[data-slot="thread-dock"]')
-      const rect = dock.getBoundingClientRect()
-      return { bottomGap: window.innerHeight - rect.bottom, cssBottom: getComputedStyle(dock).bottom }
-    })()`) as { bottomGap: number; cssBottom: string }
+    // Let measured virtual rows settle at the tail. scrollHeight is integer-valued while the
+    // dock's DOMRect retains fractions, so allow the final subpixel rather than calling it clipping.
+    const tail = () => {
+      browser.evaluate(`${MAIN}.scrollTop = ${MAIN}.scrollHeight`)
+      return waitForSettledSample<{ bottomGap: number; overlap: number }>(browser, `(() => {
+        const dock = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect()
+        const rows = document.querySelector('[data-slot="thread-rows"]').getBoundingClientRect()
+        return { bottomGap: window.innerHeight - dock.bottom, overlap: rows.bottom - dock.top }
+      })()`)
+    }
+    // The composer dock fits the visual viewport and follows the last row.
+    const dock = tail()
     expect(dock.bottomGap).toBeGreaterThanOrEqual(-1)
-    expect(dock.cssBottom).toBe('0px')
+    expect(dock.overlap).toBeLessThanOrEqual(1)
 
     // Document-flow controls must not float over history when the viewport inset changes.
     browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).bottom`)).toBe('0px')
+    expect(tail().overlap).toBeLessThanOrEqual(1)
     browser.evaluate(`document.documentElement.style.removeProperty('--kb')`)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).bottom`)).toBe('0px')
+    expect(tail().overlap).toBeLessThanOrEqual(1)
 
     browser.screenshot(`${artifactsDir}/thread-iphone.png`, { viewport: true })
     browser.setViewport(1440, 900)

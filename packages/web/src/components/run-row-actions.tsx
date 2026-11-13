@@ -128,7 +128,7 @@ export function RunRowSwipeFrame({
 }: {
   inertReferences: boolean
   swipeable: boolean
-  swipe: Pick<ReturnType<typeof useSwipeToArchive>, 'surfaceRef' | 'offset' | 'past'>
+  swipe: Pick<ReturnType<typeof useSwipeToArchive>, 'surfaceRef' | 'offset' | 'phase' | 'past'>
   title: string
   onArchive: () => void
   children: React.ReactNode
@@ -139,6 +139,7 @@ export function RunRowSwipeFrame({
       ref={swipe.surfaceRef}
       data-slot="task-row-swipe"
       data-swipe={swipeable ? 'on' : undefined}
+      data-phase={swipeable ? swipe.phase : undefined}
       // `pan-y pinch-zoom`: the browser keeps vertical scrolling and pinch zoom; the gesture only
       // ever reads horizontal moves.
       className={cn('relative rounded-[6px]', swipeable && 'touch-pan-y touch-pinch-zoom overflow-hidden')}

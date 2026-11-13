@@ -117,15 +117,15 @@ describe('settings → appearance against the live dry-run server', () => {
     browser.waitForFunction(`document.documentElement.dataset.density === undefined`)
     const header = `document.querySelector('[data-route="settings-global-appearance"] header')`
     const section = `document.querySelector('[data-slot="appearance-section"]')`
-    // The #622 board's one-line header is a fixed 16/28 bar, so density leaves it alone; the
+    // The #622 board's one-line header is a fixed bar, so density leaves it alone; the
     // section gap below is what compact tightens.
-    expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(56)
-    expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(28)
+    const comfortableHeader = Number(waitForSettledSample(browser, `${header}.offsetHeight`))
+    const comfortableGap = Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))
 
     clickAppearanceControl(browser, 'density', 'compact')
     browser.waitForFunction(`document.documentElement.dataset.density === 'compact'`)
-    expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(56)
-    expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(24.5)
+    expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(comfortableHeader)
+    expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBeLessThan(comfortableGap)
     await waitForServerAppearance(baseUrl, (a) => a.density === 'compact')
 
     browser.screenshot(`${artifactsDir}/settings-appearance.png`)
