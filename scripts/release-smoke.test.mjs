@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { INSTALL_WAIT_MS, PUBLISH_WAIT_MS, bootEnv, cockpitAsset, failureLine, parseArgs, registryInstall, run } from './release-smoke.mjs';
 
-const { causesForStep } = createRequire(import.meta.url)('../.github/scripts/failure-diagnostics.cjs');
+const { causesForStep, sanitize } = createRequire(import.meta.url)('../.github/scripts/failure-diagnostics.cjs');
 
 test('the smoke takes a package, an exact version and an optional upgrade source', () => {
   assert.deepEqual(parseArgs(['--package', '@hearsay-tools/squawk', '--version', '1.2.1-rc.1']),
@@ -49,7 +49,7 @@ function fakeRegistry({ visibleAt = 0, installableAt = visibleAt, version = '1.2
         exec: (args, { timeout } = {}) => {
           calls.push({ at: now, command: args[0], args, timeout });
           if (args[0] === 'view') { if (now < visibleAt) throw notFound(); return `${version}\n`; }
-          if (now < installableAt) throw Object.assign(new Error('Command failed: npm install'), { stderr: '' });
+          if (now < installableAt) throw Object.assign(new Error('Command failed: npm install'), { stderr: '', status: 1, signal: null });
           return null;
         },
       };
@@ -148,6 +148,28 @@ test('the CI failure filer reads the failure the smoke ends on, not a wait line 
   const log = [...registry.logs, failure, '##[error]Process completed with exit code 1.'].join('\n');
   const causes = causesForStep({ run: { id: 1, run_attempt: 1 }, job: { id: 2 }, step: { number: 5, name: 'Clean install, boot and cockpit' }, log });
   assert.deepEqual(causes.map(cause => cause.title), [failure]);
+});
+
+// The filer's causes for a failed smoke step whose log is `lines`.
+const filed = lines => causesForStep({ run: { id: 1, run_attempt: 1 }, job: { id: 2 }, step: { number: 5, name: 'Clean install, boot and cockpit' },
+  log: [...lines, '##[error]Process completed with exit code 1.'].join('\n') }).map(cause => cause.title);
+
+test('a child process failure ends on a line the filer reads, not on its `Command failed` wrapper', async t => {
+  const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-test-'));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  // npm install writes to the inherited stdio, so its error carries no stderr text.
+  const registry = fakeRegistry({ installableAt: Infinity });
+  const error = await registryInstall(prefix, 'fake@1.2.1', registry.options()).then(() => assert.fail('the install must fail'), caught => caught);
+  const install = failureLine(error);
+  assert.match(install, /^release-smoke: Error: fake@1\.2\.1 did not install after 300 s \(\d+ attempts\): npm install ended with code 1$/);
+  assert.deepEqual(filed([...registry.logs, install]), [sanitize(install)]);
+  // A git or tool failure in run() reaches the same line without the deadline wrapper.
+  const git = failureLine(Object.assign(new Error('Command failed: git init -q -b main\nfatal: boom'), { status: 128, signal: null }));
+  assert.equal(git, 'release-smoke: Error: git init -q -b main ended with code 128');
+  assert.deepEqual(filed([git]), [sanitize(git)]);
+  const killed = failureLine(Object.assign(new Error('Command failed: npm view fake@1.2.1 version'), { status: null, signal: 'SIGTERM' }));
+  assert.equal(killed, 'release-smoke: Error: npm view fake@1.2.1 version ended with signal SIGTERM');
+  assert.equal(failureLine(new Error('Command failed: npm view x')), 'release-smoke: Error: npm view x did not complete');
 });
 
 // A package whose binary is a tiny server with the routes the smoke reads. Its project

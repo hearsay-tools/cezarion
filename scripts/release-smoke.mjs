@@ -78,12 +78,22 @@ function runNpm(args, { quiet = false, timeout } = {}) {
 // failure to .github/scripts/failure-diagnostics.cjs, which files the first such line.
 function reason(error) {
   const line = `${error.stderr ?? ''}`.split(/\r?\n/).find(text => /\S/.test(text) && !text.startsWith('npm error code '));
-  return (line ?? error.message.split('\n')[0]).trim().replace(/^npm (?:error|ERR!) /, '');
+  return (line ?? describe(error)).trim().replace(/^npm (?:error|ERR!) /, '');
+}
+
+// A child process error from execFileSync reads `Command failed: <command>`, which the filer
+// skips as a wrapper line; name the command and how it ended instead.
+function describe(error) {
+  const first = error.message.split('\n')[0];
+  const command = /^Command failed: (.+)$/.exec(first)?.[1];
+  if (!command) return first;
+  if (error.signal) return `${command} ended with signal ${error.signal}`;
+  return Number.isInteger(error.status) ? `${command} ended with code ${error.status}` : `${command} did not complete`;
 }
 
 // The line a failed smoke ends on, in the `Error:` form the CI failure filer reads as the cause.
 export function failureLine(error) {
-  return `release-smoke: Error: ${error.message}`;
+  return `release-smoke: Error: ${describe(error)}`;
 }
 
 // Each attempt may run for what is left of `waitMs`, and at least one poll interval, so a
