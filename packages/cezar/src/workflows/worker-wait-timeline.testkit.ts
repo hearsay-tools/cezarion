@@ -25,9 +25,10 @@ export async function until(predicate: () => boolean, explain?: () => string) {
     throw error;
   });
 }
-/** A run's events after `afterSeq`, one line each: seq, type, turn, step and the first characters of
- *  its text, note or message. An event without a `turnId` takes the one its `turn.started` opened, until the
- *  `turn-end`; events between turns show `turn=-`. The last line, `assertion`, takes the
+/** A run's events after `afterSeq`, one line each: seq, UTC time of day, type, turn, step and the
+ *  first characters of its text, note or message. The time shows whether a stuck wait began late or
+ *  stalled after its last event (hearsay-tools/squawk#2535). An event without a `turnId` takes the
+ *  one its `turn.started` opened, until the `turn-end`; events between turns show `turn=-`. The last line, `assertion`, takes the
  *  `: expected …` that Vitest appends to a message. */
 export function formatTimeline(runId: string, events: readonly RunEvent[], afterSeq = 0): string {
   const lines: string[] = []; let turn: string | undefined;
@@ -39,7 +40,7 @@ export function formatTimeline(runId: string, events: readonly RunEvent[], after
       const message = typeof event.message === 'object' && event.message !== null ? (event.message as { text?: unknown }).text : event.message;
       const said = typeof event.text === 'string' ? event.text : typeof message === 'string' ? message : '';
       const excerpt = said.replace(/\s+/g, ' ').trim();
-      lines.push(`  ${event.seq} ${event.type} turn=${own ?? turn ?? '-'} step=${event.stepId ?? '-'}`
+      lines.push(`  ${event.seq} ${event.ts.slice(11, 23)} ${event.type} turn=${own ?? turn ?? '-'} step=${event.stepId ?? '-'}`
         + (excerpt ? ` ${JSON.stringify(excerpt.length > 80 ? `${excerpt.slice(0, 80)}…` : excerpt)}` : ''));
     }
     if (event.type === 'turn-end') turn = undefined;
