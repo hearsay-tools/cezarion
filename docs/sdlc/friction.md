@@ -56,7 +56,7 @@ previous digest carried forward, by root cause. It checks each group against
 
 | Verdict | When |
 | --- | --- |
-| Act | One run lost more than 30 minutes to it, it gave a wrong result, or it occurred in two or more runs |
+| Act | One run lost more than 30 minutes to it, it gave a wrong result, it occurred in two or more runs, or it holds a `came back` finding |
 | Watch | A first occurrence below that bar. The digest carries it forward with its count and first-seen date |
 | Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days. A group with a `came back` finding is never dropped as fixed |
 
