@@ -32,17 +32,18 @@ function actionsData(s, route, args) {
 const headCheckRuns = s => s.checkRuns ?? s.jobs.map(({ id, name, status, conclusion }) => ({ id, name, status, conclusion }));
 // A provider read names the CodeRabbit check; the board's head listing does not.
 const providerRead = (route, args) => route.endsWith('/commits/{ref}/check-runs') && Boolean(args?.check_name);
+function checkRunsData(s, route, args) {
+  if (route.endsWith('/check-runs/{check_run_id}')) return s.checks.find(c => c.id === args.check_run_id);
+  if (args.check_name) return { total_count: s.checkTotal ?? s.checks.length, check_runs: s.checkPages?.[args.page - 1] ?? s.checks };
+  const runs = headCheckRuns(s);
+  return { total_count: runs.length, check_runs: runs };
+}
 function reviewData(s, route, args) {
   if (route.endsWith('/pulls/{pull_number}')) return s.pr;
   if (route.endsWith('/rules/branches/{branch}')) return s.rules ?? [{ type: 'required_status_checks',
     parameters: { required_status_checks: [{ context: 'Unit, build, E2E, and package' }] } }];
   if (route.endsWith('/commits/{ref}/status')) return { statuses: s.statuses ?? [] };
-  if (route.endsWith('/commits/{ref}/check-runs') && !args.check_name) {
-    const runs = headCheckRuns(s);
-    return { total_count: runs.length, check_runs: runs };
-  }
-  if (route.endsWith('/commits/{ref}/check-runs')) return { total_count: s.checkTotal ?? s.checks.length, check_runs: s.checkPages?.[args.page - 1] ?? s.checks };
-  if (route.endsWith('/check-runs/{check_run_id}')) return s.checks.find(c => c.id === args.check_run_id);
+  if (route.includes('/check-runs')) return checkRunsData(s, route, args);
   if (route.endsWith('/pulls/{pull_number}/files')) return s.files;
   if (route.endsWith('/contents/{path}')) return s.contents[`${args.ref}:${args.path}`];
   if (route.includes('/actions/')) return actionsData(s, route, args);
