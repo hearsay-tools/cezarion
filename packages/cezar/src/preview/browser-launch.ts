@@ -6,9 +6,11 @@ import { ChromiumError, launchChromium, resolveChromium, stopChromium } from './
 
 /** A task's Chromium as the preview host launches it (hearsay-tools/cezarion#781): resolve, launch, attach to its page. Split out of `host.ts`. */
 
-const PROFILE_RELEASE_WAIT_MS = 5_000;
 /** How long a closed Chromium and its helpers may take to exit before they get SIGKILL. */
 const BROWSER_KILL_GRACE_MS = 5_000;
+/** The release wait covers the grace, the SIGKILL and `stopGroup`'s 1 s wait for the group to
+ *  end, so a browser that needed SIGKILL is gone before its profile is deleted. */
+const PROFILE_RELEASE_WAIT_MS = BROWSER_KILL_GRACE_MS + 2_000;
 const STDERR_TAIL_CHARS = 4096;
 
 export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };

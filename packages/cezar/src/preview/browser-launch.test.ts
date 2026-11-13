@@ -148,11 +148,12 @@ describe('preview browser launch', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('bounds profile release at exactly five seconds when the browser never exits', async () => {
+  it('bounds profile release at exactly seven seconds when the browser never exits', async () => {
     vi.useFakeTimers();
     const done = vi.fn();
     const waiting = waitForExit({ exited: new Promise(() => {}) } as BrowserHandle).then(done);
-    await vi.advanceTimersByTimeAsync(4999);
+    // The 5 s kill grace, then SIGKILL and up to 1 s for the group to end, then 1 s of margin.
+    await vi.advanceTimersByTimeAsync(6999);
     expect(done).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await waiting;
