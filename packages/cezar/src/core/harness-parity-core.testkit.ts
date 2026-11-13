@@ -901,7 +901,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor print rejects an input receipt only when its process exits without a result, a failed turn; the print wire carries no provider rejection of an admitted prompt.',
+    reason: 'Cursor print rejects an input receipt when its process does not exit 0 after a result, a failed turn; the print wire carries no provider rejection of an admitted prompt.',
   },
   // U27 (hearsay-tools/cezarion#1525): the late-acknowledgement entry needs a turn that ends before
   // its input is acknowledged. The fresh-step and Continue cells run on every wire.
