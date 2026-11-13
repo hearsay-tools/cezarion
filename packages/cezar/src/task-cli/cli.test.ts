@@ -3,7 +3,7 @@ import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
-import { runTaskCommand, taskHelp, type TaskIo } from './cli.ts';
+import { runTaskCommand, taskHelp } from './cli.ts';
 import { TaskCliError } from './http.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { taskCliFixture } from './cli.testkit.ts';
@@ -250,14 +250,17 @@ describe('cez task', () => {
       expect(String(last().error)).toContain('no task webhook');
     });
 
-    it('opts in by default when discovery saw a webhook, and --no-notify opts out', async () => {
+    it('does not opt in by default on a project with a webhook; only --notify opts in', async () => {
       await withWebhook();
-      const hooked: TaskIo = { ...io(), discover: async () => ({ ...ctx.cockpit, hasWebhook: true }) };
-      expect(await runTaskCommand(['start', 'do it'], {}, hooked)).toBe(0);
+      expect(await run(['start', 'do it'])).toBe(0);
+      expect(last().notify).toBe(false);
+      expect(ctx.store.getRun(last().id as string)?.notify).toBeUndefined();
+      expect(await run(['start', 'do it', '--notify'])).toBe(0);
       expect(last().notify).toBe(true);
       expect(ctx.store.getRun(last().id as string)?.notify).toBe(true);
-      expect(await runTaskCommand(['start', 'do it', '--no-notify'], {}, hooked)).toBe(0);
+      expect(await run(['start', 'do it', '--no-notify'])).toBe(0);
       expect(last().notify).toBe(false);
+      expect(ctx.store.getRun(last().id as string)?.notify).toBeUndefined();
     });
 
     it('rejects --notify with --no-notify before discovering a cockpit', async () => {
