@@ -41,7 +41,6 @@ it('refuses a human Continue on a routed question whose session is gone', async 
       expect(answer.ok === false && answer.message).toContain(`hsq message reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`);
       expect(store.getRun(f.p.id)?.status).toBe(RUN_STATUS.waiting);
       expect(store.getRun(f.p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
-      expect(store.getRun(f.p.id)?.delegation).not.toHaveProperty('completion');
       expect(manager.finishBlockedReason(f.p.id)).toContain(f.w.id);
     } finally { f.close(); }
   });

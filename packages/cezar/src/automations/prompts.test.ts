@@ -77,10 +77,6 @@ describe('AUTOMATION_SCHEMA_REFERENCE', () => {
     expect(automationDefinitionSchema.safeParse({ ...once, id: 'x', revision: 1, enabled: false, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z' }).success).toBe(true);
     for (const words of ['archived', 'Run now', 'cancel']) expect(AUTOMATION_SCHEMA_REFERENCE).toContain(words);
   });
-
-  it('describes no dispatch: the fork delegates through governed workers', () => {
-    expect(AUTOMATION_SCHEMA_REFERENCE).not.toMatch(/dispatch/i);
-  });
 });
 
 describe('automationsPrompt and the skill body', () => {

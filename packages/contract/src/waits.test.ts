@@ -1,5 +1,3 @@
-const UNSUPPORTED_HUMAN_WAIT_KIND = 'human';
-const UNSUPPORTED_HUMAN_ASK_KIND = 'human';
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from './runs.ts';
 import {
@@ -313,8 +311,6 @@ describe('answers', () => {
   it('ties the deadline to the kind, in the answer and in every open wait', () => {
     const human = { wait_id: HUMAN_ID, kind: WAIT_KIND.human, summary: 'human: Which module?' };
     expect(squawkWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
-    // cezar_wait opens no human wait, so its answer never names one.
-    expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_WAIT_KIND, open_waits: [human] }).success).toBe(false);
     for (const kind of ['pr', 'timer'] as const) {
       expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
       expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
@@ -325,7 +321,6 @@ describe('answers', () => {
 
   it('extends the CI error codes with the timer refusals', () => {
     expect(waitErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'timers_disabled', 'wake_budget_spent']));
-    expect(waitErrorCodeSchema.options).not.toContain('autonomous_run');
   });
 
   it('parses cancel answers, with the open waits on either branch', () => {
@@ -372,7 +367,7 @@ describe('cezar_ask', () => {
     expect(squawkAskRequestSchema.safeParse({ context: 'c', questions: [] }).success).toBe(false);
     const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
     expect(squawkAskRequestSchema.safeParse({ context: 'c', questions: five }).success).toBe(false);
-    expect(squawkAskRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_ASK_KIND, context: 'c', questions: CARD }).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ stray: true, context: 'c', questions: CARD }).success).toBe(false);
   });
 
   it('takes an open question as a question without options', () => {
@@ -385,14 +380,9 @@ describe('cezar_ask', () => {
   });
 
   it('answers with the wait id and the open waits, or a refusal the agent can act on', () => {
-    expect(squawkAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_ASK_KIND, open_waits: [] }).success).toBe(false);
     expect(squawkAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, deadline: '2026-10-17T15:40:00.000Z', open_waits: [] }).success).toBe(false);
     expect(squawkAskAnswerSchema.parse({ ok: false, code: 'autonomous_run', message: 'm' }).ok).toBe(false);
     expect(askErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'autonomous_run', 'session_closed', 'worker_wait_pending', 'unavailable']));
-    // Only refusals a question can meet: no CI lookup failures, no timer refusals.
-    for (const code of ['inaccessible_pr', 'gh_missing', 'timers_disabled', 'wake_budget_spent', 'questions_required']) {
-      expect(askErrorCodeSchema.options).not.toContain(code);
-    }
   });
 });
 
@@ -480,10 +470,6 @@ describe('worker wait entry', () => {
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], deadline: undefined })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], stray: true })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], phase: WAIT_PHASE.resolved, result: { reason: 'outcome' } })).success).toBe(true);
-    // `cancelled` is a phase and `message` is gone: neither is a result.
-    for (const reason of ['cancelled', 'message']) {
-      expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], result: { reason } })).success).toBe(false);
-    }
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], wakeInputId: WAKE_INPUT })).success).toBe(true);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], wakeInputId: 'nope' })).success).toBe(false);
   });

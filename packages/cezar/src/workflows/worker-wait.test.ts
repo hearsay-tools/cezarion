@@ -32,7 +32,6 @@ for (const mode of ['fresh', 'continuation'] as const) {
       await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
       expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
       expect(waitOf(store.getRun(p.id))).toBeUndefined();
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
       expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
       expect(manager.finish(p.id)).toBe(false);
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');

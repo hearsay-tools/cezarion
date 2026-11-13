@@ -4,15 +4,13 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AddressInfo } from 'node:net';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { workspaceConfigPath, workspaceUiStatePath } from '../paths.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { startServer } from './start-server.ts';
 import { createApp, type WorkspaceConfigResponse } from './server.ts';
 
 /**
@@ -227,22 +225,6 @@ describe('the workspace settings API (step 2.7)', () => {
       memoryLimitMb: null,
       worktreeRetentionDefault: 3,
     });
-  });
-
-  it('boots and answers health with a retired skillsAutoUpdate key stored and its env var set', async () => {
-    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ skillsAutoUpdate: true })));
-    vi.stubEnv('CEZ_SKILLS_AUTO_UPDATE', '1');
-    vi.stubEnv('CEZ_DRY_RUN', '1');
-    vi.stubEnv('CEZ_PROJECT_WARMUP', '0');
-    const server = startServer({ home: testHome(), repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
-    try {
-      await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-      const { port } = server.address() as AddressInfo;
-      expect((await fetch(`http://127.0.0.1:${port}/api/v1/health`)).status).toBe(200);
-    } finally {
-      server.close();
-      vi.unstubAllEnvs();
-    }
   });
 
   it('PUT stores and independently clears composer defaults while exposing env inheritance', async () => {

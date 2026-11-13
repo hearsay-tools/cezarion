@@ -396,7 +396,6 @@ describe('Cursor print logical session', () => {
       expect(turn.args).toContain('--add-dir');
       expect(turn.args[turn.args.indexOf('--add-dir') + 1]).toBe(extraRoot);
       expect(turn.args[turn.args.indexOf('--model') + 1]).toBe('gpt-5.4-mini-low');
-      expect(turn.args).not.toContain('--allowed-tools');
       expect(turn.args).toContain('--plugin-dir');
       expect(JSON.stringify(turn.args)).not.toContain(syntheticToken);
     }

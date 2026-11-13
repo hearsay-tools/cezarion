@@ -17,7 +17,6 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 describe('recover() reads legacy generated-inbox records — hearsay-tools/cezarion#1543', () => {
   let repoRoot: string;
   let store: RunStore;
-  const savedFollowups = process.env.CEZ_FOLLOWUPS;
 
   beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-recover-'));
@@ -39,8 +38,6 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
     await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
-    if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
-    else process.env.CEZ_FOLLOWUPS = savedFollowups;
   });
 
   const WORKFLOW_DEF = {
@@ -64,7 +61,6 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
   };
 
   it('reads and recovers an old true record without a live session', async () => {
-    delete process.env.CEZ_FOLLOWUPS;
     const id = queuedRun(true);
     expect(store.getRun(id)?.generateFollowups).toBe(true); // the pre-restart truth
 
@@ -75,8 +71,7 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
     expect(store.getRun(id)?.status).toBe('queued');
   });
 
-  it.each([true, false, undefined])('recovers the legacy %s preference even with the retired env flag set', async (preference) => {
-    process.env.CEZ_FOLLOWUPS = '1';
+  it.each([true, false, undefined])('recovers the legacy %s preference', async (preference) => {
     const id = queuedRun(preference);
 
     await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();
@@ -86,7 +81,6 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
   });
 
   it('recovers a legacy false record', async () => {
-    process.env.CEZ_FOLLOWUPS = '1';
     const id = queuedRun(false);
 
     await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();

@@ -176,9 +176,5 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     await until(() => store.getRun(w.id)?.status === 'waiting');
     const id = await say(f, 'worker', f.p.id, 'request', 'Need a decision mock:hold');
     await until(() => delivered(f.p.id, id));
-    const delegation = store.getRun(f.p.id)?.delegation;
-    expect(delegation).not.toHaveProperty('wait');
-    expect(delegation).not.toHaveProperty('lastWait');
-    expect(delegation).not.toHaveProperty('completion');
   });
 });

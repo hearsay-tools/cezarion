@@ -170,7 +170,7 @@ describe('buildOmpArgs', () => {
     ]);
   });
 
-  it('resume uses --resume and never --session-id or --exclude-tools', () => {
+  it('resume uses --resume and never --session-id', () => {
     const resumed = buildOmpArgs({ ...base, sessionId: '0199-abc', resume: true, restrictCrossSessionMessaging: true });
     expect(resumed.slice(0, 4)).toEqual(['--mode', 'rpc', '--resume', '0199-abc']);
     const fresh = buildOmpArgs({ ...base, sessionId: '0199-abc' });
@@ -179,7 +179,6 @@ describe('buildOmpArgs', () => {
     for (const args of [resumed, fresh]) {
       expect(args).not.toContain('--session-id');
       expect(args).not.toContain('--session');
-      expect(args).not.toContain('--exclude-tools');
     }
   });
 

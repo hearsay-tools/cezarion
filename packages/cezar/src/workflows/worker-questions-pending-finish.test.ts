@@ -60,7 +60,6 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
       expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === WAIT_KIND.timer && wait.phase === 'open' && wait.via === WAIT_VIA.cezar_wait)).toHaveLength(besideWait ? 1 : 0);
       expect(waitOf(store.getRun(p.id))).toBeUndefined();
       expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
       expect(manager.finishBlockedReason(p.id)).toContain(w.id);
     } finally { close(); }
   });

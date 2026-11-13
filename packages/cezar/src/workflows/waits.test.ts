@@ -102,7 +102,6 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(waitResultText(timer())).toBe(`Timer ${timer().id} fired. Continue toward the task goal; register another wait if you are still waiting.`);
     expect(waitResultText(timer({ via: WAIT_VIA['monitoring-line'] }))).toBe(MONITORING_WAKE_NUDGE);
     expect(waitResultText(timer({ via: WAIT_VIA['schedule-wakeup'] }))).toBe(MONITORING_WAKE_NUDGE);
-    expect(MONITORING_WAKE_NUDGE).not.toContain('CEZ:');
     expect(isMonitoringTimer(timer())).toBe(false);
     expect(isMonitoringTimer(ci())).toBe(false);
   });

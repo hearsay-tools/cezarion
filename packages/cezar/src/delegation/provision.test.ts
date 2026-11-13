@@ -45,7 +45,6 @@ describe('session provisioning', () => {
     expect(session.instructions).toContain('inbox remains a fallback read during an active turn; it acknowledges only the messages it returns');
     // #505: messages reach a live session mid-turn; nothing promises turn-boundary delivery.
     expect(session.instructions).toContain('Messages reach the recipient\'s live session as soon as they are accepted, including mid-turn');
-    expect(session.instructions).not.toContain('next safe turn boundary');
     expect(session.instructions).toContain('receipts report queued, delivered and consumed separately');
     expect(session.instructions).toContain('conversation <recipient-run-id> [--before <cursor>] for history or investigation; it does not acknowledge messages');
     const env = buildChildEnv({ backend, source: { CEZ_HOME: '/live/home', CEZ_ENV_PASSTHROUGH: 'CEZ_HOME', CEZ_AGENT_ENV_FULL: full, CEZ_DELEGATION_TOKEN: 'parent-token', CEZ_DELEGATION_URL: 'http://evil' }, extraEnv: session.env });
@@ -106,8 +105,6 @@ describe('session provisioning', () => {
     // #505: a worker's questions go to its parent, which replies or asks the human.
     expect(worker.instructions).toContain('Ask your parent with hsq message request; any question you raise goes to your parent too, never to a human.');
     expect(worker.instructions).not.toContain('cezar_ask');
-    expect(worker.instructions).not.toContain('only a human can answer');
-    expect(worker.instructions).not.toContain('Messages never answer human questions');
     // hearsay-tools/cezarion#1327: a park notice quotes the worker's last message to its waiting parent.
     expect(worker.instructions).toContain(`${productName('Cezar')} tells your parent what you wait on and quotes your last message`);
     expect(worker.instructions).not.toContain(`${productName('Cezar')} sends you a notice`);

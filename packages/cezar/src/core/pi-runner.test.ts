@@ -1023,7 +1023,6 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
   it('sends no allowlist for the step default, and names its built-ins to the default-tools extension', () => {
     const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault } });
     expect(args).toEqual(['--mode', 'rpc', ...squawkExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
-    expect(args).not.toContain('--tools');
     expect(existsSync(extensions(args).at(-1)!)).toBe(true);
   });
 

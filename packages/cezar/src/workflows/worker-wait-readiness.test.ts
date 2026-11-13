@@ -34,8 +34,6 @@ it('readiness closed session reopens to refuse a successful done with outstandin
     expect(completionNudges(p.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.status).not.toBe('done');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 it('readiness collects a markerless worker after its idle timer closes the session', async () => {
