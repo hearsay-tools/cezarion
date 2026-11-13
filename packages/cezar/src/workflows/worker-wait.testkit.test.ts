@@ -3,6 +3,7 @@ import type { RunEvent } from '../runs/store.ts';
 import { formatTimeline, until } from './worker-wait-timeline.testkit.ts';
 
 const ts = '2026-10-20T10:00:00.000Z';
+const late = '2026-10-20T10:00:13.640Z';
 const events: RunEvent[] = [
   { seq: 1, ts, type: 'step-start', stepId: 'task', name: 'Task' },
   { seq: 2, ts, type: 'turn.started', stepId: 'task', turnId: 'turn_1' },
@@ -12,22 +13,22 @@ const events: RunEvent[] = [
   { seq: 6, ts, type: 'turn.completed', stepId: 'task', turnId: 'turn_1' },
   { seq: 7, ts, type: 'turn-end', stepId: 'task' },
   { seq: 8, ts, type: 'note', message: `nudge ${'x'.repeat(100)}` },
-  { seq: 9, ts, type: 'turn.started', stepId: 'task', turnId: 'turn_2' },
+  { seq: 9, ts: late, type: 'turn.started', stepId: 'task', turnId: 'turn_2' },
   { seq: 10, ts, type: 'turn-end', stepId: 'task' },
 ];
 
 describe('the event timeline in assertion messages (hearsay-tools/cezarion#1292)', () => {
-  it('lists each event after the seq with its type, turn, step and the start of its text or message', () => {
+  it('lists each event after the seq with its time, type, turn, step and the start of its text or message', () => {
     expect(formatTimeline('run-1', events, 2)).toBe([
       'events of run run-1 after seq 2:',
-      '  3 tool-call turn=turn_1 step=task',
-      '  4 conversation-message turn=turn_1 step=- "API correction: use v2"',
-      '  5 text turn=turn_1 step=task "Read the \\"correction\\""',
-      '  6 turn.completed turn=turn_1 step=task',
-      '  7 turn-end turn=turn_1 step=task',
-      `  8 note turn=- step=- "nudge ${'x'.repeat(74)}…"`,
-      '  9 turn.started turn=turn_2 step=task',
-      '  10 turn-end turn=turn_2 step=task',
+      '  3 10:00:00.000 tool-call turn=turn_1 step=task',
+      '  4 10:00:00.000 conversation-message turn=turn_1 step=- "API correction: use v2"',
+      '  5 10:00:00.000 text turn=turn_1 step=task "Read the \\"correction\\""',
+      '  6 10:00:00.000 turn.completed turn=turn_1 step=task',
+      '  7 10:00:00.000 turn-end turn=turn_1 step=task',
+      `  8 10:00:00.000 note turn=- step=- "nudge ${'x'.repeat(74)}…"`,
+      '  9 10:00:13.640 turn.started turn=turn_2 step=task',
+      '  10 10:00:00.000 turn-end turn=turn_2 step=task',
       'assertion',
     ].join('\n'));
   });
