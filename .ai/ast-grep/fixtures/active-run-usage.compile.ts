@@ -29,7 +29,7 @@ turns.add('forged');
 recordedTurns.clear();
 // @ts-expect-error Computed access does not grant Set.delete.
 turns['delete']('forged');
-const costs = alias.reportedClaudeCost!;
+const costs = alias.cumulativeSessionCost!;
 // @ts-expect-error A live map view has no set operation.
 costs.set('forged', 99);
 // @ts-expect-error Map bracket access is read-only too.
@@ -38,4 +38,4 @@ declare const view: Parameters<(view: UsageGroup) => void>[0];
 // @ts-expect-error Typed helper parameters have the same getter-only boundary.
 view.usageInvocation!.observed = true;
 // @ts-expect-error A helper cannot acquire a writable map.
-view.reportedClaudeCost!.set('forged', 99);
+view.cumulativeSessionCost!.set('forged', 99);
