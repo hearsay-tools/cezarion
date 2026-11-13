@@ -36,6 +36,17 @@ async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Prom
   return false;
 }
 
+/** Whether `value` is still the worktree its receipt and identity marker name, at its own real path:
+ * only then may destroy stop what runs there. Any doubt answers false. */
+export async function ownedWorktreePresent(repoRoot: string, value: WorkerWorkspace): Promise<boolean> {
+  try {
+    const workspace = await validateIntent(repoRoot, value);
+    const receipt = await readReceipt(await receiptLocation(repoRoot, workspace));
+    return !!receipt && same(receipt.workspace, workspace) && await liveGitDir(repoRoot, workspace) === receipt.gitDir &&
+      await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) === workspace.resourceId;
+  } catch { return false; }
+}
+
 /** A removal that could not take the worktree mutation lock in time. Contention clears without
  * changing anything a destroy can observe, so a retry must not skip it (hearsay-tools/cezarion#879). */
 export const WORKTREE_LOCK_BUSY_ERROR = 'Owned resources retained: worktree mutation lock is busy; retry destroy later';

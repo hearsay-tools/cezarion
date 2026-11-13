@@ -203,8 +203,10 @@ export class WorkerCleanup {
      * failure. A complete destroy keeps nothing, and neither does a failure no key input or named
      * holder accounts for (lock contention, a failed Git step, an unnamed blocker): it can clear
      * without changing anything a tick could see, so the next tick attempts in full. */
+    // A worktree service that outlived its stop is retried by the next tick's full attempt.
+    let servicesStopped = true;
     const observed = (result: WorkerDestroyResult, holders: readonly number[], explained: boolean) => {
-      this.observeAttempt(project, workerId, result.state === 'complete' || !explained ? undefined : { key, holders: recordHolders(holders) });
+      this.observeAttempt(project, workerId, result.state === 'complete' || !explained || !servicesStopped ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
     const terminationFailure = (): WorkerDestroyResult => {
@@ -300,7 +302,7 @@ export class WorkerCleanup {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
       // Before either holder scan: the termination proof of a crashed generation scans the worktree too.
-      await stopWorktreeServices(workspace.path);
+      servicesStopped = await stopWorktreeServices(project.root, workspace);
       assertAttached();
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();
