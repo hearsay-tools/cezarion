@@ -25,7 +25,7 @@ export default defineConfig({
     environment: 'node',
     // failure-setup names the running test for the seam's failure bundles and writes one for a
     // plain `expect` failure, so a red spec always leaves page state behind (#408).
-    setupFiles: ['../../../scripts/test-browser-home-env.mjs', './fetch-setup.mjs', './failure-setup.ts'],
+    setupFiles: ['../../../scripts/test-browser-home-env.mjs', './fetch-setup.mjs', './artifacts-setup.ts', './failure-setup.ts'],
     include: ['**/*.e2e.ts'],
     // One browser session, one server: parallel specs would fight over both.
     fileParallelism: false,

@@ -1,6 +1,6 @@
 import { checkWorkspaceResolution } from '../../../scripts/check-workspace-resolution.mjs'
 import { execFile } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -60,9 +60,6 @@ export async function setup(): Promise<() => void> {
     }
   }
   try {
-    // Specs write evidence straight into this folder and only screenshots create it, so in a
-    // shuffled order a spec could write before any screenshot ran (hearsay-tools/squawk#3494).
-    mkdirSync(resolve(root, '.ai/qa/artifacts_e2e'), { recursive: true })
     // The wrapper already bootstrapped with its requested --server-env flags. Booting
     // again here would discard those flags, and could replace our own server at the TTL.
     if (!(previousToken && process.env.TEST_ENV_LEASE_BOOTSTRAPPED === '1')) {
