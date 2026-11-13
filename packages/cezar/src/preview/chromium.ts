@@ -456,13 +456,15 @@ export async function stopChromium(proc: ChildProcess, graceMs = 0): Promise<voi
   if (proc.pid !== undefined) await stopGroup({ pid: proc.pid, child: proc }, { graceMs });
 }
 
-/** SIGKILL for the whole group while Node still holds the leader, so `-pid` names its group. */
-function killChromium(proc: ChildProcess): void {
+/** SIGKILL for the whole group, then a wait until no member runs. The first signal goes while
+ *  Node still holds the leader, so `-pid` names its group; `stopChromium` also reaches helpers
+ *  whose leader exited before the launch failed. */
+async function killChromium(proc: ChildProcess): Promise<void> {
   const held = proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null;
   if (held && process.platform !== 'win32') {
-    try { process.kill(-proc.pid!, 'SIGKILL'); return; } catch { /* the group already ended */ }
+    try { process.kill(-proc.pid!, 'SIGKILL'); } catch { /* the group already ended */ }
   }
-  proc.kill('SIGKILL');
+  await stopChromium(proc);
 }
 
 /** One launch attempt. A timed-out attempt is killed and has exited (or had `KILLED_EXIT_WAIT_MS`
@@ -507,9 +509,9 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
     wake();
   });
 
-  const fail = (kind: 'timeout' | 'exited', message: string, stalled = false): ChromiumError => {
+  const fail = async (kind: 'timeout' | 'exited', message: string, stalled = false): Promise<ChromiumError> => {
     browser?.close();
-    killChromium(proc);
+    await killChromium(proc);
     const stderrTail = tail.toString('utf8');
     if (missing) return new ChromiumError('not-installed', stderrTail, message);
     const ErrorType = stalled ? ChromiumStallError : ChromiumError;
@@ -541,9 +543,9 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
     clearTimeout(closeTimer);
     exit ??= 'Chromium closed its DevTools pipe';
   }
-  if (exit) throw fail('exited', exit);
+  if (exit) throw await fail('exited', exit);
   if (ready && browser) return { proc, browser };
-  const error = fail('timeout', expired === 'hard' ? `Chromium exceeded the ${LAUNCH_HANG_GUARD_MS / 1000} s hang guard (${bin})` : `Chromium was silent for ${timeoutMs / 1000} s (${bin})`, expired === 'stall');
+  const error = await fail('timeout', expired === 'hard' ? `Chromium exceeded the ${LAUNCH_HANG_GUARD_MS / 1000} s hang guard (${bin})` : `Chromium was silent for ${timeoutMs / 1000} s (${bin})`, expired === 'stall');
   let killedTimer: NodeJS.Timeout | undefined;
   await Promise.race([closed, new Promise<void>(resolve => (killedTimer = setTimeout(resolve, KILLED_EXIT_WAIT_MS)))]);
   clearTimeout(killedTimer);

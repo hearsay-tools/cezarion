@@ -540,21 +540,25 @@ setInterval(()=>{},1000);`,
     expect(existsSync(record)).toBe(false);
   });
 
-  it.skipIf(process.platform !== 'linux')('stops the helpers Chromium forked too, even one that ignores SIGTERM (hearsay-tools/squawk#2458)', async () => {
+  // A helper that ignores SIGTERM, forked before the fake answers on its pipe or exits.
+  it.skipIf(process.platform !== 'linux').each([
+    { when: 'it is stopped', leader: `${ANSWER_PIPE}\nsetInterval(()=>{},1000);` },
+    { when: 'its leader exits before the handshake', leader: 'process.exit(3);' },
+  ])('ends the helpers Chromium forked too when $when (hearsay-tools/squawk#2458)', async ({ leader }) => {
     const helperFile = join(dir, 'helper.pid');
     const bin = script(
       'fake-chrome-helper',
       `const fs=require('fs');const {spawn}=require('child_process');
 const helper=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'});
 fs.writeFileSync(${JSON.stringify(helperFile)}, String(helper.pid));
-${ANSWER_PIPE}
-setInterval(()=>{},1000);`,
+${leader}`,
     );
-    // The fake writes the helper's pid before it answers on the pipe, so the file is there.
-    const { proc } = await launchChromium(bin, join(dir, 'profile'), {});
+    const launched = await launchChromium(bin, join(dir, 'profile'), {}).catch((error: unknown) => ({ error }));
+    if ('proc' in launched) await stopChromium(launched.proc);
+    else expect(launched.error).toMatchObject({ kind: 'exited' });
+    // The fake writes the pid before it answers or exits. A killed helper may stay a zombie
+    // until it is reaped; it runs no more code.
     const helper = Number(readFileSync(helperFile, 'utf8'));
-    await stopChromium(proc);
-    // A killed helper may stay a zombie until it is reaped; it runs no more code.
     const state = (() => { try { return readFileSync(`/proc/${helper}/stat`, 'utf8').split(') ')[1]?.[0]; } catch { return undefined; } })();
     expect(state === undefined || state === 'Z').toBe(true);
   });
