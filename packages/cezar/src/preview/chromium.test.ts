@@ -540,7 +540,8 @@ setInterval(()=>{},1000);`,
     expect(existsSync(record)).toBe(false);
   });
 
-  // A helper that ignores SIGTERM, forked before the fake answers on its pipe or exits.
+  // A helper the fake forks before it answers on its pipe or exits. It shares the fake's group
+  // only when Chromium is spawned as a group leader.
   it.skipIf(process.platform !== 'linux').each([
     { when: 'it is stopped', leader: `${ANSWER_PIPE}\nsetInterval(()=>{},1000);` },
     { when: 'its leader exits before the handshake', leader: 'process.exit(3);' },
@@ -549,7 +550,7 @@ setInterval(()=>{},1000);`,
     const bin = script(
       'fake-chrome-helper',
       `const fs=require('fs');const {spawn}=require('child_process');
-const helper=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'});
+const helper=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
 fs.writeFileSync(${JSON.stringify(helperFile)}, String(helper.pid));
 ${leader}`,
     );
