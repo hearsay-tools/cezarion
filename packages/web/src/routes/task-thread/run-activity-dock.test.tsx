@@ -668,7 +668,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     renderDock(fresh({ referencedIssueUrl: 'https://github.com/owner/repo/issues/15', referencedPullRequestUrl: 'https://github.com/owner/repo/pull/42' }), [])
     ensureOpen()
     const foldedChip = sectionHead('workspace').querySelector<HTMLElement>('[data-slot="pr-chip"]')!
-    expect(foldedChip.hasAttribute('tabindex')).toBe(false)
+    expect(foldedChip.tabIndex).toBe(-1)
     fireEvent.click(sectionHead('workspace'))
     const linked = section('workspace')!.querySelector('[data-slot="linked-references"]')!
     expect(linked.querySelector('[data-reference-kind="PR"]')?.textContent).toContain('PRs')
