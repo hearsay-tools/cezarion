@@ -1631,7 +1631,7 @@ Without the key nothing runs, exactly as before. Examples:
 
 A worker's worktree can start things that keep running after the worker settles: a test
 server, a file watcher, a container. Worker destroy refuses while a process still works in
-the worktree, and names each one by its pid and command. Give the project a
+the worktree, and names each one by its pid and executable name, never its arguments. Give the project a
 `worktreeTeardown` and destroy runs those commands in the worker's worktree first:
 
 ```jsonc

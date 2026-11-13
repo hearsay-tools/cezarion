@@ -130,44 +130,26 @@ export function processCwdUnder(pid: number, dirs: readonly string[], platform: 
   return found !== 'unknown' && found.length > 0;
 }
 
-/** A flag whose value may be a credential: the refusal drops it and every argument after it. */
-const SECRET_FLAG = /pass|token|secret|key|auth|cred|cookie/i;
-
-/** A command line as a refusal may show it: the program by its base name, `name=value` arguments by
- * their name only, nothing from a flag that may carry a credential on, and at most 160 characters.
- * Destroy errors are persisted and returned by the API, so no argument value that may be a secret
- * reaches them. */
-export function redactedCommand(args: readonly string[]): string | undefined {
-  const [program = '', ...rest] = args.filter(Boolean);
-  // A process title (`tool <repo> daemon …`) is one argument with spaces, not a program path.
-  const [name = '', ...words] = program.includes(' ') ? program.split(/\s+/) : [basename(program)];
-  const shown: string[] = [name];
-  for (const arg of [...words, ...rest]) {
-    const eq = arg.indexOf('=');
-    shown.push(eq > 0 ? `${arg.slice(0, eq + 1)}…` : arg);
-    if (arg.startsWith('-') && SECRET_FLAG.test(arg)) { if (eq < 0) shown.push('…'); break; }
-  }
-  const command = shown.join(' ').replace(/\s+/g, ' ').trim();
-  return !command ? undefined : command.length > 160 ? `${command.slice(0, 159)}…` : command;
-}
-
-/** One process's command line for a refusal a human reads, never for a decision; undefined when it
- * cannot be read. */
-function processCommand(pid: number): string | undefined {
-  let args: string[] | undefined;
+/** One process's executable name, never its arguments: destroy errors are persisted and returned by
+ * the API, and any argument may carry a secret. Undefined when it cannot be read. For a refusal a
+ * human reads, never for a decision. */
+function processName(pid: number): string | undefined {
+  let name: string | undefined;
   if (process.platform === 'linux') {
-    try { args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch { return undefined; }
+    // The executable file; `comm` is a thread name the process may change (Node's is `node-MainThread`).
+    try { name = basename(readlinkSync(`/proc/${pid}/exe`)); }
+    catch { try { name = readFileSync(`/proc/${pid}/comm`, 'utf8'); } catch { return undefined; } }
   } else if (process.platform === 'darwin') {
-    const ps = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
-    args = ps.status === 0 ? ps.stdout.trim().split(' ') : undefined;
+    const ps = spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
+    name = ps.status === 0 ? basename(ps.stdout.trim()) : undefined;
   }
-  return args && redactedCommand(args);
+  return name?.trim() || undefined;
 }
 
-/** Holder pids with their commands, `123 (sleep 30), 456`, so a refusal tells a test server from an
- * agent's leftover (hearsay-tools/squawk#914). At most 8 are named. */
+/** Holder pids with their executable names, `123 (sleep), 456`, so a refusal tells a test server from
+ * an agent's leftover (hearsay-tools/squawk#914). At most 8 are named. */
 export function describeProcesses(pids: readonly number[]): string {
-  const named = pids.slice(0, 8).map(pid => { const command = processCommand(pid); return command ? `${pid} (${command})` : String(pid); });
+  const named = pids.slice(0, 8).map(pid => { const name = processName(pid); return name ? `${pid} (${name})` : String(pid); });
   return named.join(', ') + (pids.length > 8 ? ', …' : '');
 }
 

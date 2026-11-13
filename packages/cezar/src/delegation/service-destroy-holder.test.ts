@@ -67,7 +67,7 @@ describe('destroy backoff holder', { timeout: 30_000 }, () => {
     useTeardown(failing, stop(holder.pid!));
     const refused = await f.service.destroy(f.caller, { workerId });
     expect(refused).toMatchObject({ state: 'incomplete' });
-    expect(refused.error).toMatch(new RegExp(`processes ${holder.pid} \\(sleep 30\\)`));
+    expect(refused.error).toMatch(new RegExp(`processes ${holder.pid} \\(sleep\\)`));
     expect(f.store.readEvents(workerId).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('worktree teardown failed:')))
       .toEqual([expect.objectContaining({ message: expect.stringMatching(/^worktree teardown failed: `echo run .*` exited 3$/) })]);
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
@@ -156,7 +156,7 @@ describe('destroy backoff holder', { timeout: 30_000 }, () => {
     onTestFinished(() => { late?.kill('SIGKILL'); });
     execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
     await vi.waitFor(() => expect(late).toBeDefined(), { timeout: 10_000 });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.error).toMatch(new RegExp(`processes ${late!.pid} \\(sleep 30\\)`)), { timeout: 10_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.error).toMatch(new RegExp(`processes ${late!.pid} \\(sleep\\)`)), { timeout: 10_000 });
     const exited = new Promise<void>(resolve => late!.once('exit', () => resolve()));
     late!.kill('SIGKILL'); await exited;
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });

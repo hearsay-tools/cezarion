@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasLinuxPython, singleThreadZombie, threadHoldingPort } from '../linux-zombie.testkit.ts';
 import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
-import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, redactedCommand, scanProcessCwds, sharedCwdScan, processCwdUnder } from './process-liveness.ts';
+import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, describeProcesses, scanProcessCwds, sharedCwdScan, processCwdUnder } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns, so host processes never enter a scan.
 // Keep cwd/stat/token reads real, including ENOENT after our child has exited;
@@ -333,21 +333,17 @@ it.runIf(linux)('counts a single-thread zombie as exited', async () => {
   finally { await zombie.stop(); }
 });
 
-// Destroy errors are persisted and returned by the API: a holder's command never carries a secret.
-describe('redactedCommand', () => {
-  it.each([
-    [['/usr/bin/sleep', '30'], 'sleep 30'],
-    [['node', 'server.js', '--port=8080', 'DATABASE_URL=postgres://u:dummy-secret@h/db'], 'node server.js --port=… DATABASE_URL=…'],
-    [['curl', '--token', 'dummy-secret', 'https://example.test'], 'curl --token …'],
-    [['tool', '--password=dummy-secret', '--next', 'x'], 'tool --password=…'],
-    [['tool repo daemon @1 cli daemon /work/tree', ''], 'tool repo daemon @1 cli daemon /work/tree'],
-    [[''], undefined],
-  ])('%j shows %j', (args, expected) => {
-    const shown = redactedCommand(args);
-    expect(shown).toBe(expected);
-    expect(shown ?? '').not.toContain('dummy-secret');
-  });
-  it('cuts a long command to 160 characters', () => {
-    expect(redactedCommand(['node', 'x'.repeat(300)])).toHaveLength(160);
-  });
+// Destroy errors are persisted and returned by the API: a holder is named by its executable only, so
+// no argument, in any form, reaches them.
+it.runIf(process.platform === 'linux' || process.platform === 'darwin')('describeProcesses names the executable and no argument', async () => {
+  const secret = 'dummy-secret';
+  const child = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(() => {}, 1e6)", '--',
+    `--password=${secret}`, '--token', secret, '-u', `user:${secret}`, `Authorization: Bearer ${secret}`, `https://user:${secret}@host`, `KEY=${secret}`],
+    { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    await new Promise(resolve => child.stdout!.once('data', resolve));
+    const shown = describeProcesses([child.pid!]);
+    expect(shown).toBe(`${child.pid} (node)`);
+    expect(shown).not.toContain(secret);
+  } finally { child.kill('SIGKILL'); }
 });

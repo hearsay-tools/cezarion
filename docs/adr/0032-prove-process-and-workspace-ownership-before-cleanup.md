@@ -42,7 +42,7 @@ identity marker name, at its own real path, it runs the project's optional `work
 commands there (hearsay-tools/squawk#914), before the termination proof and the holder scans.
 They stop what the worktree started for itself, such as a test server or a file watcher. A
 missing hook, a failed command or a timeout changes nothing else: the scans still decide, a
-remaining holder is named by its pid and command and never signalled, and the next scheduled
+remaining holder is named by its pid and executable name (never its arguments, which may hold secrets) and never signalled, and the next scheduled
 attempt runs the teardown again.
 
 Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts), [workspace-record.ts](../../packages/cezar/src/delegation/workspace-record.ts), [workspace-removal.ts](../../packages/cezar/src/delegation/workspace-removal.ts), [worktree-teardown.ts](../../packages/cezar/src/delegation/worktree-teardown.ts).
