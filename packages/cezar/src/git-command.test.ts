@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { git } from './git-command.ts';
+import { git, gitEnv } from './git-command.ts';
 
 /** The one git() helper: it acts on `cwd` even when the process env points git at another
  *  repository (hearsay-tools/squawk#3207), and it reports an output over the buffer cap by name
@@ -17,7 +17,7 @@ describe('git', () => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-git-command-')));
     repo = join(root, 'repo');
     other = join(root, 'other');
-    for (const dir of [repo, other]) execFileSync('git', ['init', '-q', dir]);
+    for (const dir of [repo, other]) execFileSync('git', ['init', '-q', dir], { env: gitEnv() });
   });
   afterEach(() => {
     vi.unstubAllEnvs();
