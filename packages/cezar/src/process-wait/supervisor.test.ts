@@ -30,8 +30,8 @@ afterEach(() => {
 });
 
 describe('ProcessWaitSupervisor', () => {
-  // hearsay-tools/squawk#2904: `echo 3 > file` creates the file before it writes the code. The
-  // writer holds the empty file open across many polls, and none of them may settle the wait.
+  // The writer leaves the file empty between create and write, as `echo 3 > file` does. The probe
+  // test below pins that window without timing; this case runs the real poller through it.
   it('resolves exit_file with the code the command wrote, not with the empty file before it', async () => {
     const exitFile = join(root, 'build.exit');
     const proc = child(`: > ${exitFile}; sleep 0.2; echo 3 > ${exitFile}`);
@@ -84,6 +84,13 @@ describe('ProcessWaitSupervisor', () => {
 });
 
 describe('probeProcessWait', () => {
+  // hearsay-tools/squawk#2904: a shell creates the exit file before it writes the code.
+  it('keeps watching a live process whose exit file is still empty', () => {
+    const exitFile = join(root, 'created.exit');
+    writeFileSync(exitFile, '');
+    expect(probeProcessWait({ pid: process.pid, exitFile, deadline: new Date(Date.now() + 60_000).toISOString(), roots: { worktree: root } }, Date.now())).toBeUndefined();
+  });
+
   it('reads the exit file again when the process is gone: a command writes it just before it ends', () => {
     const exitFile = join(root, 'late.exit');
     vi.mocked(recordedProcessLive).mockImplementationOnce(() => { writeFileSync(exitFile, '3\n'); return false; });
