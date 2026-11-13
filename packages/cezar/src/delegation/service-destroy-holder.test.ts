@@ -2,13 +2,15 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { DatabaseSync } from 'node:sqlite';
 
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
+import { testHome } from '../home/test-home.testkit.ts';
+import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
 import { leaseIdentity, processStartToken } from '../detached-process.ts';
 import { stopWorktreeServices } from './worktree-services.ts';
 import { f, linux, cadence, settled, destroyOf, useDestroyBackoffFixture } from './service-destroy-backoff.testkit.ts';
@@ -25,12 +27,15 @@ async function fakeSquealDaemon(root: string): Promise<ChildProcess> {
 }
 
 /** A `squeal` on PATH that records its arguments and, after `failures` calls that change nothing,
- * ends `pid` as `squeal stop` ends its daemon. Returns the recorded calls. */
-function fakeSquealCli(pid: number, failures = 0): () => string {
+ * ends `pid` as `squeal stop` ends its daemon. With `gate`, it first waits for that file to exist.
+ * Returns the recorded calls. */
+function fakeSquealCli(pid: number, failures = 0, gate?: string): () => string {
   const bin = mkdtempSync(join(tmpdir(), 'cez-squeal-bin-')); const log = join(bin, 'calls');
   onTestFinished(() => rmSync(bin, { recursive: true, force: true }));
-  // Like `squeal stop`, it returns once the daemon is gone (bound: 10 s).
-  writeFileSync(join(bin, 'squeal'), `#!/bin/sh\necho "$@" >> '${log}'\n[ "$(wc -l < '${log}')" -gt ${failures} ] || exit 1\n` +
+  // Like `squeal stop`, it returns once the daemon is gone (bound: 10 s for the gate and for the exit).
+  writeFileSync(join(bin, 'squeal'), `#!/bin/sh\necho "$@" >> '${log}'\n` +
+    (gate ? `for i in $(seq 200); do [ -f '${gate}' ] && break; sleep 0.05; done\n` : '') +
+    `[ "$(wc -l < '${log}')" -gt ${failures} ] || exit 1\n` +
     `kill ${pid}\nfor i in $(seq 200); do kill -0 ${pid} 2>/dev/null || exit 0; sleep 0.05; done\n`);
   chmodSync(join(bin, 'squeal'), 0o755);
   vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
@@ -72,6 +77,25 @@ describe('destroy backoff holder', { timeout: 30_000 }, () => {
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
     expect(calls().split('\n')).toHaveLength(2);
+  });
+
+  it.runIf(linux)('a project replaced while the services stop runs starts no termination through the old manager', async () => {
+    await cadence();
+    const { workerId, workspace } = await settled(false);
+    const daemon = await fakeSquealDaemon(workspace.path);
+    const gate = join(mkdtempSync(join(tmpdir(), 'cez-squeal-gate-')), 'release');
+    onTestFinished(() => rmSync(dirname(gate), { recursive: true, force: true }));
+    const calls = fakeSquealCli(daemon.pid!, 0, gate);
+    const termination = vi.spyOn(f.manager, 'awaitRunTermination');
+    const explicit = f.service.destroy(f.caller, { workerId });
+    await vi.waitFor(() => expect(calls()).not.toBe(''), { timeout: 10_000 });
+    const replacementManager = createFixtureManager(f.store, f.root);
+    const detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    try {
+      writeFileSync(gate, '');
+      await expect(explicit).rejects.toThrow();
+      expect(termination).not.toHaveBeenCalled();
+    } finally { detachReplacement(); replacementManager.dispose(); }
   });
 
   // A destroy reaches only the services of the worktree it owns: never another checkout's, even
