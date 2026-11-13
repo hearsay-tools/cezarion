@@ -276,7 +276,7 @@ npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
 # Multiple spec filters and Vitest options work too:
 npm run test:e2e -- smoke.e2e.ts composer.e2e.ts --force-rebuild
 # Boot the shared server with an opt-in feature on (repeatable):
-npm run test:e2e -- inbox.e2e.ts --server-env=CEZ_FOLLOWUPS=1
+npm run test:e2e -- smoke.e2e.ts --server-env=CEZ_AUTOMATIONS=1
 ```
 
 No ambient `CEZ_*` variable reaches an e2e cockpit (hearsay-tools/cezarion#1045), so a run from

@@ -84,6 +84,12 @@ describe('session provisioning', () => {
     expect(instructions).toContain('A high-only model and a low-only model need separate step settings.');
     expect(instructions).toContain('Omission and auto do not clear an inherited effort pin.');
   });
+  it('teaches that several waits can be open, messages close none, and cancel-wait stops one', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toContain('Several waits can be open at once (workers, peers, CI, timers)');
+    expect(instructions).toContain('Messages wake you and close no wait');
+    expect(instructions).toContain('cancel-wait <wait-id> stops one wait');
+  });
   // hearsay-tools/cezarion#1995: the peer wait and the request kind are taught where the request wait is.
   it('teaches the peer wait and cezar_wait kinds request and peer', () => {
     const { instructions } = provision()!;

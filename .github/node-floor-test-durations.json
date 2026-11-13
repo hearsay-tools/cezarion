@@ -716,6 +716,7 @@
     "packages/web/src/routes/github/issue-linked-tasks.test.tsx": 705.4135400000002,
     "packages/web/src/routes/github/use-hand-to-agent-state.test.tsx": 37.23057799999992,
     "packages/web/src/routes/global-tasks.test.tsx": 7218.628307999999,
+    "packages/web/src/routes/inbox.test.tsx": 115.20186999999999,
     "packages/web/src/routes/new-task-autostart.test.ts": 6.624878999999993,
     "packages/web/src/routes/new-task-draft.test.ts": 14.411331000000018,
     "packages/web/src/routes/new-task-form.test.ts": 28.297978,
