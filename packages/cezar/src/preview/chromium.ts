@@ -1,6 +1,6 @@
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import type { Readable, Writable } from 'node:stream';
 import { z } from 'zod';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import { spawnDetached, stopGroup } from '../detached-process.ts';
 import { cdpOverPipe, type CdpConnection } from './cdp.ts';
 import { LAUNCH_HANG_GUARD_MS, watchChromiumLaunch, type chromiumProcessProgress } from './chromium-launch-progress.ts';
 
@@ -448,11 +449,28 @@ export async function launchChromium(
   }
 }
 
+/** Ends a launched Chromium and every helper it forked: SIGTERM to its process group, SIGKILL
+ *  after `graceMs`. Resolves once no member runs. The helpers outlive the main process for a
+ *  moment and still write the profile (hearsay-tools/squawk#2458). */
+export async function stopChromium(proc: ChildProcess, graceMs = 0): Promise<void> {
+  if (proc.pid !== undefined) await stopGroup({ pid: proc.pid, child: proc }, { graceMs });
+}
+
+/** SIGKILL for the whole group while Node still holds the leader, so `-pid` names its group. */
+function killChromium(proc: ChildProcess): void {
+  const held = proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null;
+  if (held && process.platform !== 'win32') {
+    try { process.kill(-proc.pid!, 'SIGKILL'); return; } catch { /* the group already ended */ }
+  }
+  proc.kill('SIGKILL');
+}
+
 /** One launch attempt. A timed-out attempt is killed and has exited (or had `KILLED_EXIT_WAIT_MS`
  *  to) before it rejects, so a retry does not share the profile with it. */
 async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEnv, timeoutMs: number, readProgress?: typeof chromiumProcessProgress): Promise<{ proc: ChildProcess; browser: CdpConnection }> {
-  // fd 3 carries commands into Chromium, fd 4 carries its replies and events out.
-  const proc = spawn(bin, chromiumArgs(profileDir, env), { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+  // fd 3 carries commands into Chromium, fd 4 carries its replies and events out. Chromium leads
+  // its own process group, so a stop reaches the helpers it forks (hearsay-tools/squawk#2458).
+  const proc = spawnDetached(bin, chromiumArgs(profileDir, env), { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   const pid = proc.pid;
   if (pid !== undefined) {
     const record = join(dirname(profileDir), CHROMIUM_PID_FILE);
@@ -491,7 +509,7 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
 
   const fail = (kind: 'timeout' | 'exited', message: string, stalled = false): ChromiumError => {
     browser?.close();
-    proc.kill('SIGKILL');
+    killChromium(proc);
     const stderrTail = tail.toString('utf8');
     if (missing) return new ChromiumError('not-installed', stderrTail, message);
     const ErrorType = stalled ? ChromiumStallError : ChromiumError;

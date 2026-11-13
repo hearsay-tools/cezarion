@@ -35,6 +35,7 @@ import {
   launchChromium,
   realFs,
   resolveChromium,
+  stopChromium,
   type ChromiumFs,
 } from './chromium.ts';
 
@@ -539,6 +540,25 @@ setInterval(()=>{},1000);`,
     expect(existsSync(record)).toBe(false);
   });
 
+  it.skipIf(process.platform !== 'linux')('stops the helpers Chromium forked too, even one that ignores SIGTERM (hearsay-tools/squawk#2458)', async () => {
+    const helperFile = join(dir, 'helper.pid');
+    const bin = script(
+      'fake-chrome-helper',
+      `const fs=require('fs');const {spawn}=require('child_process');
+const helper=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'});
+fs.writeFileSync(${JSON.stringify(helperFile)}, String(helper.pid));
+${ANSWER_PIPE}
+setInterval(()=>{},1000);`,
+    );
+    // The fake writes the helper's pid before it answers on the pipe, so the file is there.
+    const { proc } = await launchChromium(bin, join(dir, 'profile'), {});
+    const helper = Number(readFileSync(helperFile, 'utf8'));
+    await stopChromium(proc);
+    // A killed helper may stay a zombie until it is reaped; it runs no more code.
+    const state = (() => { try { return readFileSync(`/proc/${helper}/stat`, 'utf8').split(') ')[1]?.[0]; } catch { return undefined; } })();
+    expect(state === undefined || state === 'Z').toBe(true);
+  });
+
   it.skipIf(!posix)('does not trust a DevToolsActivePort left by an earlier launch', async () => {
     const profile = join(dir, 'profile');
     mkdirSync(profile, { recursive: true });
@@ -720,13 +740,13 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
   const posix = process.platform !== 'win32';
   let dir: string;
   let server: Server | undefined;
-  const procs: Array<{ kill: (signal?: NodeJS.Signals) => boolean }> = [];
+  const procs: ChildProcess[] = [];
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'cez-chromium-real-'));
   });
   afterEach(async () => {
-    for (const proc of procs.splice(0)) proc.kill('SIGKILL');
+    for (const proc of procs.splice(0)) await stopChromium(proc);
     await new Promise<void>(resolve => (server ? server.close(() => resolve()) : resolve()));
     server = undefined;
     rmSync(dir, { recursive: true, force: true });

@@ -4,8 +4,8 @@ import { checkWorkspaceResolution } from '../../scripts/check-workspace-resoluti
 
 checkWorkspaceResolution()
 
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 import { strictRunExits, throwRunExitViolations } from './src/runs/run-exits.ts'
 import { installOutboundGuard, throwOutboundRefusals } from './src/test-outbound-guard.testkit.ts'
@@ -40,6 +40,19 @@ process.env.TEMP = sandboxTemp
 // like the task keys below. The mirror directories live in the sandbox and go with it.
 const HOST_RUNNER_COMMANDS = ['claude', 'codex', 'opencode', 'pi', 'omp', 'agent', 'cursor-agent']
 process.env.PATH = hideHostCommands(HOST_RUNNER_COMMANDS, join(sandboxTemp, 'path'))
+// Nor the host gh, which answers with the developer's login and leaves its state in the sandbox
+// (hearsay-tools/squawk#2459), nor a browser opener (hearsay-tools/squawk#2369). They live in
+// /usr/bin, which is too large to mirror for every file, so a stub first on PATH refuses each one
+// with exit 127. A test that sets its own binary or PATH still runs what it names.
+const REFUSED_HOST_COMMANDS = ['gh', 'xdg-open', 'open']
+if (process.platform !== 'win32') {
+  const refused = join(sandboxTemp, 'refused')
+  mkdirSync(refused)
+  for (const name of REFUSED_HOST_COMMANDS) {
+    writeFileSync(join(refused, name), `#!/bin/sh\necho '${name}: server unit tests refuse the host command (vitest.setup.ts)' >&2\nexit 127\n`, { mode: 0o755 })
+  }
+  process.env.PATH = `${refused}${delimiter}${process.env.PATH}`
+}
 
 // Nothing in this suite may write to the developer's own `~/.cezar`. Most cases pin
 // `CEZ_HOME` themselves, but the pin is one global for the whole worker and their
