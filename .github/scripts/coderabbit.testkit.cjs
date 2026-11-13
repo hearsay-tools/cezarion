@@ -49,6 +49,7 @@ function reviewData(s, route, args) {
   if (route === 'GET /repos/{owner}/{repo}/pulls') return s.pulls ?? [s.pr];
   if (route === 'POST /graphql') return { data: { repository: { pullRequest: { reviewThreads: s.threadPage ?? {
     nodes: s.threads, pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+  if (route === 'GET /rate_limit') return { resources: { core: { remaining: s.coreRemaining ?? 5000, reset: 1 } } };
   throw new Error(`Unexpected route ${route}`);
 }
 function fixture() {

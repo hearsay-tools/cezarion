@@ -8,6 +8,7 @@ const { readCodeRabbitAdmission, trustedCheck } = require('./coderabbit-admissio
 const { readNativeReview } = require('./native-review-proof.cjs');
 const { signalTarget } = require('./review-signal.cjs');
 const { readHeadChecks, reviewCheckCompleted, boardStatus, syncBoard } = require('./pr-readiness.cjs');
+const { DEFAULT_FLOOR, countApiCalls, checkFloor } = require('./api-budget.cjs');
 const TARGET_LIMIT = 4;
 const PULL_ACTIONS = new Set(['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
 const recovery = reason => new Error(`${reason}; dispatch with pr_number for manual recovery`);
@@ -240,19 +241,38 @@ async function discover({ github, owner, repo, eventName, payload, now = Date.no
   }
   return { numbers };
 }
+// The board is the low-priority part of the job: under the core floor of the
+// token that serves its reads, it skips and a later event catches up. The rerun
+// decision and the review gate never shed. GET /rate_limit is free.
+const FLOOR_READ_MS = 5000;
+async function boardWithinBudget({ readGithub, pr, floor, log }) {
+  const budget = { request: route => readGithub.request(route,
+    { request: { timeout: FLOOR_READ_MS, signal: AbortSignal.timeout(FLOOR_READ_MS), retries: 0 } }) };
+  const { proceed, remaining } = await checkFloor({ github: budget, floor });
+  if (!proceed) log(`PR ${pr.number}: board sync skipped: core remaining ${remaining} on the read token is under the floor of ${floor}; a later event catches up.`);
+  return proceed;
+}
 // `github` (GITHUB_TOKEN) makes the one targeted rerun write; `readGithub`
 // (the release App when available) makes every read; `projectGithub` syncs the board.
 async function reconcile({ github, readGithub = github, projectGithub = null, owner, repo, pullNumber, releaseAppBotLogin,
-  now = Date.now, sleep = delay, log = () => {} }) {
+  boardFloor = DEFAULT_FLOOR, now = Date.now, sleep = delay, log = () => {} }) {
   if (!positive(pullNumber)) throw new Error('Missing trusted discovery PR number');
   const deadline = now() + 120000, read = reader(readGithub, owner, repo, deadline, now);
   const pr = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
   if (pr?.number !== pullNumber || !eligiblePull(pr, `${owner}/${repo}`)) return 'ineligible';
+  const shed = Boolean(projectGithub) && !(await boardWithinBudget({ readGithub, pr, floor: boardFloor, log }));
   // The admitted event is only a wake hint. Queue only PR identity, then prove
   // the newest live head/run at the lock head; never carry historical proof.
   const checks = await headChecks(read, pr, log);
   return reconcilePull({ github: readGithub, read, write: reader(github, owner, repo, deadline, now),
-    owner, repo, pr, checks, board: Boolean(projectGithub), releaseAppBotLogin, now, deadline, sleep, log,
-    followBoard: admitted => followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log }) });
+    owner, repo, pr, checks, board: Boolean(projectGithub) && !shed, releaseAppBotLogin, now, deadline, sleep, log,
+    followBoard: shed ? async () => {} : admitted => followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log }) });
 }
-module.exports = { discover, reconcile, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };
+// Each token has its own quota, so each distinct client gets one count line.
+// A client that serves several roles keeps its first label.
+function countTokens(tokens) {
+  const counted = new Map();
+  for (const [label, client] of tokens) if (client && !counted.has(client)) counted.set(client, [label, countApiCalls(client)]);
+  return () => [...counted.values()].map(([label, calls]) => `${label}: ${calls.summary()}`);
+}
+module.exports = { discover, reconcile, countTokens, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };
