@@ -105,7 +105,7 @@ test('the coverage jobs hold no secret, read only, pin every action and keep exp
     assert.ok(Object.values(job.permissions).every((permission) => permission === 'read'), id);
     assert.doesNotMatch(JSON.stringify(job), /secrets\./, id);
     for (const step of job.steps) {
-      if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}( |$)/, `${id}: ${step.uses} is not pinned to a commit`);
+      if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}( |$)|^\.\/\.github\/actions\/node-dist$/, `${id}: ${step.uses} is not pinned to a commit`);
       if (step.run) assert.deepEqual(step.run.match(/\$\{\{[^}]*\}\}/g)?.filter((e) => e !== '${{ matrix.shard }}') ?? [], [], `${id}: ${step.name}`);
     }
   }

@@ -1,0 +1,19 @@
+name: Install Node.js from nodejs.org
+description: >-
+  Downloads an exact Node.js release from nodejs.org, checks its SHA-256 against the
+  release's SHASUMS256.txt and installs it into the runner tool cache. The pinned
+  actions/setup-node step that follows then finds the version in the tool cache and
+  makes no GitHub API call (docs/sdlc/ci.md § Node setup without GitHub API calls).
+inputs:
+  node-version:
+    description: Exact version, such as 24.21.0. Takes precedence over node-version-file.
+    required: false
+  node-version-file:
+    description: File under the workspace that holds an exact version, such as .node-version.
+    required: false
+outputs:
+  node-version:
+    description: The exact version now in the tool cache, without a leading v.
+runs:
+  using: node24
+  main: index.cjs

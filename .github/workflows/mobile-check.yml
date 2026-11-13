@@ -2,10 +2,10 @@ name: Mobile apps
 
 on:
   pull_request:
-    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', 'docs/mobile.md', '.github/workflows/mobile-check.yml']
+    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', 'docs/mobile.md', '.github/workflows/mobile-check.yml', '.github/actions/node-dist/**']
   push:
     branches: [main]
-    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', '.github/workflows/mobile-check.yml']
+    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', '.github/workflows/mobile-check.yml', '.github/actions/node-dist/**']
   workflow_dispatch:
 
 permissions:
@@ -37,9 +37,14 @@ jobs:
             metadata: --rebrand on --final-old-app --store-url https://play.google.com/store/apps/details?id=ci.fixture
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version: '24.22.1'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.22.1'
+          token: ''
       - name: Native test harness fixtures
         run: python3 packages/mobile/scripts/side-by-side-fixtures.py
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
@@ -110,9 +115,14 @@ jobs:
             metadata: --rebrand on --final-old-app --store-url https://example.com/mobile-store-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version: '24.22.1'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.22.1'
+          token: ''
       - name: Generate native build metadata
         id: identity
         run: |

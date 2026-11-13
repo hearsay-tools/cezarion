@@ -241,12 +241,12 @@ plus the complexity and clone gates. Typecheck, workflow lint, citations, classi
 feed the `Review preflight` gate. Heavy jobs wait only for their skip inputs:
 unit tests and build/package need queue proof and immutable PR inputs; Vitest and browser shards
 also need change-surface and PR-shape classification. They run beside typecheck and
-preflight. Native review admission follows preflight; `verify` requires all of them. Other events keep their existing test inventory. The eight Vitest shards use the exact Node version in
-`.node-version`, the eight cockpit browser shards the current Node LTS; typecheck, unit tests and build/package use
-exactly the `engines.node` minimum (Node 24.21.0):
+preflight. Native review admission follows preflight; `verify` requires all of them. Other events keep their existing test inventory. The eight Vitest shards and the eight cockpit browser shards use the exact Node version in
+`.node-version`; typecheck, unit tests and build/package use
+exactly the `engines.node` minimum (Node 24.21.0). Every job installs Node without a GitHub API call (§ Node setup without GitHub API calls):
 
 - Eight Vitest shards on `ubuntu-24.04` each install dependencies and run `npm test -- --shard=N/8 --maxWorkers=4` for N=1..8. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
-- The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
+- The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It uses the minimum-Node setup.
 - Two unit jobs on `ubuntu-24.04` run package unit tests and repository script tests from source on exactly Node 24.21.0. Each installs dependencies and runs beside build/package.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. Only the packaged tests and their typecheck read build output. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Eight cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/8`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
@@ -261,7 +261,7 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, upper-quartile fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+On merge groups and manual dispatches, the full Vitest suite runs once across the eight `.node-version` shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once `.node-version` moves on. Its Node download keeps a bounded time and one retry for stalled downloads (hearsay-tools/cezarion#1214), now inside the node-dist action. The Vitest sequencer keeps its measured weights, upper-quartile fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
 comparison, runner cost, failures and coverage investigation. Four workers per shard,
@@ -346,7 +346,7 @@ The [first four-shard run](https://github.com/hearsay-tools/cezarion/actions/run
 
 Job wall time is GitHub's `startedAt` to `completedAt`, excluding queue time. The longest job fell 52% from the 13m16s sequential baseline; summed browser job time rose from 13m16s to 15m41s (18%). Each shard spent about 17–20s provisioning, building, and starting the server. Shard 1 contains both `github.e2e.ts` (164.24s) and `touch-targets.e2e.ts` (100.57s), so file imbalance limits the gain. These timings describe the initial file-hash split, before duration balancing. This is one successful CI comparison, not a repeated benchmark; a local comparison was abandoned after disposable-clone setup failures.
 
-The balanced GitHub-hosted [run 34995104039](https://github.com/hearsay-tools/cezarion/actions/runs/34995104039) passed with browser job times of 3m51s, 3m45s, 4m00s and 3m45s. The subsequent [Blacksmith 4-vCPU run 35002322591](https://github.com/hearsay-tools/cezarion/actions/runs/35002322591) passed in 3m11s, 3m42s, 2m51s and 3m33s. The owner chose GitHub-hosted runners for browser shards because the 18-second reduction in the longest job did not justify the additional cost. These are single-run measurements with different Node versions and intervening test fixes, not a controlled hardware-only comparison. Duration balancing, current-LTS selection and the test fixes remain in place. Browser setup uses `check-latest: true` with `lts/*` so an older matching version in a runner image cannot silently replace the current LTS patch. The first Blacksmith attempt selected cached Node 24.13.0 instead of the GitHub run's 24.20.0 and failed on all four shards with socket errors; it is retained as a failed comparison, not timing evidence.
+The balanced GitHub-hosted [run 34995104039](https://github.com/hearsay-tools/cezarion/actions/runs/34995104039) passed with browser job times of 3m51s, 3m45s, 4m00s and 3m45s. The subsequent [Blacksmith 4-vCPU run 35002322591](https://github.com/hearsay-tools/cezarion/actions/runs/35002322591) passed in 3m11s, 3m42s, 2m51s and 3m33s. The owner chose GitHub-hosted runners for browser shards because the 18-second reduction in the longest job did not justify the additional cost. These are single-run measurements with different Node versions and intervening test fixes, not a controlled hardware-only comparison. Duration balancing and the test fixes remain in place. Browser setup installs the exact `.node-version` release, so an older matching version in a runner image cannot silently replace it. The first Blacksmith attempt selected cached Node 24.13.0 instead of the GitHub run's 24.20.0 and failed on all four shards with socket errors; it is retained as a failed comparison, not timing evidence.
 
 Browser sharding now reuses the unit sequencer's longest-first allocator with a separate duration manifest. It assigns each next file to the lightest shard, resolves ties deterministically, and gives new specs the upper-quartile known duration. The manifest never controls discovery, so removed specs are ignored and new specs remain included. The initial browser weights come from the successful run above and predict 203.48–204.95s of tests per shard, before setup; this is an allocation estimate, not a measured balanced CI result. The sequencer only overrides shard allocation, preserving Vitest's normal execution order for local full runs and within each shard.
 
@@ -457,6 +457,44 @@ Workflows pin each action to a full commit SHA, most with the release tag in a c
 these actions weekly and opens one pull request that moves every outdated pin, and its
 version comment, to a newer release. That includes Squeal's action, which it follows through
 Squeal's `v<version>` tags (§ Squeal shared results).
+
+### Node setup without GitHub API calls
+
+`actions/setup-node` reads the `actions/node-versions` manifest through the GitHub API with
+`GITHUB_TOKEN` (two core calls) whenever the requested version is not already in the runner
+tool cache, and always for `lts/*` or `check-latest`. Hosted images cache only some Node 22
+and 24 patches, so every job used to spend the repository's shared hourly API quota, and
+`lts/*` jobs failed outright once it ran out.
+
+The local `.github/actions/node-dist` action now runs before each `setup-node` step. It
+downloads the exact release from nodejs.org, checks its SHA-256 against the release's
+`SHASUMS256.txt` and unpacks it into the tool-cache layout `setup-node` looks up
+(`<RUNNER_TOOL_CACHE>/node/<version>/<arch>` plus `<arch>.complete`). `setup-node` then
+logs `Found in cache` and makes no network call for Node itself. Each `setup-node` step also
+sets `token: ''`, so a lookup miss falls back to an unauthenticated manifest read or to
+nodejs.org instead of spending the repository's quota. The action takes only exact versions:
+`node-version: '24.21.0'` or `node-version-file: .node-version`. It is not cached with
+`actions/cache`: `ci.yml` runs under `pull_request_target`, whose caches land in the base
+branch scope, where a PR job could plant an unverified Node binary.
+
+Jobs that check out a ref that can predate the action (a rollback release candidate, the
+Squeal results trial, the LXC canary) first check out the action from the workflow's own
+commit into `node-dist-tooling`, install Node, and then check out their ref.
+
+Other jobs that check out a commit other than the workflow's own (the merge-group base in the
+complexity and clone gates, a PR merge ref, a nightly or release candidate) keep their
+checkout and run the action only under `if: hashFiles('.github/actions/node-dist/action.yml') != ''`.
+When the tree lacks it, the step before this change runs instead, with its bounded retry in
+the minimum-Node jobs, so a base-checkout gate never runs tooling from the queued head. A run
+step that moves the workspace with `git checkout` or `git switch` (the Squeal packaged test
+trial) counts as such a checkout. `setup-node-api-free.workflow.test.cjs` enforces both
+patterns.
+
+The only job that still follows `lts/*` is the `lts/*` leg of the release-candidate install
+matrix (`release-candidate-tests.yml`, run by Nightly and Release). It keeps `check-latest`
+and the token, because resolving `lts/*` needs the manifest. When it shows a newer LTS line
+than `.node-version`, the maintainer who bumps `.node-version` moves the Vitest and browser
+shards and the other `.node-version` jobs with it.
 
 ### Checking issue citations
 

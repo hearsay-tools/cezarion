@@ -35,9 +35,14 @@ jobs:
         with:
           ref: ${{ startsWith(github.ref_name, 'bench/156-rebalance') && '76429dcfbd0449ad5e09c116d7abb64bc2730b2c' || 'b1fe75911378dfe7816a7a83312c2acbdcf848f4' }}
           path: application
+      - name: Install Node.js from nodejs.org
+        uses: ./harness/.github/actions/node-dist
+        with:
+          node-version: '24.20.0'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24.20.0'
+          token: ''
       - name: Apply isolated experiment
         env:
           VARIANT: ${{ matrix.variant }}
@@ -124,10 +129,15 @@ jobs:
           ref: 252b749d464a8f630f7446a6ff29e6f8fa076b10
           path: application
           fetch-depth: 0
+      - name: Install Node.js from nodejs.org
+        uses: ./harness/.github/actions/node-dist
+        with:
+          node-version-file: harness/.node-version
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: lts/*
+          node-version-file: harness/.node-version
+          token: ''
           cache: npm
           cache-dependency-path: application/package-lock.json
       - name: Measure release verification
@@ -171,9 +181,14 @@ jobs:
         with:
           ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
           path: application-combined
+      - name: Install Node.js from nodejs.org
+        uses: ./harness/.github/actions/node-dist
+        with:
+          node-version: '24.20.0'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24.20.0'
+          token: ''
       - name: Apply combined candidate
         run: git -C application-combined apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/combined.patch"
       - name: Measure paired verification
@@ -242,9 +257,14 @@ jobs:
         with:
           ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
           path: application
+      - name: Install Node.js from nodejs.org
+        uses: ./harness/.github/actions/node-dist
+        with:
+          node-version: '24.20.0'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24.20.0'
+          token: ''
       - name: Download verified archive
         if: matrix.variant == 'snapshot-reuse'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
