@@ -24,7 +24,7 @@ const ROWS = [
   },
 ] as const
 
-/** The per-task Cezar access switches (hearsay-tools/cezarion#2784). Both default on. */
+/** The per-task Squawk access switches (hearsay-tools/cezarion#2784). Both default on. */
 export function TaskAccessControls({ allowWorkers, allowMessaging, onChange, disabled = false, embedded = false }: {
   allowWorkers: boolean
   allowMessaging: boolean

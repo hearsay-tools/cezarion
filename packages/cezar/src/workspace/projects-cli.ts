@@ -15,7 +15,7 @@ import {
 } from './projects.ts';
 
 /**
- * `cezar projects` (spec 2026-07-20-multi-project-workspace, step 5.2) — the
+ * `hsq projects` (spec 2026-07-20-multi-project-workspace, step 5.2) — the
  * terminal twin of Settings → Projects, for the operator who is on a server (or
  * an ssh session) and has no cockpit in front of them.
  *
@@ -162,7 +162,7 @@ async function removeCommand(id: string | undefined, io: ProjectsCommandIo, home
   // here: that rule exists because a running server would break its own
   // sidebar, and the CLI runs with no server and no boot project. Removing the
   // repo you normally serve is therefore allowed — and self-healing, since the
-  // next `cezar serve` in it registers it again (said in the note below).
+  // next `hsq serve` in it registers it again (said in the note below).
   if (!(await removeProject(id, home))) {
     io.error(`unknown project: ${id}`);
     return 1;
@@ -172,7 +172,7 @@ async function removeCommand(id: string | undefined, io: ProjectsCommandIo, home
 }
 
 /**
- * `cezar projects tag <id> [<tag>…]` — the terminal twin of the Tags cell in
+ * `hsq projects tag <id> [<tag>…]` — the terminal twin of the Tags cell in
  * Settings → Projects.
  *
  * Replaces the WHOLE list, like the PATCH route does, and for the same reason:

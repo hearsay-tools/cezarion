@@ -302,7 +302,7 @@ describe('provider action gating', () => {
 /**
  * The gate re-probes before it refuses (`providerActionError` in `server.ts`).
  *
- * Auth state is served stale-while-revalidate, so a cached "disconnected" can predate a login cezar
+ * Auth state is served stale-while-revalidate, so a cached "disconnected" can predate a login Squawk
  * never saw — someone typing `claude auth login` in a terminal. Refusing on that would lock a user
  * out of their own cockpit with no way back but waiting, which is exactly what a short cache window
  * used to paper over, at the cost of making every reader of `GET /api/v1/providers/status`

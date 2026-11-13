@@ -47,7 +47,7 @@ export interface RunOptions {
   /** Loopback port for this instance. For a NEW named instance the caller
    * passes an auto-picked free port; a resume keeps the recorded one. */
   port?: number | undefined;
-  /** `--external-proxy`: an existing reverse proxy fronts cezar, so the
+  /** `--external-proxy`: an existing reverse proxy fronts Squawk, so the
    * platform installs no nginx/SSL of its own. */
   externalProxy?: boolean | undefined;
   /** `--bind-host`: interface the cockpit binds so that proxy can reach it. */
@@ -352,7 +352,7 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
     }
 
     // Drop entries that never had a system effect; anything left was recorded
-    // by a step id this binary doesn't know (a newer cezar) and was NOT
+    // by a step id this binary doesn't know (a newer Squawk) and was NOT
     // reversed — keep its ledger and say so instead of silently erasing it.
     for (const id of Object.keys(state.steps)) {
       if (!needsUndo(state.steps[id])) delete state.steps[id];
@@ -385,7 +385,7 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
 }
 
 /**
- * Reload the running cockpit to pick up a new cezar version — the standardized
+ * Reload the running cockpit to pick up a new Squawk version — the standardized
  * `server-deploy` flow. Delegates to the platform's `redeploy` (restart service
  * + re-verify); holds the single-writer lock for the whole run.
  */

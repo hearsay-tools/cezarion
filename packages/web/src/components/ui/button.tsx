@@ -4,7 +4,7 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-/* Variant vocabulary comes from the Cezarion masters, not stock shadcn:
+/* Variant vocabulary comes from the Squawk masters, not stock shadcn:
  * `primary` (gold) and `contrast` (inverse surface) are the two CTAs, `danger-ghost` is the
  * destructive affordance. There is deliberately no `secondary`/`link` — the design system doesn't use them.
  */

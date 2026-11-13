@@ -413,7 +413,7 @@ export function useProviderStatus() {
     // user-driven Connect/Check again/Try again actions update this same key immediately; a
     // background interval only re-probes unchanged credentials and can repeatedly challenge a
     // reverse-proxy-authenticated mobile browser. A focus refresh is allowed once the answer is
-    // five minutes old, covering credentials changed outside cezar without permanent polling.
+    // five minutes old, covering credentials changed outside Squawk without permanent polling.
     staleTime: 5 * 60_000,
     refetchInterval: liveRefetchInterval(false),
     refetchOnWindowFocus: true,
@@ -779,7 +779,7 @@ export function useAgentAccountStatus(routeId: string, enabled: boolean) {
 /**
  * Sign IN to one agent account — the last mile of "add account → Connect → the CLI creates the
  * folder", which is the documented first-run sequence and the only way a second login can be
- * created from cezar.
+ * created from Squawk.
  *
  * Invalidates both the account listing and the provider card: the login the user just opened is
  * for a named account, but the terminal they finish it in can equally be the discovered one, and a
@@ -824,7 +824,7 @@ export function useRecheckAgentAccount() {
 }
 
 /** Hand one of an account's config files to a local app. Nothing to invalidate — opening a file
- *  changes no cezar state, so this deliberately does NOT go through the shared mutation helper. */
+ *  changes no Squawk state, so this deliberately does NOT go through the shared mutation helper. */
 export function useOpenAgentAccountFile() {
   return useMutation({
     mutationFn: (variables: { routeId: string } & OpenAgentAccountFileInput) => {
@@ -939,7 +939,7 @@ export function useHealth() {
  *
  * The boot-project guard is the load-bearing part. `/health` is WORKSPACE-level (project-scope.ts
  * `WORKSPACE_LEVEL`): the server always builds it from `bootRoot`, so its `repo.remote` names the
- * project cezar launched in, whichever project the URL is scoped to. Handing a non-boot project's
+ * project Squawk launched in, whichever project the URL is scoped to. Handing a non-boot project's
  * task a link built from the boot project's repo would point at a completely different repository
  * — the same wrong-link defect #526 exists to kill.
  *
@@ -1028,7 +1028,7 @@ export const MIN_RUNS_SEARCH_LENGTH = 2
  * The workspace stream patches this cache row by row (`runs-index-sync.ts`,
  * hearsay-tools/cezarion#2729). Every snapshot, from the query function or the shared live read,
  * passes the sync's fence `merge`. The recurring read is the visible-only backstop for projects
- * another cezar process runs (D2): `RUNS_INDEX_BACKSTOP_MS` by default, or a shorter interval a
+ * another Squawk process runs (D2): `RUNS_INDEX_BACKSTOP_MS` by default, or a shorter interval a
  * caller passes (the global Tasks page). The shared worker reads the path once, at the shortest
  * interval any document asks for. No `refetchOnWindowFocus`: `global-events.tsx` reconciles this
  * key on visibility restore through the same fence.
@@ -1665,7 +1665,7 @@ export function useRemoveQueuedMessage(id: string) {
   })
 }
 
-/** GitHub edits produce no Cezar events (#152). The owner-approved polling exception
+/** GitHub edits produce no Squawk events (#152). The owner-approved polling exception
  * refreshes mounted, foreground lists every minute; unmounted queries have no timer.
  * Revisit/focus after a minute also refetches. Automatic reads retain the server's 60 s
  * cache, so an upstream edit appears within 120 s plus request time while online/visible.

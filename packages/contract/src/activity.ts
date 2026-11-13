@@ -70,8 +70,8 @@ export const activityWaitSchema = z.discriminatedUnion('kind', [
     detail: z.object({
       /** The ask card's first question. */
       question: z.string().max(ACTIVITY_TEXT_MAX).optional(),
-      /** `question`: an open question; `turn-end`: Cezar's `no-wait` wait; `budget`: the
-       *  automatic-wake budget is spent; `completion`: Cezar's completion gate. */
+      /** `question`: an open question; `turn-end`: Squawk's `no-wait` wait; `budget`: the
+       *  automatic-wake budget is spent; `completion`: Squawk's completion gate. */
       reason: z.enum(['question', 'turn-end', 'budget', 'completion']),
       /** Inputs not delivered yet, when there are any. */
       queuedMessages: z.number().int().positive().optional(),

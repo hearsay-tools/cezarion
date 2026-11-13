@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { down, parseUpArgs, up } from '../.ai/scripts/qa-fixture.mjs';
 import { identity } from '../.ai/scripts/test-env-lease.mjs';
 
-// A stand-in for the e2e build: `dist/index.js` answers like `cezar serve` does for the checks
+// A stand-in for the e2e build: `dist/index.js` answers like `hsq serve` does for the checks
 // qa-fixture makes. It records its argv and environment, and keeps a child in its own process
 // group, so a test can see what reached the server and that `down` stops the whole group.
 // CEZ_STUB_MODE (passed through --server-env) picks a failure, or `hang`, a boot that never
@@ -29,7 +29,7 @@ const childScript = (process.env.CEZ_STUB_CHILD === 'stubborn' ? 'process.on("SI
 const child = process.env.CEZ_STUB_CHILD === 'zombie'
   ? spawn('sh', ['-c', 'true & exec setsid sleep 1000'], { stdio: 'ignore' })
   : spawn(process.execPath, ['-e', childScript], { stdio: 'ignore' });
-// cezar creates its home on first write, as here.
+// Squawk creates its home on first write, as here.
 mkdirSync(process.env.CEZ_HOME, { recursive: true });
 writeFileSync(join(process.env.CEZ_HOME, 'stub.json'), JSON.stringify({ args, env: process.env, child: child.pid }));
 const projects = mode === 'unregistered' ? [] : [{ id: 'qa-repo', root: repo }];

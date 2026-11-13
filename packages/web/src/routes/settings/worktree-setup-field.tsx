@@ -20,7 +20,7 @@ import { RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings
 
 /**
  * Project settings → Worktrees → "Prepare new worktrees" (hearsay-tools/cezarion#917, spec
- * `.ai/specs/2026-10-07-worktree-setup.md`): the commands Cezar runs in every new task and worker
+ * `.ai/specs/2026-10-07-worktree-setup.md`): the commands Squawk runs in every new task and worker
  * worktree before the agent starts. One command per line; blank lines are dropped.
  *
  * Editable on a local cockpit, or on a remote one whose host operator ran `cez remote-settings

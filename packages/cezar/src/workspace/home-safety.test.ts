@@ -18,15 +18,15 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 /**
- * The registry-clobber regression. A cezar test run used to be able to replace
+ * The registry-clobber regression. A Squawk test run used to be able to replace
  * the developer's real `~/.cezar/config.json` with a fixture's projects: the
  * `CEZ_HOME` pin lives in `process.env`, a timing-out test drops it in
  * `afterEach` while a merge-write is still in flight, and the write then
  * resolved a different home than the read. These cases lock in the two
  * defences — one resolved path per merge-write, and a hard refusal to write
- * into the real cezar home from a test process.
+ * into the real Squawk home from a test process.
  */
-describe('cezar home write safety', () => {
+describe('Squawk home write safety', () => {
   const originalCezHome = process.env.CEZ_HOME;
   const originalHome = process.env.HOME;
   let pinned: string;
@@ -86,7 +86,7 @@ describe('cezar home write safety', () => {
     expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
   });
 
-  it('refuses a write into the real cezar home while running under vitest', async () => {
+  it('refuses a write into the real Squawk home while running under vitest', async () => {
     // Reload the writer so its guard observes this file's OS-account mock after shared setup.
     vi.resetModules();
     const { atomicWriteJsonSync } = await import('./config.ts');
@@ -162,7 +162,7 @@ describe('cezar home write safety', () => {
     expect(existsSync(join(fakeUserHome, '.cezar'))).toBe(false);
   }, 180_000);
 
-  it('allows writes outside the OS account cezar home', () => {
+  it('allows writes outside the OS account Squawk home', () => {
     process.env.HOME = fakeUserHome;
     const sandboxed = join(pinned, 'config.json');
 

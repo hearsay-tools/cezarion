@@ -5,7 +5,7 @@
  * Why browser-local (#788): the right sidebar width is a property of the SCREEN you are sitting
  * at, not of the workspace. The same checkout opened on a 13" laptop and a 34" ultrawide wants
  * two different answers, and `~/.cezar/config.json` can only hold one. That also keeps this out
- * of a protected surface — nothing an older cezar has to be able to read.
+ * of a protected surface — nothing an older Squawk has to be able to read.
  */
 
 /** One key, one preference. Namespaced `cez-` like `cez-theme` and `cez-density`. */
@@ -14,7 +14,7 @@ export const SIDEBAR_WIDTH_STORAGE_KEY = 'cez-sidebar-width'
 /**
  * The bounds, in CSS pixels.
  *
- * `MIN` is the approved 264px Cezarion column from design.pen — the sidebar may grow but never
+ * `MIN` is the approved 264px Squawk column from design.pen — the sidebar may grow but never
  * shrink below the width the navigation masters were designed around. `MAX` keeps a widened sidebar from
  * eating the thread it exists to navigate; 420px is roughly the point where the main column on a
  * 13" laptop stops being comfortable.

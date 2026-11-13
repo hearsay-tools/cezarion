@@ -404,7 +404,7 @@ function ProjectRow({
  *
  * The point is cross-repo work: tag the API, the web app and the design system `storefront` and
  * the global Tasks page (`/tasks`) can show all three as one list, or split every project's tasks
- * by tag. Nothing else in cezar reads them, deliberately — a tag is a lens, not a permission, a
+ * by tag. Nothing else in Squawk reads them, deliberately — a tag is a lens, not a permission, a
  * queue or a routing rule.
  *
  * Bound to the server value with no local mirror of the list: the chips render `project.tags`

@@ -180,7 +180,7 @@ export function modelsForRunner(
     }
   }
   // Native settings may contain a provider-specific/custom id that is not in
-  // cezar's static catalog. Keep it representable so the initial selection
+  // Squawk's static catalog. Keep it representable so the initial selection
   // matches the agent's own configured default on every backend.
   for (const id of customIds) {
     if (!id || seen.has(id) || modelConflictsWithRunner(id, runner)) continue

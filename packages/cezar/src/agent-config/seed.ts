@@ -39,9 +39,9 @@ export function isPreserved(preserve: ReadonlySet<string>, rel: string, separato
  * (against the vendor's advice) is neither copied nor excluded. `preserve` names
  * repo-relative paths the caller already placed on purpose (a worker's explicit
  * `--attach` files, hearsay-tools/cezarion#1149): those are left alone and not
- * reported. A file is written only where nothing is, or where cezar's own unchanged
+ * reported. A file is written only where nothing is, or where Squawk's own unchanged
  * copy is (the worktree manifest, hearsay-tools/cezarion#1814), so the agent's edit
- * survives a re-seed. Returns the repo-relative paths that hold cezar's current copy,
+ * survives a re-seed. Returns the repo-relative paths that hold Squawk's current copy,
  * for the caller's note. Never throws.
  */
 export async function seedAgentConfigLocalLayer(
@@ -74,7 +74,7 @@ export async function seedAgentConfigLocalLayer(
       const path = rel.split(sep).join('/');
       try {
         const state = await files.inspect(path);
-        // The agent's edit, or a file cezar never wrote: left as it is.
+        // The agent's edit, or a file Squawk never wrote: left as it is.
         if (state.owner === 'theirs') files.forget(path);
         if (state.owner !== 'free' && state.owner !== 'ours') continue;
         // Ignore first: a seeded file git could see must never exist, not even for a crash's length.

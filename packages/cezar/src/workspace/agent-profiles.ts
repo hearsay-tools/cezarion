@@ -17,8 +17,8 @@ import {
  * Resolving an agent account against `~/.cezar/agent-accounts.json` — the I/O half of
  * `src/core/agent-profiles.ts` (which stays pure and owns the vendor knowledge).
  *
- * Nothing here is cached. `~/.cezar/` is shared by every cezar process on the machine (a `serve`
- * per repo, headless `cezar run`s, a settings PUT), so a snapshot is a staleness bug waiting to
+ * Nothing here is cached. `~/.cezar/` is shared by every Squawk process on the machine (a `serve`
+ * per repo, headless `hsq run`s, a settings PUT), so a snapshot is a staleness bug waiting to
  * happen — and one small JSON read is free next to spawning an agent CLI.
  */
 
@@ -38,7 +38,7 @@ export interface ResolvedAgentProfile {
 /**
  * The implicit account for a provider: whatever `agentHomePaths()` discovers, which already
  * honours the vendors' own `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `XDG_CONFIG_HOME`. Setting one of
- * those on the cezar process therefore moves the DEFAULT account rather than being ignored.
+ * those on the Squawk process therefore moves the DEFAULT account rather than being ignored.
  */
 export function defaultAgentProfile(
   provider: ProviderId,
@@ -110,7 +110,7 @@ export function selectProfile(
  *
  * `{}` for the default account, which is the whole point: the zero-config path adds nothing to the
  * child environment. Reads the store per call (see the module note). An unreadable home degrades to
- * the default account, which is the behaviour cezar had before accounts existed. The one throw is
+ * the default account, which is the behaviour Squawk had before accounts existed. The one throw is
  * `AgentAccountUnavailableError`, for a named account that would open another folder than its own
  * (`namedAccountUnavailable`); spawning bare instead would bill the default while the UI names the
  * stored account.
@@ -217,7 +217,7 @@ export function ompProfileDirError(
 }
 
 /**
- * A named account cezar refuses to spawn as it stands. The caller fails the step or answers with
+ * A named account Squawk refuses to spawn as it stands. The caller fails the step or answers with
  * the message. It never falls back to the default account, which would bill an account the UI
  * does not name.
  */

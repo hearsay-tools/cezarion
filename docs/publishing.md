@@ -40,7 +40,7 @@ the repo — `.ai/cezar/`, `~/.cezar/`, `CEZ_*` and the `cez` command are
 unchanged — and the private workspace packages keep their `@open-mercato/*`
 names because they never reach npm.
 
-How cezar reaches npm. Two paths, deliberately separate
+How Squawk reaches npm. Two paths, deliberately separate
 (spec: `.ai/specs/2026-07-18-npm-preview-publish.md`, issue #482), with
 two authentication methods (#33):
 
@@ -273,7 +273,7 @@ also reused. The `existing` input needs no bump PR.
 Stable patch/minor/major releases create the version-bump PR with a short-lived
 GitHub App installation token. This emits `pull_request_target`, so the real CI
 aggregate appears in the PR and satisfies the existing branch ruleset. This is
-maintainer infrastructure; Cezar users do not configure an App.
+maintainer infrastructure; Squawk users do not configure an App.
 
 An organization owner (or someone permitted to manage and install GitHub Apps)
 performs this setup once:

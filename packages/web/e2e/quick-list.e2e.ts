@@ -22,7 +22,7 @@ import {
 // fixture-server starts: 6
 
 /**
- * The task quick-list, in a real browser, against a real cezar serving real runs.
+ * The task quick-list, in a real browser, against a real Squawk serving real runs.
  *
  * Why this spec boots its own server instead of using the shared test env: the run store reads
  * `.ai/cezar/runs.json` **once, at startup** (`RunStore.open`) and is in-memory from then on, so
@@ -32,7 +32,7 @@ import {
  * last person did.
  *
  * So: a throwaway data dir, a fixture `runs.json`, one `node dist/index.js serve --repo <tmp>`.
- * The fixture is not invented data — `runs.json` is cezar's documented state contract (a
+ * The fixture is not invented data — `runs.json` is Squawk's documented state contract (a
  * `RunRecord[]`, the exact shape `GET /api/v1/runs` answers with and `src/runs/store.ts` parses with
  * zod). If a record here were wrong, the store would drop it and these assertions would fail.
  *
@@ -48,7 +48,7 @@ const runId = `e2e-quick-list-${process.pid}`
 const now = Date.now()
 const ago = (ms: number) => new Date(now - ms).toISOString()
 
-/** A `RunRecord[]` — cezar's on-disk run index. */
+/** A `RunRecord[]` — Squawk's on-disk run index. */
 const FIXTURE = [
   ({
     id: 'fix-review-pr',

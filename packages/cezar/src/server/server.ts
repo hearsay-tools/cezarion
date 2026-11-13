@@ -494,7 +494,7 @@ export function projectRouteManifest(app: Hono): ProjectRouteInfo[] {
 /** 409 body for every automations route while GitHub automations are off (#801). */
 const AUTOMATIONS_OFF = 'Automations are disabled — unset CEZ_AUTOMATIONS or set it to 1 and restart to enable them';
 
-/** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
+/** 404 body for a run whose row is in runs.db but whose record this Squawk cannot decode (#779). */
 const UNREADABLE_RUN_ERROR = `this run could not be read by this ${productName('cezar')}: its record in runs.db does not fit this version (a newer ${productName('cezar')} may have written it). It is left in the database untouched.`;
 
 // These response shapes belong to the contract; keep the server's existing type exports.
@@ -1119,7 +1119,7 @@ export function createApp(deps: ServerDeps) {
   // decides how often a revalidation is kicked off; on its own it bounds nothing,
   // because the revalidation is fire-and-forget. While a cockpit holds the
   // `health` topic the publisher's interval keeps the cache warm and the two are
-  // the same number — but the normal state of a background `cezar serve` is NO
+  // the same number — but the normal state of a background `hsq serve` is NO
   // subscriber, and then nothing refreshes the cache at all: the next `GET
   // /api/health`, an hour later, would answer with the boot pre-warm's payload
   // and only the request AFTER it would see the truth. That endpoint is the
@@ -1235,7 +1235,7 @@ export function createApp(deps: ServerDeps) {
     },
   });
   /**
-   * Warm the whole of cezar's agent knowledge — the three discovered defaults AND every extra
+   * Warm the whole of Squawk's agent knowledge — the three discovered defaults AND every extra
    * account — so no reader ever pays the first shell-out.
    *
    * Which login each agent is signed into is operating knowledge, not a settings-page detail: the
@@ -1452,7 +1452,7 @@ export function createApp(deps: ServerDeps) {
       // a connected answer there stands for CONNECTED_TTL_MS. Without this, Connect after a
       // `claude /logout` answers "already connected", opens nothing, and the user is stuck — and it
       // would contradict this module's own invariant that opening a login is one of the things
-      // cezar CAN observe and therefore invalidates explicitly rather than waiting out a window.
+      // Squawk CAN observe and therefore invalidates explicitly rather than waiting out a window.
       if (!profile.isDefault) providerAuth.forgetProfileStatus(provider, profile.id);
       const row = profile.isDefault
         ? (await providerAuth.status({ refresh: true })).providers.find(
@@ -1889,7 +1889,7 @@ export function createApp(deps: ServerDeps) {
 
     // Which account a PROJECT uses. On the accounts family rather than `PATCH /api/v1/projects`
     // because the selection is stored beside the accounts it names — one file, one atomic write,
-    // and nothing about it can be dropped by a cezar version that never heard of accounts.
+    // and nothing about it can be dropped by a Squawk version that never heard of accounts.
     .put(
       '/workspace/agent-profiles/selection',
       jsonZodValidator(() => selectAgentProfileSchema),
@@ -1961,7 +1961,7 @@ export function createApp(deps: ServerDeps) {
             removed = store.accounts.length < before;
             if (!removed) return;
             // Scrub every reference IN THE SAME MUTATOR — the reason selections share this file.
-            // A two-call delete-then-scrub can be observed mid-way by another cezar process on
+            // A two-call delete-then-scrub can be observed mid-way by another Squawk process on
             // this machine, which would then resolve a dangling id; harmless today (it degrades
             // to the default) but only by luck.
             for (const [root, selection] of Object.entries(store.selections)) {
@@ -2055,7 +2055,7 @@ export function createApp(deps: ServerDeps) {
       }
       if (!entry) return c.json({ error: `unknown project: ${id}` }, 404);
 
-      // The boot project is refused, not removed: `cezar serve` re-registers the
+      // The boot project is refused, not removed: `hsq serve` re-registers the
       // repo it was started in on every boot, so "removing" it would undo itself
       // at the next restart while breaking this session's sidebar in the
       // meantime. The pane disables the button and says the same thing.
@@ -2089,7 +2089,7 @@ export function createApp(deps: ServerDeps) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
-      // Lost a race with another writer (or another cezar process): the entry is
+      // Lost a race with another writer (or another Squawk process): the entry is
       // gone, which is what the caller wanted, but say it honestly.
       if (!removed) return c.json({ error: `unknown project: ${id}` }, 404);
       // In-process handles for a project no route can reach any more: store
@@ -2112,7 +2112,7 @@ export function createApp(deps: ServerDeps) {
     // never be degraded away by the next load's `.catch`.
     //
     // Deliberately NOT the home of the agent-account selection: that lives in
-    // `~/.cezar/agent-accounts.json` beside the accounts it names, so a cezar version that has
+    // `~/.cezar/agent-accounts.json` beside the accounts it names, so a Squawk version that has
     // never heard of accounts cannot drop it (see workspace/agent-accounts.ts).
     .patch('/projects/:projectId', jsonZodValidator(updateProjectInputSchema), async (c) => {
       if (capabilities().singleProject) {
@@ -2429,7 +2429,7 @@ export function createApp(deps: ServerDeps) {
     }
     // Hosted mode: the same root the picker is narrowed to, re-checked — see
     // `isInsideBrowseRoot`. Local mode deliberately has NO containment: a
-    // project under `/srv/code` is a normal local setup and `cezar serve`
+    // project under `/srv/code` is a normal local setup and `hsq serve`
     // registers it today.
     //
     // Containment is asked in two halves, around the stat, and the split is
@@ -2471,8 +2471,8 @@ export function createApp(deps: ServerDeps) {
       };
     }
     // The boot-time auto-registration guard, applied to the manual gesture
-    // too: `$HOME` and cezar's own task worktrees are exactly as wrong a
-    // project root when a human clicks "Add project" as when `cezar serve`
+    // too: `$HOME` and Squawk's own task worktrees are exactly as wrong a
+    // project root when a human clicks "Add project" as when `hsq serve`
     // would have registered them. Reachable from the dialog, which starts at
     // `~` and can add the folder it is showing.
     if (!(await shouldRegisterProject(requested))) {
@@ -4599,7 +4599,7 @@ export function createApp(deps: ServerDeps) {
       baseBranch: config.baseBranch ?? null,
       defaultRunner: config.defaultRunner,
       systemPrompt: config.systemPrompt ?? null,
-      // Native defaults seed each runner independently. A Cezar preset remains
+      // Native defaults seed each runner independently. A Squawk preset remains
       // selectable unless the operator opts into the fixed-model policy.
       defaultModels: modelsLocked
         ? nativeModels
@@ -5249,7 +5249,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
-    // Dev servers run in their own process groups: they outlive cezar unless stopped here.
+    // Dev servers run in their own process groups: they outlive Squawk unless stopped here.
     // A failed release must not abort the restart halfway, with the store flushed and the port still bound.
     await deps.previewHost?.close().catch(() => undefined);
     previewSockets.close();

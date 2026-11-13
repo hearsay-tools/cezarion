@@ -42,8 +42,8 @@ export function spawnDetached(file: string, args: readonly string[], options: Om
   return spawn(file, args, { ...options, detached: true });
 }
 
-/** Starts a process cezar never stops, such as an editor or a browser: detached, so it outlives
- *  cezar, with no stdio and nothing recorded. True when no spawn error arrives within `settleMs`.
+/** Starts a process Squawk never stops, such as an editor or a browser: detached, so it outlives
+ *  Squawk, with no stdio and nothing recorded. True when no spawn error arrives within `settleMs`.
  *  Neither the child nor the wait keeps the event loop alive, so a caller may drop the promise. */
 export function startAndForget(file: string, args: readonly string[], { settleMs = 250 }: { settleMs?: number } = {}): Promise<boolean> {
   return new Promise((resolve) => {

@@ -28,7 +28,7 @@ process.env.GIT_AUTHOR_EMAIL = 'tests@cezar.invalid'
 process.env.GIT_COMMITTER_NAME = 'Cezar Tests'
 process.env.GIT_COMMITTER_EMAIL = 'tests@cezar.invalid'
 
-// Nor may they inherit a cezar task session's context: the dry-run mocks append to
+// Nor may they inherit a Squawk task session's context: the dry-run mocks append to
 // CEZ_HANDOFF_FILE, and a CLI under test would reach the live task's delegation API and
 // tool socket (hearsay-tools/cezarion#953). packages/cezar/vitest.setup.ts clears the same keys.
 for (const key of [

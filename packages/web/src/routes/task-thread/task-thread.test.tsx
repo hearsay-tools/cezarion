@@ -1778,7 +1778,7 @@ describe('composer execution actions (#201)', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
   })
 
-  // Review of #1437: Cezar's own wait (`no-wait`) asks nothing, so it keeps the one-click Continue.
+  // Review of #1437: Squawk's own wait (`no-wait`) asks nothing, so it keeps the one-click Continue.
   it('offers empty Continue beside a Cezar wait that asks no question', async () => {
     const squawkWait = { ...openHumanWait(), source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] }
     renderView(<ThreadView run={run('done', { waits: [squawkWait], steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)

@@ -46,7 +46,7 @@ describe('crash recovery up to the moves', { timeout: TIMEOUT }, () => {
       const crashed = await fence(project);
       await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt(point) }), point).rejects.toThrow(point);
       crashed.release();
-      // Git's own prune, as any checkout sharing this Git directory runs it: it ignores cezar's receipts.
+      // Git's own prune, as any checkout sharing this Git directory runs it: it ignores Squawk's receipts.
       git(project.repo, 'worktree', 'prune');
       const recovery = await fence(project);
       try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery }); } finally { recovery.release(); }

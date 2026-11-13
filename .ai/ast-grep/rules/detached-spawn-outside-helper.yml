@@ -3,8 +3,8 @@ language: typescript
 severity: warning
 message: >-
   Start a process that outlives its caller through packages/cezar/src/detached-process.ts
-  (hearsay-tools/cezarion#1815): startOwnedGroup or spawnDetached for one cezar stops later, with
-  stopGroup ending its whole group, or startAndForget for one cezar never stops.
+  (hearsay-tools/cezarion#1815): startOwnedGroup or spawnDetached for one Squawk stops later, with
+  stopGroup ending its whole group, or startAndForget for one Squawk never stops.
 files:
   - packages/cezar/src/**/*.ts
 ignores:

@@ -6,7 +6,7 @@ import { z } from 'zod';
 export const ASK_LIMITS = { questions: 4, id: 64, header: 12, question: 400, minOptions: 2, maxOptions: 4, label: 60, description: 280, context: 20_000 } as const;
 
 /** hearsay-tools/cezarion#1458: the Markdown the user reads above the questions. On Claude, prose
- *  between tool calls can reach Cezar only as a short summary; a field inside the call arrives whole. */
+ *  between tool calls can reach Squawk only as a short summary; a field inside the call arrives whole. */
 export const askContextSchema = z.string().min(1).max(ASK_LIMITS.context);
 
 export const askOptionSchema = z

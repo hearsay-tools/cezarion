@@ -90,7 +90,7 @@ test('Docker, Podman, Kubernetes and cgroup containers resolve --no-sandbox', ()
   }
 });
 
-test('a Cezar worktree TMPDIR is rewritten so Chrome’s SingletonSocket stays under the platform limit', () => {
+test('a Squawk worktree TMPDIR is rewritten so Chrome’s SingletonSocket stays under the platform limit', () => {
   const tmpdir = '/home/agent/projects/cezar/.ai/cezar/tmp/f132a645-1b38-454c-8b7e-23ac7e7142b0';
   assert.ok(tmpdir.length + CHROME_SINGLETON_OVERHEAD > 107);
   const resolved = resolveBrowserLaunch({

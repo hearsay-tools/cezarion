@@ -37,7 +37,7 @@ vi.mock('node:child_process', async (original) => {
 
 // The lock seam covers two windows: before the locked operation rechecks protection, and after
 // it reads its witness but before the ref transaction. Commands can also return a controlled
-// failure or partial output. Outside processes (a shell, an IDE) do not follow cezar's lock.
+// failure or partial output. Outside processes (a shell, an IDE) do not follow Squawk's lock.
 vi.mock('../git-worktree-lock.ts', async (original) => {
   const real = await original<typeof import('../git-worktree-lock.ts')>();
   return {

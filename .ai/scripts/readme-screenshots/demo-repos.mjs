@@ -73,7 +73,7 @@ export function writeTree(root, files) {
   }
 }
 
-/** The cezar workflows and skills both demo repositories carry. */
+/** The Squawk workflows and skills both demo repositories carry. */
 export function squawkFiles() {
   const files = {};
   for (const [name, text] of Object.entries(DEMO_WORKFLOWS)) files[`.ai/cezar/workflows/${name}`] = text;

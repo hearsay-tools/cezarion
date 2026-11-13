@@ -18,7 +18,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
  * #622 (GitHub slice): the GitHub view's own sidebar (desktop) and filter index (phone), in a real
  * browser against its own fixture server.
  *
- * The fixture server is a dry-run cezar whose project has a `github.com/example/sidebar-fixture`
+ * The fixture server is a dry-run Squawk whose project has a `github.com/example/sidebar-fixture`
  * remote and a hand-written `runs.json`; the GitHub payloads are served through Chrome's network
  * layer (`routeJson`), because dry-run search only understands text and the qualifier searches
  * (`review-requested:@me`, `status:failure`) need deterministic hits. No server or contract change.

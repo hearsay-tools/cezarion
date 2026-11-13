@@ -8,7 +8,7 @@ import { checkTimeText } from '@/lib/format'
  * Session activity card both read it, so the two can never disagree about what the run is doing.
  *
  * `nextCheck` is an OPEN TIMER's deadline and nothing else. A CI or worker wait's deadline is when
- * cezar gives up, not when it looks again, so it is never presented as a next check.
+ * Squawk gives up, not when it looks again, so it is never presented as a next check.
  */
 export interface RunStatusLine {
   attention: Attention

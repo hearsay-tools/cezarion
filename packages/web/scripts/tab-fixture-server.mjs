@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
-// serverPackage: a cezar package directory holding dist/ and web/dist/ (the e2e mirror for the
+// serverPackage: a Squawk package directory holding dist/ and web/dist/ (the e2e mirror for the
 // specs, packages/cezar for the production-build benchmark).
 // `--index` seeds the runs-index workload (hearsay-tools/cezarion#2729) instead of the task-list runs.
 const args = process.argv.slice(2)

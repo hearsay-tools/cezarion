@@ -226,7 +226,7 @@ describe('the agent accounts section', () => {
     // One tab at a time, so only the ACTIVE agent's rows are in the DOM.
     await waitFor(() => expect(rows()).toHaveLength(1))
     expect(document.body.textContent).toContain('discovered')
-    // The discovered profile is what cezar found — a Rename or Remove would imply a setting. Checked
+    // The discovered profile is what Squawk found — a Rename or Remove would imply a setting. Checked
     // with the panel OPEN, since that is now the only place either could appear.
     await openDetails('default')
     expect(document.querySelector('[data-slot="account-manage"]')).toBeNull()
@@ -881,7 +881,7 @@ describe('the add-account dialog', () => {
 
     expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('codex')
     // The placeholder follows too, so the example folder is not the wrong agent's. It stays a
-    // GENERIC name — this string ships to every cezar user, so it must not carry one person's.
+    // GENERIC name — this string ships to every Squawk user, so it must not carry one person's.
     expect(dirField().placeholder).toBe('~/.codex-second')
   })
 

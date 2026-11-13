@@ -299,7 +299,7 @@ describe('request validation bounds (#429)', () => {
     await apiRequest(app, `/api/v1/runs/${run.id}/pin`, { method: 'POST' });
     const res = await postJson(`/api/v1/runs/${run.id}/pin`, { pinned: false });
     expect(res.status).toBe(200);
-    // Absent, not `false`: the shape a cezar that never heard of pins would have written.
+    // Absent, not `false`: the shape a Squawk that never heard of pins would have written.
     expect(await res.json()).not.toHaveProperty('pinned');
     expect(store.getRun(run.id)).not.toHaveProperty('pinned');
   });

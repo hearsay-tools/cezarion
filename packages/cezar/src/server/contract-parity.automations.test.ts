@@ -39,7 +39,7 @@ import type { AppType } from './app-type.ts';
  *     annotating it `ForgeAvailability` makes the route answer one shape.
  *
  * The one thing this cannot see: an EXTRA key. The storage schemas in `src/automations/types.ts`
- * are `.passthrough()` (a definitions/state/log file written by a newer cezar must round-trip
+ * are `.passthrough()` (a definitions/state/log file written by a newer Squawk must round-trip
  * through an older one), so the route's own type carries a catchall and a key the contract never
  * named is admitted by it. Named keys — their types, and whether they are required — are checked
  * in full, which is where drift actually happens.

@@ -98,7 +98,7 @@ export function canBeUnread(run: ReadStateInput): boolean {
  * "Mark unread" (hearsay-tools/cezarion#775) takes the other road: it *clears* the receipt, and an absent one is
  * unread by this same clause.
  *
- * ISO-8601 strings compare lexicographically because every timestamp cezar writes is UTC
+ * ISO-8601 strings compare lexicographically because every timestamp Squawk writes is UTC
  * (`toISOString()` → trailing `Z`), so `<` on the strings is `<` on the instants.
  */
 export function isUnread(run: ReadStateInput): boolean {

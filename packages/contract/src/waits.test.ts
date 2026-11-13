@@ -151,7 +151,7 @@ function parkedRootWait(): RunRecord['delegation'] {
   } as unknown as RunRecord['delegation'];
 }
 
-/** Cezar's completion wait on two workers: a list entry with no deadline (hearsay-tools/cezarion#1301). */
+/** Squawk's completion wait on two workers: a list entry with no deadline (hearsay-tools/cezarion#1301). */
 function completionWaits(over: Record<string, unknown> = {}): WorkerWaitEntry[] {
   return [workerWaitEntrySchema.parse({
     kind: WAIT_KIND.worker, id: '33333333-3333-4333-8333-333333333333', source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, registeredAt: '2026-10-17T15:00:00.000Z',
@@ -667,7 +667,7 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     expect(workerWaitView({ waits: [bare], delegation: { role: 'root' } as never })).toBeUndefined();
   });
 
-  // Inspection and the relationships view still show the parent's wait while it parks on Cezar's
+  // Inspection and the relationships view still show the parent's wait while it parks on Squawk's
   // completion wait, which has no deadline (hearsay-tools/cezarion#1301).
   it('projects a deadline-less completion entry for inspection and the relationships view', () => {
     const bare = workerWaitEntrySchema.parse({ ...workerBase(targets), source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, mode: 'all', deadline: undefined, timeoutSeconds: undefined });
@@ -709,7 +709,7 @@ describe('computeWaitingOn with worker entries', () => {
   });
 });
 
-// Review of #1437: Cezar's worker fallback is a real question (it carries `questions`), so
+// Review of #1437: Squawk's worker fallback is a real question (it carries `questions`), so
 // `cez task status` and the webhook's `task.question` must see it; its other waits ask nothing.
 describe('asksQuestion', () => {
   const human = (over: Record<string, unknown>) => ({ id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
@@ -1045,7 +1045,7 @@ describe('waiting-on mixed entries', () => {
   });
 });
 
-// hearsay-tools/cezarion#2431: Cezar's wait on native subagents a turn left running.
+// hearsay-tools/cezarion#2431: Squawk's wait on native subagents a turn left running.
 describe('subagent waits', () => {
   const child = (id: string, status: 'running' | 'completed' | 'failed' | 'cancelled' = 'running') => ({ id, status });
 

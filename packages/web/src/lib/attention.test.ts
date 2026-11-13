@@ -208,7 +208,7 @@ describe('tone vocabulary', () => {
   })
 })
 
-/** A worker wait in the list (hearsay-tools/cezarion#1301): an agent's registered wait, or Cezar's
+/** A worker wait in the list (hearsay-tools/cezarion#1301): an agent's registered wait, or Squawk's
  *  deadline-less completion wait. */
 const workerEntry = (over: Record<string, unknown> = {}) => ({
   kind: WAIT_KIND.worker, id: '00000000-0000-4000-8000-0000000000e1', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,

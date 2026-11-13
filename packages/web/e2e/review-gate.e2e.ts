@@ -11,7 +11,7 @@ import { waitForStatus } from './poll'
 // fixture-server starts: 1
 
 /**
- * The review gate (R3 Step 2.2) end-to-end, against a LIVE dry run — cezar's core promise
+ * The review gate (R3 Step 2.2) end-to-end, against a LIVE dry run — Squawk's core promise
  * that nothing auto-merges, walked in full: the mock claude's first turn touches `notes.md`
  * in the run's REAL worktree, so finishing the waiting session parks the run at `review`
  * (the settleSuccess rule). This spec then does what a reviewer does: reads the banner and

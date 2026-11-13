@@ -168,7 +168,7 @@ describe('task thread', () => {
     expect(block.copy).toBe(true)
     expect(block.keywordText).toBe('const')
     // Streamdown owns how its custom token variable is painted; our contract is that Shiki
-    // maps the keyword to cezar's theme token and that the active palette defines that token.
+    // maps the keyword to Squawk's theme token and that the active palette defines that token.
     expect(block.keywordToken).toBe('var(--syn-key)')
     expect(normalizeColorSample(browser, block.synKey)).toBe('rgb(94, 234, 212)')
   })

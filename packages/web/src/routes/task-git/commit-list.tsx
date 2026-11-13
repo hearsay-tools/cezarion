@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
  * WHICH CONSUMER ACTUALLY NEEDS THE VIRTUAL TIER — they are not symmetric, and it would be easy
  * to assume they are:
  *  - The TASK Commits tab is why this exists. `collectRunCommits` (src/server/git-changes.ts)
- *    runs `git log <merge-base>..HEAD` with NO cap, and cezar autosaves a commit per turn, so a
+ *    runs `git log <merge-base>..HEAD` with NO cap, and Squawk autosaves a commit per turn, so a
  *    long-running task genuinely reaches hundreds of rows.
  *  - The REPO Commits segment cannot reach the threshold today: `getLog` (src/server/git.ts)
  *    defaults to 20 and `server.ts` calls it without a count, so that list is 20 rows, full

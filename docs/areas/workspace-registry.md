@@ -54,7 +54,7 @@ the shrink-only OS-user reader list (hearsay-tools/cezarion#2810).
 Tests select `Home.sandbox(dir)` and use the shared setup's selector for process
 entry tests. The factory contains cache and config paths under that directory and
 creates a test `install.json` marker without replacing an existing one. A request for
-a test marker refuses the account's real cezar home in every process, with or without
+a test marker refuses the account's real Squawk home in every process, with or without
 a test-runner variable: the legacy home, each platform default root, their descendants
 and symlink aliases (`home/protected-roots.ts`, hearsay-tools/cezarion#2778). On
 Windows and macOS the comparison ignores case, so an absent `.CEZAR` still counts as

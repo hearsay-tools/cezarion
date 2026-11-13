@@ -3,7 +3,7 @@ language: typescript
 severity: warning
 message: >-
   Write the handoff file only through packages/cezar/src/handoff.ts (hearsay-tools/cezarion#1809):
-  the file is the agent's, and cezar's own records live in RunRecord.handoffRecords. Record an
+  the file is the agent's, and Squawk's own records live in RunRecord.handoffRecords. Record an
   autosave through recordHandoffAutosave or recordHandoffPeriodicAutosave, render the block for a
   reader through renderHandoffRecords, and write no line into the file from here.
 files:

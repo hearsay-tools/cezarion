@@ -1,7 +1,7 @@
 /**
  * Reject option-like git revision arguments (#431). A `-`/`--`-prefixed
  * base/from ref is git argument injection: `git diff --output=/path` writes an
- * arbitrary file, `--upload-pack=<cmd>` runs a command, etc. Every ref cezar
+ * arbitrary file, `--upload-pack=<cmd>` runs a command, etc. Every ref Squawk
  * feeds to git is already gated upstream by `git rev-parse --verify` /
  * `git check-ref-format`, which reject option-like values — this is the
  * explicit last line of defense so a future refactor can't silently drop that

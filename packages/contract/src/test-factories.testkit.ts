@@ -206,7 +206,7 @@ export function makePeerWait(over: Partial<PeerWaitEntry> = {}): PeerWaitEntry {
   };
 }
 
-/** Cezar's open wait on one running native subagent (hearsay-tools/cezarion#2431). */
+/** Squawk's open wait on one running native subagent (hearsay-tools/cezarion#2431). */
 export function makeSubagentWait(over: Partial<SubagentWaitEntry> = {}): SubagentWaitEntry {
   return {
     ...waitBase(),

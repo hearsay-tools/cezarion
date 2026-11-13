@@ -2,9 +2,9 @@ import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 
 /**
- * SIGHUP is acted on only when cezar runs on a terminal. GNU `nohup` moves stdin and stdout
+ * SIGHUP is acted on only when Squawk runs on a terminal. GNU `nohup` moves stdin and stdout
  * off the terminal, so `nohup cez serve` is not on one. Node resets SIGHUP to its default at
- * startup, discarding the ignore disposition `nohup` set, so off a terminal cezar ignores
+ * startup, discarding the ignore disposition `nohup` set, so off a terminal Squawk ignores
  * hangups itself (hearsay-tools/cezarion#915).
  */
 export function onTerminal(): boolean {

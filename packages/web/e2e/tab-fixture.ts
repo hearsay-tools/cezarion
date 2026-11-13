@@ -4,7 +4,7 @@ import { fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /** Production CLI over a private workspace; pages share a browser, never host state. `serverPackage`
- * is the cezar package directory to serve: the specs' e2e build mirror by default, and
+ * is the Squawk package directory to serve: the specs' e2e build mirror by default, and
  * `<root>/packages/cezar` for the production-build benchmark. */
 export async function createTabFixture(buildRoot = process.cwd(), options: { remote?: boolean | undefined; basicAuth?: boolean; serverPackage?: string; taskList?: 'project' | 'global'; taskListSizes?: { active: number; archived: number; projects: number }; indexSeed?: boolean } = {}) {
   const serverPackage = resolve(buildRoot, options.serverPackage ?? '.ai/qa/build/cezar')

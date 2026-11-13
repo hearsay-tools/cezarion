@@ -316,7 +316,7 @@ export function LinkedReferences({ run }: { run: ApiRun }) {
   }
   // The one PR chip `taskReferences` cannot express: a forge URL whose last segment is not a
   // number (`taskPrUrl`'s own tolerance — an unrecognized forge still gets a working link, just
-  // without a number cezar would be inventing). Gated on that URL not being painted already,
+  // without a number Squawk would be inventing). Gated on that URL not being painted already,
   // NOT on there being no chips at all: today every `pullRequestUrl` is a GitHub `…/pull/N` and
   // the two are the same test, but a forge whose PR URLs do not end in a number (#847's GitLab
   // adapter) would have a `prNumber` chip standing in front of a link that then never rendered.

@@ -124,7 +124,7 @@ describe('workspace runs index API', () => {
     expect(body.truncated).toEqual([]);
   });
 
-  it('agrees with a cold read on a run this cezar cannot read, and opening it says why (#779)', async () => {
+  it('agrees with a cold read on a run this Squawk cannot read, and opening it says why (#779)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     onTestFinished(() => warn.mockRestore());
     await registerProject(repoRoot, undefined, testHome());
@@ -403,7 +403,7 @@ describe('workspace runs index API', () => {
     const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
     setRunStatus(store, live.id, RUN_STATUS.waiting, { delegation });
     store.appendEvent(live.id, question);
-    // Every ask opens a human wait (phase 2); a cold row an older cezar stored keeps the summary,
+    // Every ask opens a human wait (phase 2); a cold row an older Squawk stored keeps the summary,
     // which the read upgrades into one (phase 4b, hearsay-tools/cezarion#1236).
     store.commitWait(live.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' });
     seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: RUN_STATUS.waiting, delegation, hasPendingHumanAsk: true })]);

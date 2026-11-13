@@ -39,7 +39,7 @@ function project(): { root: string; dataDir: string } {
   return { root, dataDir: join(root, '.ai/cezar') };
 }
 
-/** A detached stand-in dev server with its pid record, as a crashed cezar leaves it. */
+/** A detached stand-in dev server with its pid record, as a crashed Squawk leaves it. */
 function leftover(dataDir: string, runId: string, port: number): ChildProcess {
   const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000'], { detached: true, stdio: 'ignore' });
   strays.push(child);

@@ -106,7 +106,7 @@ export const DESIGN_RULES: Rule[] = [
   },
   {
     name: 'fixture-serve-must-pin-cez-home',
-    why: "a spec-owned `cezar serve` takes its env from fixtureServeEnv(dataRoot) — a hand-rolled { CEZ_DRY_RUN } leaves CEZ_HOME at the developer's real ~/.cezar, so every run appends a dead /tmp fixture to their project registry",
+    why: "a spec-owned `hsq serve` takes its env from fixtureServeEnv(dataRoot) — a hand-rolled { CEZ_DRY_RUN } leaves CEZ_HOME at the developer's real ~/.cezar, so every run appends a dead /tmp fixture to their project registry",
     // Line-level: a CEZ_DRY_RUN that is not accompanied by a CEZ_HOME on the same line. Both
     // fixtureServeEnv() and the specs that spell the pair inline satisfy it.
     pattern: /^(?![^\n]*CEZ_HOME)[^\n]*\bCEZ_DRY_RUN\b/g,

@@ -49,7 +49,7 @@ const MAX_ENTRIES = 1000;
 /**
  * Home folders macOS guards with a privacy prompt (Files & Folders, Media & Apple Music,
  * Photos, Full Disk Access). Opening the picker at `~` must not LOOK INSIDE them: the `.git`
- * probe below is a read inside the folder, and in the desktop app it made macOS ask "Cezar
+ * probe below is a read inside the folder, and in the desktop app it made macOS ask "Squawk
  * would like to access Apple Music…" (and Documents, Desktop, Downloads…) before the user
  * clicked anything. They are still listed; opening one is the user's choice, and so is the
  * prompt that follows. Their `isRepo` is simply `false`.

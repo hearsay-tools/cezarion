@@ -234,7 +234,7 @@ describe('agent inputs and inbox claims', () => {
     conversation: { senderRunId: U1, recipientRunId: U2, kind: 'request', relationship: 'peer' }, id: U3, source: agentInputSchema.shape.source.enum.agent, parentRunId: U1,
     text: 'hi', createdAt: T, deliveredAt: T, consumedAt: T, awaitingRead: true, inboxClaim: claim, requestHash: HASH, deadline: T,
   };
-  /** Cezar's own input, as turn-nudges writes a completion refusal: no conversation, hash or deadline. */
+  /** Squawk's own input, as turn-nudges writes a completion refusal: no conversation, hash or deadline. */
   const lifecycleInput = { id: U4, parentRunId: U1, source: 'lifecycle', purpose: 'completion-refusal', text: 'not done', createdAt: T, deliveredAt: T };
 
   it('keeps every claim field and refuses duplicate or empty members', () => {

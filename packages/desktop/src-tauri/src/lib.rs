@@ -1,14 +1,14 @@
-//! cezar desktop (PoC): a native window around the managed cezar install.
+//! Squawk desktop (PoC): a native window around the managed Squawk install.
 //!
 //! The shell is deliberately thin. It resolves the entry file of the ACTIVE managed version
 //! (`~/.cezar/versions/current`), runs it as a sidecar through the user's login shell (so the
-//! `node`, `claude`, `gh` on their PATH are the ones cezar sees — a GUI app inherits none of
+//! `node`, `claude`, `gh` on their PATH are the ones Squawk sees — a GUI app inherits none of
 //! that), waits for `/api/v1/health`, and points the webview at the cockpit. Everything the
 //! cockpit does happens in the sidecar. A sidecar that exits `75` (`CEZ_SUPERVISED=1`) asks to be
 //! relaunched, and the supervisor loop below starts the current version again. Older cockpits
 //! still do this after their own update.
 //!
-//! The shell installs a cezar only when there is none (first launch): `npm install --prefix`
+//! The shell installs a Squawk only when there is none (first launch): `npm install --prefix`
 //! of the newest release into the managed `versions/` layout, then `current` points at it. The
 //! shell never updates or switches an installed cockpit.
 //!
@@ -263,7 +263,7 @@ pub fn run() {
     let shell_for_run = shell.clone();
     let shell_for_events = shell.clone();
     // SIGTERM/SIGINT (a `kill`, a logout, a supervisor of our own) never reach Tauri's Exit
-    // event, and a cezar older than the parent watch would then outlive us — take the sidecar
+    // event, and a Squawk older than the parent watch would then outlive us — take the sidecar
     // down here, then leave.
     let shell_for_signal = shell.clone();
     let _ = ctrlc::set_handler(move || {
@@ -360,7 +360,7 @@ pub fn run() {
             }
         })
         .build(context)
-        .expect("failed to build the cezar desktop shell")
+        .expect("failed to build the desktop shell")
         .run(move |app, event| match event {
             RunEvent::Ready => {
                 if app.get_webview_window("main").is_some() {
@@ -451,7 +451,7 @@ fn supervisor_continues(shell: &Shell, relaunch: bool) -> bool {
     }
 }
 
-/// The entry to run, installing cezar first on a machine that has none.
+/// The entry to run, installing Squawk first on a machine that has none.
 fn entry_or_install(window: &WebviewWindow) -> Option<PathBuf> {
     let versions = match selected_versions_root() {
         Ok(versions) => versions,
@@ -463,7 +463,7 @@ fn entry_or_install(window: &WebviewWindow) -> Option<PathBuf> {
     if let Some(entry) = resolve_entry() {
         return Some(entry);
     }
-    // First launch on this machine: the supervisor puts a cezar in place itself.
+    // First launch on this machine: the supervisor puts a Squawk in place itself.
     if !install_cezar(window, &versions) {
         return None;
     }
@@ -489,7 +489,7 @@ fn run_cockpit(shell: &Shell, window: &WebviewWindow) -> bool {
         let _ = item.set_enabled(true);
     }
     let cwd = pick_cwd();
-    splash_reset(window, "Starting cezar…", &entry.to_string_lossy());
+    splash_reset(window, &format!("Starting {}…", identity::DISPLAY_NAME), &entry.to_string_lossy());
 
     let log: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
     // Spawn and publish under the child lock, after checking quit there: quit either finds this
@@ -591,7 +591,7 @@ fn watch_cockpit(shell: &Shell, window: &WebviewWindow, pid: u32, log: &Mutex<Ve
     };
     match status.and_then(|s| s.code()) {
         Some(RESTART_EXIT_CODE) => {
-            splash_reset(window, "Restarting cezar…", "Switching to the newly activated version.");
+            splash_reset(window, &format!("Restarting {}…", identity::DISPLAY_NAME), "Switching to the newly activated version.");
             true
         }
         Some(code) if !shell.quitting.load(Ordering::SeqCst) => {
@@ -645,7 +645,7 @@ fn check_node() -> Result<String, String> {
         return Err("Node.js was not found on your PATH.".into());
     }
     if !node_meets_floor(&version) {
-        return Err(format!("Node.js {version} is installed, but cezar needs {MIN_NODE_LABEL} or newer."));
+        return Err(format!("Node.js {version} is installed, but {} needs {MIN_NODE_LABEL} or newer.", identity::DISPLAY_NAME));
     }
     Ok(version)
 }
@@ -674,16 +674,16 @@ fn require_node(window: &WebviewWindow) -> bool {
     }
 }
 
-// ---- installing cezar from the shell (first launch only) -----------------------------------
+// ---- installing Squawk from the shell (first launch only) -----------------------------------
 
 /// The npm dist-tag the first install takes: the newest stable release.
 const INSTALL_TAG: &str = "latest";
 
-/// Install the newest cezar into the managed layout and make it current. Runs only when nothing
+/// Install the newest Squawk into the managed layout and make it current. Runs only when nothing
 /// is installed (`entry_or_install`); the shell never replaces an installed cockpit. Streams
 /// npm's output to the splash. Returns whether the install succeeded.
 fn install_cezar(window: &WebviewWindow, versions: &Path) -> bool {
-    splash_reset(window, "Installing cezar…", &format!("{PACKAGE}@{INSTALL_TAG} → {}", versions.display()));
+    splash_reset(window, &format!("Installing {}…", identity::DISPLAY_NAME), &format!("{PACKAGE}@{INSTALL_TAG} → {}", versions.display()));
 
     let mut lines: Vec<String> = Vec::new();
     let installed = install_into(versions, |staging| {
@@ -734,15 +734,15 @@ fn spawn_sidecar(entry: &Path, port: u16, cwd: &Path, log: Arc<Mutex<VecDeque<St
         .current_dir(cwd)
         .envs(product::generated_env("DESKTOP", "1"))
         .envs(product::generated_env("SUPERVISED", "1"))
-        // cezar polls this pid and exits when it is gone — a force-quit of the shell never
+        // Squawk polls this pid and exits when it is gone — a force-quit of the shell never
         // leaves a headless cockpit behind (the Exit handler only runs on a clean quit).
         .envs(product::generated_env("SUPERVISOR_PID", std::process::id().to_string()))
-        // The shell holds this pipe; closing it asks cezar to shut down (`sidecar.rs`).
+        // The shell holds this pipe; closing it asks Squawk to shut down (`sidecar.rs`).
         .envs(product::generated_env("SUPERVISOR_STDIN", "1"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // cezar starts agents through this binary so macOS privacy prompts name the agent, not the
+    // Squawk starts agents through this binary so macOS privacy prompts name the agent, not the
     // app (`disclaim.rs`). The cockpit server itself stays the app's own.
     if cfg!(target_os = "macos") {
         if let Ok(exe) = std::env::current_exe() {
@@ -817,7 +817,7 @@ fn shell_quote(value: &str) -> String {
 // ---- the managed layout --------------------------------------------------------------------
 //
 // `versions/<id>` directories, each with a `.cezar-install.json` manifest, and `current` pointing
-// at the active one: the layout every cezar install has used. Written against the filesystem
+// at the active one: the layout every Squawk install has used. Written against the filesystem
 // rather than as a shell script, so one implementation — and one set of tests — serves macOS,
 // Linux and Windows.
 
@@ -834,7 +834,7 @@ fn valid_version_id(id: &str) -> bool {
 }
 
 /// The id `current` points at: a link (a symlink, or a junction on Windows), else a text file
-/// holding the id — what cezar writes where it could create neither.
+/// holding the id — what Squawk writes where it could create neither.
 fn active_id(versions: &Path) -> Option<String> {
     let current = versions.join("current");
     std::fs::read_link(&current)
@@ -928,7 +928,7 @@ fn install_into(versions: &Path, run_npm: impl FnOnce(&Path) -> Result<(), Strin
     result
 }
 
-/// Now, as `2026-09-28T11:03:07Z` — the shape cezar's own manifests carry.
+/// Now, as `2026-09-28T11:03:07Z` — the shape Squawk's own manifests carry.
 fn iso_now() -> String {
     let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     iso_from_unix(seconds)
@@ -1153,7 +1153,7 @@ fn resolve_entry() -> Option<PathBuf> {
 }
 
 /// The boot folder: `CEZ_DESKTOP_CWD`, else the most recently opened registered project, else
-/// the home directory (which cezar never registers as a project — the cockpit then shows the
+/// the home directory (which Squawk never registers as a project — the cockpit then shows the
 /// registry).
 fn pick_cwd() -> PathBuf {
     if let Some(explicit) = product::env_os("DESKTOP_CWD").map(PathBuf::from) {
@@ -1261,7 +1261,7 @@ fn fail_needs_node(window: &WebviewWindow, reason: &str) {
         "{}?needs_node=1&error={}&title={}",
         app_origin(),
         urlencode(reason),
-        urlencode(&format!("cezar needs Node.js {MIN_NODE_LABEL} or newer"))
+        urlencode(&format!("{} needs Node.js {MIN_NODE_LABEL} or newer", identity::DISPLAY_NAME))
     )) {
         let _ = window.navigate(url);
     }
@@ -1517,9 +1517,9 @@ mod tests {
         assert!(node_meets_floor(&version), "{version}");
     }
 
-    /// The sidecar's whole launch: node is started with the entry and the arguments cezar
+    /// The sidecar's whole launch: node is started with the entry and the arguments Squawk
     /// expects, in the right folder and environment, and its health answers on the port. Then
-    /// the shell's stop: closing stdin ends it without a force-kill, as cezar's
+    /// the shell's stop: closing stdin ends it without a force-kill, as Squawk's
     /// `watchSupervisor` does.
     #[test]
     #[ignore = "needs Node.js on PATH"]

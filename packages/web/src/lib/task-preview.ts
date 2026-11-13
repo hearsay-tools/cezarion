@@ -1,6 +1,6 @@
 import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-api-client/contract/handoff'
 
-/** The lifecycle lines cezar wrote into the Progress log before hearsay-tools/cezarion#1809. A
+/** The lifecycle lines Squawk wrote into the Progress log before hearsay-tools/cezarion#1809. A
  *  journal from an older run still holds them; the preview never shows one. */
 const LEGACY_LIFECYCLE_LINE =
   /^- \S+ — (?:(?:turn complete|step ".*" complete|step ".*" ended without done|session idle-closed) — |worktree setup (?:done in|failed —|skipped —) )/

@@ -2,13 +2,13 @@ import { z } from 'zod';
 
 // ---- team skill sources (`/skills/sources`, hearsay-tools/cezarion#279) -------------------------
 
-/** The source shapes cezar accepts, as the cockpit and every refusal name them. */
+/** The source shapes Squawk accepts, as the cockpit and every refusal name them. */
 export const SKILLS_REPO_FORMATS = 'owner/name, an https, ssh or git URL, git@host:path, or a local or file:// path';
 
 const ALLOWED_URL_SCHEMES = new Set(['https', 'http', 'ssh', 'git', 'file']);
 
 /**
- * The kind of a `skillsRepos` `repo` value, or null when cezar refuses it. One rule for the
+ * The kind of a `skillsRepos` `repo` value, or null when Squawk refuses it. One rule for the
  * request schema, the cockpit's Add form and the server's git remote (`safeRemoteFor`).
  *
  * Refused: an empty value, a leading `-` (git would read an option), `::` (remote-helper

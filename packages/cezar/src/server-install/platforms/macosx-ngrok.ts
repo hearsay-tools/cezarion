@@ -281,7 +281,7 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
   },
 });
 
-/* ── autostart: run cezar itself as a launchd agent ─────────────────── */
+/* ── autostart: run Squawk itself as a launchd agent ─────────────────── */
 
 
 /** Live launchd `ProgramArguments` joined into one string so the shared npx-cache
@@ -301,7 +301,7 @@ function readSquawkProgramArguments(path: string): string {
   }
 }
 
-/** Resolve the argv array for the cezar launchd agent, mirroring how the CLI was launched. */
+/** Resolve the argv array for the Squawk launchd agent, mirroring how the CLI was launched. */
 export async function resolveSquawkArgv(ctx: InstallContext, rebrand = REBRAND_SWITCH): Promise<string[]> {
   const node = process.execPath;
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -316,7 +316,7 @@ export async function resolveSquawkArgv(ctx: InstallContext, rebrand = REBRAND_S
   const globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
   if (globalBin) return [node, globalBin];
 
-  // No runnable cezar → installing a KeepAlive agent would make launchd
+  // No runnable Squawk → installing a KeepAlive agent would make launchd
   // respawn-throttle a permanently failing job across reboots. Fail the step.
   throw new StepAborted(
     `could not locate a runnable ${productName('cezar', rebrand)} (${entry} missing, no global ${identity.npmAlias ?? identity.command}) — ` +
@@ -324,9 +324,9 @@ export async function resolveSquawkArgv(ctx: InstallContext, rebrand = REBRAND_S
   );
 }
 
-/** launchd agent that keeps the cezar cockpit running on the given port. */
+/** launchd agent that keeps the Squawk cockpit running on the given port. */
 export function squawkLaunchdPlist(repoRoot: string, port: number, argv: string[], rebrand = REBRAND_SWITCH): string {
-  // Give the agent the operator's PATH so cezar can spawn claude/gh/codex.
+  // Give the agent the operator's PATH so Squawk can spawn claude/gh/codex.
   const pathDirs = [dirname(process.execPath), ...(process.env.PATH ?? '').split(':'), '/usr/local/bin', '/usr/bin', '/bin']
     .filter((d, i, a) => d && d !== '.' && a.indexOf(d) === i);
   const fullArgv = [...argv, 'serve', '--no-open', '--port', String(port)];
@@ -460,7 +460,7 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       refreshNpxCacheForRedeploy(ctx, readSquawkProgramArguments(agentArtifact(ctx, 'autostart', rebrand).path), {
         reconfigureHint: commandText(`  cez server-install --platform macosx-ngrok --reconfigure autostart`, undefined, rebrand),
       });
-      // Restart both the cezar cockpit and the ngrok tunnel, then re-verify.
+      // Restart both the Squawk cockpit and the ngrok tunnel, then re-verify.
       if (ctx.dryRun) {
         ctx.ui.info(`DRY RUN — would restart the ${productName('cezar', rebrand)} and ngrok launchd agents and re-verify.`);
         return;

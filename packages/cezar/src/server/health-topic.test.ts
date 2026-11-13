@@ -181,7 +181,7 @@ describe('health topic + cache (live-server path)', () => {
 
   // The regression this file exists for: the 5 s TTL says how often a revalidation is KICKED
   // OFF, not how old the served value may be — the revalidation is fire-and-forget. With no
-  // subscriber (a background `cezar serve` with no tab open) nothing else refreshes the cache,
+  // subscriber (a background `hsq serve` with no tab open) nothing else refreshes the cache,
   // so without a ceiling the next GET could answer with the boot payload an hour later.
   it('does not serve a payload older than the staleness ceiling', async () => {
     setRunner('claude');

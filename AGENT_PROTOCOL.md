@@ -1,6 +1,6 @@
-# AGENT_PROTOCOL.md — the cezar agent protocol
+# AGENT_PROTOCOL.md — the Squawk agent protocol
 
-cezar runs every coding-agent CLI behind one seam, `AgentRunner`, and renders every backend
+Squawk runs every coding-agent CLI behind one seam, `AgentRunner`, and renders every backend
 through one event vocabulary. This file holds the rules for that seam that code, types, tests
 and lint rules do not state. When this file and the code disagree, the code wins.
 
@@ -18,17 +18,17 @@ runner id. Each runner's `*_SPEC_SUPPORT` constant, next to its class, says whic
 
 - `.ai/scripts/probe-steering.ts` probes the `inputDelivery` of a real CLI. It spends a paid
   session, so run it by hand.
-- The delegation CLI (`cez worker`, `cez message`) is agent-facing and has no compatibility
+- The delegation CLI (`hsq worker`, `hsq message`) is agent-facing and has no compatibility
   window: change or remove a verb without an alias. This does not apply to human commands
-  such as `cez task send`.
+  such as `hsq task send`.
 
 ---
 
 ## 2. v1 `AgentEvent` — the flat stream
 
 `AgentEvent` in `packages/cezar/src/core/agent-runner.ts` is the v1 stream. Every runner
-emits it beside v2: `cezar run` renders it and saved runs hold it. New consumers read runner
-output from v2. A Cezar-owned run event, such as `provider-auth-required`, has no v2 form
+emits it beside v2: `hsq run` renders it and saved runs hold it. New consumers read runner
+output from v2. A Squawk-owned run event, such as `provider-auth-required`, has no v2 form
 and arrives as `run-event` (§9). The v1 `type` strings are additive-only (§ Compatibility).
 
 ---
@@ -61,7 +61,7 @@ on Cursor, with their evidence.
 
 ### Codex managed permissions
 
-`packages/cezar/src/core/codex-permissions.test.ts` holds the rules: when Cezar selects its
+`packages/cezar/src/core/codex-permissions.test.ts` holds the rules: when Squawk selects its
 own sandbox, and when Codex's managed permissions stay.
 
 ### Codex approval routing
@@ -72,7 +72,7 @@ what recovery does with one.
 
 #### MCP tool approvals
 
-`packages/cezar/src/core/ci-tools.testkit.ts` holds how Codex treats Cezar's own MCP server.
+`packages/cezar/src/core/ci-tools.testkit.ts` holds how Codex treats Squawk's own MCP server.
 `.ai/scripts/probe-approvals.ts` checks that routing against the installed Codex in one paid
 turn. CI never runs it.
 
@@ -101,7 +101,7 @@ never a wire gap.
 
 ## Waits (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234; CI since hearsay-tools/cezarion#474)
 
-A run keeps its waits in one list on its record. The agent opens and closes them with the cezar
+A run keeps its waits in one list on its record. The agent opens and closes them with the Squawk
 tools. Read each fact from its owner:
 
 - `packages/contract/src/waits.ts`, `ci-wait.ts` and `ask-schema.ts`: the stored wait shapes, and
@@ -109,7 +109,7 @@ tools. Read each fact from its owner:
 - `WAIT_KINDS` in `packages/cezar/src/workflows/run/wait-kinds.ts`: one typed row for each wait
   kind, with its deadline, slot, wake budget, resolvers, cancel paths and texts. A new kind is a
   new row ([ADR 0061](docs/adr/0061-one-wait-engine-executes-wait-kind-rows.md)).
-- `squawkTools` in `packages/cezar/src/ci-wait/tools.ts`: the one list of cezar tools, with the
+- `squawkTools` in `packages/cezar/src/ci-wait/tools.ts`: the one list of Squawk tools, with the
   descriptions that the agent reads. Every runner's adapter, extension and allow-list read
   it, and `squawkToolEnvNames` lists the environment names a harness forwards. A new tool is
   one entry there. `errors.ts` beside it and `workflows/completion-policy.ts` hold the refusal
@@ -141,7 +141,7 @@ authority.
 
 The harness matrix drives each real runner class through its native mock. Every criterion
 holds for every runner, or carries a `PARITY_EXEMPTIONS` entry whose reason names the wire
-limitation. A row that tests Cezar's shared logic above the seam runs on the derived runner
+limitation. A row that tests Squawk's shared logic above the seam runs on the derived runner
 set instead.
 
 Print every row with its exemptions:
@@ -189,10 +189,10 @@ per-runner file and for regression coverage. Rules that no check holds:
 - A red cell is a runner bug until proven otherwise. Fix the runner. Do not weaken the row.
 - A new mock scenario is wire-faithful, as §8 requires of a fixture.
 - A native mock matches `mock:<scenario>` over all the native user text it receives. That text
-  includes what Cezar adds: in-thread system instructions, resume context and
+  includes what Squawk adds: in-thread system instructions, resume context and
   `<cezar-context>` blocks. A change that adds text to an opening message strips that text
   before the mock matches, in `packages/cezar/scripts/mock-session-context.mjs`. The mock
-  still records the raw text, because tests assert what Cezar sent.
+  still records the raw text, because tests assert what Squawk sent.
 
 Autosave process attribution is observation, not OS containment: `autosave-holders.ts` and
 `autosave-windows.ts` say what it cannot see.
@@ -217,13 +217,13 @@ cooperative same-user supervision, not isolation.
 
 ### Native cross-session messaging at shipped defaults (D3)
 
-A runner's native cross-session messages bypass Cezar's recorded conversations, so Cezar tasks
-talk through `cez message`. The "Messaging other tasks" text of `handoffInstructions`
+A runner's native cross-session messages bypass Squawk's recorded conversations, so Squawk tasks
+talk through `hsq message`. The "Messaging other tasks" text of `handoffInstructions`
 (`packages/cezar/src/handoff.ts`) tells every session so. The D3 cells and the D3 entries in
 `PARITY_EXEMPTIONS` hold each runner's control at shipped defaults; § 11 of the same spec
 holds the probe evidence.
 
-Cezar changes no MCP server, plugin or tool setting of the user.
+Squawk changes no MCP server, plugin or tool setting of the user.
 
 <a id="codex-retrying-stream-errors-550"></a>
 
@@ -252,7 +252,7 @@ Each run has one append-only NDJSON event file that holds v1 and v2 events toget
 (`docs/areas/runs-store.md`). Never rewrite, reorder or renumber it. The per-run SSE route
 replays it, then streams live, under the event names `run-event` (v1) and `ui-event` (v2).
 The multiplex route has its own envelope: `packages/cezar/src/server/live-routes.ts` holds
-it. A Cezar-owned event such as
+it. A Squawk-owned event such as
 `provider-auth-required` never carries vendor error text or credentials.
 
 ---
@@ -294,7 +294,7 @@ force, or force only in part. The item numbers are stable: code cites them.
    native bridge keeps its pending request in the session and routes the next human answer
    back through it. It answers a malformed native request with an error and never leaves
    the turn blocked. Each native ask kind that a human can answer needs an entry in
-   `askResumeCases`. Prove the Cezar tools as
+   `askResumeCases`. Prove the Squawk tools as
    [Waits](#ci-wait-tool-contract-474) requires.
 9. **Plumbing** — Settings → Agent config ships with the runner: the doc comment of
    `packages/web/src/routes/settings/agent-descriptors.ts` holds the rules. Add the composer

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { renderHandoffRecords } from '../../handoff.ts';
+import { productName } from '../../home/display.ts';
 import { buildPrBody } from './github.ts';
 
-const FOOTER = '\n\n---\n\n🤖 made with cezar';
+const FOOTER = `\n\n---\n\n🤖 made with ${productName('cezar')}`;
 const journal = (goal: string, log: string) => `# Handoff\n\n## Goal\n\n${goal}\n\n## Progress log\n\n${log}\n## Resume notes\n\nnext: review\n`;
 
 describe('buildPrBody', () => {
@@ -28,7 +29,7 @@ describe('buildPrBody', () => {
     expect(buildPrBody(crlf, 'the task')).toBe(`## Goal\n\nShip it\n\n## Progress log\n\n- 10:01 — tests pass\n- 10:00 — started${FOOTER}`);
   });
 
-  it("leaves cezar's records block out of the body (hearsay-tools/cezarion#1809)", () => {
+  it("leaves Squawk's records block out of the body (hearsay-tools/cezarion#1809)", () => {
     const records = { autosave: [{ at: '2026-10-25T10:00:00.000Z', note: 'turn end: cezar autosave committed abc1234 on cez/x' }] };
     const text = renderHandoffRecords(journal('Ship it', '- 10:00 — started\n'), records);
     expect(text).toContain('### Autosave');

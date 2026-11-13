@@ -11,11 +11,11 @@ import { landsInside } from './skills-remote.ts';
 const execFileAsync = promisify(execFile);
 
 /**
- * The record of every path cezar wrote into a task worktree (hearsay-tools/cezarion#1814), for
+ * The record of every path Squawk wrote into a task worktree (hearsay-tools/cezarion#1814), for
  * every module that writes there (`.ai/ast-grep/rules/worktree-write-outside-manifest.yml` names
  * them). It lives in the worktree's private git dir, so it dies with the worktree and nothing in
  * the tree (a tool, a diff, autosave) sees it. A writer replaces or removes a path only while the
- * manifest lists it for that writer and the path still is what cezar left there, so a file the
+ * manifest lists it for that writer and the path still is what Squawk left there, so a file the
  * agent changed or added stays. A missing or unreadable manifest lists nothing: every file stays.
  */
 export const MANIFEST_FILE = 'cezar-manifest.json';
@@ -36,7 +36,7 @@ const entryPath = z.string().refine(
   (path) => !path.includes('\\') && path.split('/').every((part) => part !== '' && part !== '.' && part !== '..'),
 );
 
-/** Unknown keys stay, so a rewrite keeps what a newer cezar of the same version added. */
+/** Unknown keys stay, so a rewrite keeps what a newer Squawk of the same version added. */
 const entrySchema = z.object({
   path: entryPath,
   /** One writer per path: another writer's entry is never acted on. */
@@ -47,19 +47,19 @@ const entrySchema = z.object({
   /** What the entry was made from: a changed source means a rewrite. */
   source: z.string().optional(),
   /**
-   * What cezar left at the path: `link:<target>`, or `tree2:<sha256>` over every name, link target
+   * What Squawk left at the path: `link:<target>`, or `tree2:<sha256>` over every name, link target
    * and byte, each length-prefixed, and each file's executable bit. A `tree:` identity is an
    * imported one in the older encoding.
    */
   identity: z.string(),
-  /** A pending entry's other complete form that still counts as cezar's: the copy it replaces. */
+  /** A pending entry's other complete form that still counts as Squawk's: the copy it replaces. */
   alternate: z.string().optional(),
 }).passthrough();
 export type ManifestEntry = z.infer<typeof entrySchema>;
 
 const ENTRY_KEYS: ReadonlySet<string> = new Set(Object.keys(entrySchema.shape));
 
-/** What a newer cezar of the same version added to `entry`; the rest is rebuilt from the write. */
+/** What a newer Squawk of the same version added to `entry`; the rest is rebuilt from the write. */
 function unknownFields(entry: ManifestEntry | undefined): Record<string, unknown> {
   return Object.fromEntries(Object.entries(entry ?? {}).filter(([key]) => !ENTRY_KEYS.has(key)));
 }
@@ -74,7 +74,7 @@ const legacySchema = z.object({ version: z.literal(1), roots: z.array(z.unknown(
 const legacyEntrySchema = entrySchema.omit({ writer: true });
 
 interface Loaded {
-  /** Top-level keys this cezar does not know, written back unchanged. */
+  /** Top-level keys this Squawk does not know, written back unchanged. */
   extra: Record<string, unknown>;
   skillsExtra: Record<string, unknown>;
   entries: ManifestEntry[];
@@ -101,7 +101,7 @@ function strings(values: readonly unknown[] | undefined): string[] {
   return (values ?? []).filter((value): value is string => typeof value === 'string');
 }
 
-/** The manifest, or `newer` when a later cezar wrote a version this one cannot read. */
+/** The manifest, or `newer` when a later Squawk wrote a version this one cannot read. */
 async function loadManifest(gitDir: string): Promise<Loaded | 'newer'> {
   const loaded: Loaded = { extra: {}, skillsExtra: {}, entries: [], roots: [], legacy: false };
   const listed = new Set<string>();
@@ -114,7 +114,7 @@ async function loadManifest(gitDir: string): Promise<Loaded | 'newer'> {
   if (read.found) {
     const version = (read.value as { version?: unknown } | null | undefined)?.version;
     if (typeof version === 'number' && version > MANIFEST_VERSION) return 'newer';
-    // Unreadable: nothing is recorded as cezar's, and the next save replaces it.
+    // Unreadable: nothing is recorded as Squawk's, and the next save replaces it.
     const parsed = manifestSchema.safeParse(read.value);
     if (parsed.success) {
       const { version: _version, entries, skills, ...extra } = parsed.data;
@@ -164,7 +164,7 @@ const TREE2: TreeEncoding = {
   special: (rel, mode) => `S${sized(rel)}${mode}:`,
 };
 
-/** The encoding a cezar before hearsay-tools/cezarion#1814 recorded; read only to check an imported identity. */
+/** The encoding a Squawk before hearsay-tools/cezarion#1814 recorded; read only to check an imported identity. */
 const LEGACY_TREE: TreeEncoding = {
   link: (rel, target) => `L ${rel} ${target}\n`,
   dir: (rel) => `D ${rel}\n`,
@@ -301,10 +301,10 @@ export interface WorktreeFilesOptions {
 }
 
 /**
- * Who may write a path, for one writer. `ours`: listed, and still what cezar left. `free`:
+ * Who may write a path, for one writer. `ours`: listed, and still what Squawk left. `free`:
  * nothing there. `theirs`: changed since, or never listed; the writer drops any entry and never
  * touches it. `kept`: never touched and never dropped (an interrupted write that no longer matches,
- * a kind or identity this cezar cannot check, another writer's path). `outside`: its parent dir
+ * a kind or identity this Squawk cannot check, another writer's path). `outside`: its parent dir
  * leads out of the worktree.
  */
 export interface PathState {
@@ -316,7 +316,7 @@ export interface PathState {
 /**
  * One writer's view of a worktree's manifest for one pass. A write runs stage, pending, clear,
  * place, record: a crash leaves the old copy, nothing, or the new copy, each of which the next
- * pass reads as cezar's and repairs.
+ * pass reads as Squawk's and repairs.
  */
 export class WorktreeFiles {
   private readonly byPath: Map<string, ManifestEntry>;
@@ -371,8 +371,8 @@ export class WorktreeFiles {
   /**
    * An imported `tree:` identity, checked in its older encoding, which has no lengths: one tree can
    * read the same as another. A match proves the path unchanged only for a single file, or for a
-   * dir holding only `SKILL.md` where cezar wrote just that. Then the entry is recorded again as
-   * `current`. Any other match is kept: it may be cezar's copy or the agent's edit. Null when
+   * dir holding only `SKILL.md` where Squawk wrote just that. Then the entry is recorded again as
+   * `current`. Any other match is kept: it may be Squawk's copy or the agent's edit. Null when
    * nothing matched, so the path has changed.
    */
   private async checkLegacy(at: string, listed: ManifestEntry, current: string): Promise<ManifestEntry | 'kept' | null> {
@@ -382,7 +382,7 @@ export class WorktreeFiles {
     if (!field) return null;
     const stat = await lstat(at);
     if (!stat.isFile()) {
-      // An older cezar wrote these as one `SKILL.md`; a copy of a whole source dir has no known shape.
+      // An older Squawk wrote these as one `SKILL.md`; a copy of a whole source dir has no known shape.
       const oneSkillFile = listed.kind === 'generated' || (listed.kind === 'pending' && listed.identity.startsWith('tree:'));
       if (!oneSkillFile) return 'kept';
       if (!stat.isDirectory() || (await readdir(at)).join('/') !== 'SKILL.md') return null;
@@ -411,7 +411,7 @@ export class WorktreeFiles {
   }
 
   /**
-   * Write `content` at `path`, which must be free or cezar's. Returns the identity it left. The
+   * Write `content` at `path`, which must be free or Squawk's. Returns the identity it left. The
    * pending entry is saved before the path changes; a file replaces a file in one rename. Returns
    * null when the agent wrote at the path while the entry was staged: the path stays the agent's,
    * with no entry.
@@ -453,12 +453,12 @@ export class WorktreeFiles {
     return identity;
   }
 
-  /** Record what is already at `path` as cezar's: an interrupted write that finished. */
+  /** Record what is already at `path` as Squawk's: an interrupted write that finished. */
   record(path: string, meta: EntryMeta, identity: string): void {
     this.byPath.set(path, this.newEntry(path, meta, identity));
   }
 
-  /** Remove `path` while it is cezar's. The caller's next `save()` drops the entry. */
+  /** Remove `path` while it is Squawk's. The caller's next `save()` drops the entry. */
   async remove(path: string): Promise<boolean> {
     if ((await this.inspect(path)).owner !== 'ours') return false;
     await removePath(join(this.worktree, path));
@@ -566,7 +566,7 @@ function serialized<T>(worktree: string, pass: () => Promise<T>): Promise<T> {
 
 /**
  * Run `pass` with `writer`'s view of the worktree's manifest. `fallback` when the worktree has no
- * private git dir, or a newer cezar wrote a manifest version this one cannot read: then this cezar
+ * private git dir, or a newer Squawk wrote a manifest version this one cannot read: then this Squawk
  * writes nothing there and leaves the file alone.
  */
 export function withWorktreeFiles<T>(

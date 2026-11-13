@@ -20,7 +20,7 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = join(packageRoot, 'dist/index.js');
 
 test('built worker CLI runs without cez on PATH; headless provision stays local and exits cleanly', { timeout: 120_000 }, async () => {
-  // Cezar may pin TMPDIR under a checkout; ancestor dependencies must not mask
+  // Squawk may pin TMPDIR under a checkout; ancestor dependencies must not mask
   // a missing dependency in this copied installation.
   const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', "cez-worker's-package-"));
   const cwd = join(root, 'empty working directory');

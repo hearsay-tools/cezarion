@@ -17,7 +17,7 @@ import { lastSessionId, runActionFlags } from './run-actions'
  *  - `live`    — the engine still owns a session (or the run has not started yet):
  *                `POST /api/runs/:id/messages`, exactly as the ask card always did.
  *  - `resume`  — the session ENDED while the question was still unanswered (idle
- *                timeout, a cezar restart, Finish, or a cancel). The answer becomes
+ *                timeout, a Squawk restart, Finish, or a cancel). The answer becomes
  *                the opening prompt of `POST /api/runs/:id/continue`, which reopens
  *                the last recorded session and appends the answer as a
  *                `user-message` — the very event that resolves the card.

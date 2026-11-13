@@ -29,14 +29,14 @@ import { toast } from '@/components/ui/toaster'
  *    whose accounts live outside it.
  *
  * The browser is therefore an assist that fills the field, and it asks for hidden folders because
- * otherwise it could not show a single real candidate. cezar still does not go LOOKING for
+ * otherwise it could not show a single real candidate. Squawk still does not go LOOKING for
  * accounts — see the spec's "no globbing": a folder is an account because the user said so.
  *
  * Validation stays server-side (absolute after `~` expansion, not already another account's
  * folder, no control characters); this dialog only refuses an empty field, because that is not a
  * request worth sending.
  */
-/** An example folder per agent. Generic names: this string ships to every cezar user. */
+/** An example folder per agent. Generic names: this string ships to every Squawk user. */
 const FOLDER_EXAMPLE: Partial<Record<ProviderId, string>> = {
   claude: '~/.claude-second',
   codex: '~/.codex-second',

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 /**
- * WSL (Windows Subsystem for Linux) support for "Open in…" (#361): when cezar's server runs
+ * WSL (Windows Subsystem for Linux) support for "Open in…" (#361): when Squawk's server runs
  * inside a WSL distro, its own `process.platform` reads `linux` — worktree paths are POSIX
  * (`/home/…`) even though the user's editors, file explorer and terminal emulator mostly live on
  * the Windows side, reachable through WSL interop (binfmt_misc lets a WSL process exec a `.exe`

@@ -131,7 +131,7 @@ async function registeredProject(baseUrl, repo) {
   const { projects = [] } = await response.json();
   const root = realpathSync(repo);
   const project = projects.find((entry) => entry.root === root);
-  // cezar never registers a folder inside a task worktree, and the root comes from TMPDIR.
+  // Squawk never registers a folder inside a task worktree, and the root comes from TMPDIR.
   if (!project) throw new Error(`the served project is not registered: ${root} is inside .ai/cezar/worktrees/. Set TMPDIR outside it, for example TMPDIR=/tmp`);
   return project.id;
 }
@@ -198,8 +198,8 @@ async function stopFixture(repoRoot, stderr, graceMs) {
     log(stderr, `ignoring ${DESCRIPTOR}: the temporary root it names does not confirm it`);
   } else {
     if (fixture.watcher) await stopGroup(fixture.watcher, { graceMs, readStart });
-    log(stderr, `stopping cezar (pid ${fixture.server.pid})`);
-    if (!await stopGroup(fixture.server, { graceMs, readStart })) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
+    log(stderr, `stopping Squawk (pid ${fixture.server.pid})`);
+    if (!await stopGroup(fixture.server, { graceMs, readStart })) throw new Error(`Squawk pid ${fixture.server.pid} did not stop`);
     removeRoot(fixture.root);
   }
   rmSync(join(repoRoot, DESCRIPTOR), { force: true });
