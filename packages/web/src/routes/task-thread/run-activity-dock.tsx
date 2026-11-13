@@ -28,7 +28,7 @@ import { useIsDesktop } from '@/lib/use-desktop'
 import { AgentList } from './agents-dock'
 import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
-import { StepRail, activeStepIndex, railVisual } from './step-rail'
+import { StepRail, activeStepIndex, railSteps, railVisual } from './step-rail'
 import { Cleanup, WorkerActivitySection, WorkerWaitDetails, hasCleanupDetails, hasWorkerWaitDetails, useWorkersVerdict, type WorkersVerdict } from './run-relationships'
 import { ActivityRow, meterText } from './run-activity-row'
 import { ActivitySummary, type SummaryItem } from './activity-summary'
@@ -282,10 +282,12 @@ function statusTone(activity: SessionActivity) {
   return activity.allComplete ? 'text-success' : activity.failed && 'text-danger'
 }
 
-/** The workflow step the folded header names: the one the Workflow row would show, through the
- *  same index and glyph, so the two can never disagree (hearsay-tools/cezarion#1478). */
-function activeWorkflowStep(steps: StepState[]) {
-  return steps.length > 0 ? steps[activeStepIndex(steps)]! : undefined
+/** The workflow step the folded header and the Workflow row name, through the same steps, index
+ *  and glyph, so the two can never disagree (hearsay-tools/cezarion#1478). */
+function activeWorkflowStep(run: ApiRun) {
+  const steps = railSteps(run)
+  const index = activeStepIndex(run.currentStepId, steps)
+  return steps.length > 0 ? { steps, index, step: steps[index]! } : undefined
 }
 
 function ActivityHeader({
@@ -332,7 +334,7 @@ function activityLabel(run: ApiRun, identity: AgentIdentity, activity: SessionAc
   const { statusText, conflicts, cost } = activity
   const head = `Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}`
   if (open) return head
-  const activeStep = activeWorkflowStep(run.steps)
+  const activeStep = activeWorkflowStep(run)?.step
   const activeStepState = activeStep ? railVisual(activeStep.status) : undefined
   const stepLabel = activeStep ? `; step ${activeStep.name}, ${activeStepState === 'active' ? 'running' : activeStepState}` : ''
   const referenceLabel = summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''
@@ -351,7 +353,7 @@ function FoldedSummary({
   summaryReferences: TaskReference[]
 }) {
   const { statusText, cost, conflicts } = activity
-  const activeStep = activeWorkflowStep(run.steps)
+  const activeStep = activeWorkflowStep(run)?.step
   // Status and step sit before the summary, outside its priority list, in priority order. The status
   // keeps its own width; the step grows from nothing up to its whole name; the summary grows only
   // into what the step leaves and drops its own items. When even that is too much, the status
@@ -371,7 +373,7 @@ function FoldedSummary({
       <span data-slot="run-activity-status" title={statusText} className={cn('inline-flex min-w-[calc(0.875rem+3ch)] flex-[0_1_auto] items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', statusTone(activity))}>{activity.glyph}<span data-slot="run-activity-status-label" className="min-w-0 truncate">{statusText}</span></span>
       {activeStep ? (
         <span data-slot="run-activity-step" className="flex max-w-max min-w-[calc(1.375rem+2ch)] flex-[1000_1_0] items-center gap-1.5 text-[13px] text-muted-foreground">
-          <WorkflowGlyph steps={run.steps} decorative />
+          <WorkflowGlyph step={activeStep} decorative />
           <span data-slot="run-activity-step-name" title={activeStep.name} className="min-w-0 truncate">{activeStep.name}</span>
         </span>
       ) : null}
@@ -418,22 +420,21 @@ function StatusSection({ run, activity, open, onToggle }: { run: ApiRun; activit
 }
 
 function WorkflowSection({ run, desktop, automations, open, onToggle }: { run: ApiRun; desktop: boolean; automations: boolean } & SectionDisclosure) {
-  const workflow = run.steps
   const workflowName = workflowLabel(run)
-  if (!workflowName && workflow.length === 0) return null
-  const activeStep = activeWorkflowStep(workflow)
+  const active = activeWorkflowStep(run)
+  if (!workflowName && !active) return null
   return (
     <ActivityRow
       slot="workflow"
-      icon={workflow.length > 0 ? <WorkflowGlyph steps={workflow} /> : <WorkflowIcon className="size-4" />}
+      icon={active ? <WorkflowGlyph step={active.step} /> : <WorkflowIcon className="size-4" />}
       title={<>Workflow{workflowName ? <span className="font-normal text-muted-foreground"> · {workflowName}</span> : null}</>}
-      meta={activeStep
-        ? { drop: activeStep.name, keep: meterText(activeStepIndex(workflow) + 1, workflow.length, desktop, 'step') }
+      meta={active
+        ? { drop: active.step.name, keep: meterText(active.index + 1, active.steps.length, desktop, 'step') }
         : undefined}
       open={open}
       onToggle={onToggle}
     >
-      {workflow.length > 0 ? <StepRail steps={workflow} /> : null}
+      {active ? <StepRail steps={active.steps} /> : null}
       <AutomationOrigin run={run} available={automations} />
     </ActivityRow>
   )
@@ -658,8 +659,8 @@ function AutomationOrigin({ run, available }: { run: ApiRun; available: boolean 
  *  danger X for a failed or cancelled one, a faint circle for one that has not started. All
  *  four, not just the spinner: falling through to the check mark told a reader that a step
  *  which failed, or never ran, had gone fine. */
-function WorkflowGlyph({ steps, decorative = false }: { steps: StepState[]; decorative?: boolean }) {
-  const visual = railVisual(steps[activeStepIndex(steps)]!.status)
+function WorkflowGlyph({ step, decorative = false }: { step: StepState; decorative?: boolean }) {
+  const visual = railVisual(step.status)
   const base = 'size-4 shrink-0'
   switch (visual) {
     case 'active':
