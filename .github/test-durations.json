@@ -902,7 +902,6 @@
     "packages/web/src/routes/github/issue-linked-tasks.test.tsx": 846,
     "packages/web/src/routes/github/use-hand-to-agent-state.test.tsx": 62,
     "packages/web/src/routes/global-tasks.test.tsx": 10391,
-    "packages/web/src/routes/inbox.test.tsx": 154,
     "packages/web/src/routes/new-task-autostart.test.ts": 12,
     "packages/web/src/routes/new-task-draft.test.ts": 14,
     "packages/web/src/routes/new-task-form.test.ts": 41,

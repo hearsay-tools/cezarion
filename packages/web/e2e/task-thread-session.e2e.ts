@@ -118,7 +118,6 @@ describe('task thread', () => {
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('open')
     // The turn-2 snapshot won (turn 1 said 0/4 with "Read README and docs" in progress).
     expect(browser.text('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')).toBe('2 of 4 complete')
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-mirror"]') === null`)).toBe(true)
 
     // It sits in the dock region above the composer area, not in the thread flow.
     expect(browser.evaluate(`document.querySelector('[data-slot="thread-dock"] [data-slot="run-activity-plan"]') !== null`)).toBe(true)

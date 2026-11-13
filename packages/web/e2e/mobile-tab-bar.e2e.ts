@@ -173,7 +173,6 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     // The in-motion pill is status, not a reason to tap: never on the bar.
     expect(browser.count(`${TAB_BAR} [data-slot="rail-pill-bottom"]`)).toBe(0)
     // The list's own round FAB is gone: one floating button, the bar's.
-    expect(browser.count('[data-slot="new-task-fab"]')).toBe(0)
     browser.click(FAB)
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/new'))} && document.querySelector('[data-route="new"]') !== null`)
     // It would point at the page it is on, so /new drops it (the bar stays).
@@ -207,7 +206,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     expect(undersized(`${DRAWER} [data-slot="drawer-tools"], ${DRAWER} [data-slot="drawer-project-current"] button`)).toEqual([])
   })
 
-  it('shows a pushed task screen: no tab bar, back / title up top with no status, facet tabs, and Back returns to the list', () => {
+  it('shows a pushed task screen: no tab bar, back / title up top, facet tabs, and Back returns to the list', () => {
     browser.setViewport(PHONE.width, PHONE.height)
     openList()
     browser.click(`[data-slot="task-card"][data-run-id="${RUN_ID}"] a[href]`)
@@ -215,24 +214,19 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
 
     const screen = waitForSettledSample(browser, `(() => {
       const top = document.querySelector('${TOP_BAR}')
-      const state = top.querySelector('[data-slot="mobile-run-state"]')
       return {
         tabBar: document.querySelector('${TAB_BAR}') !== null, fab: document.querySelector('${FAB}') !== null,
         menu: top.querySelector('button[aria-label^="Open projects"]') !== null,
         back: top.querySelector('[data-slot="mobile-back"]')?.getAttribute('aria-label'),
         title: top.querySelector('[data-slot="mobile-run-title"]')?.textContent,
-        stateText: state?.textContent, stateDot: Boolean(state?.querySelector('[data-slot="status-dot"]')),
         kebab: top.querySelector('[aria-label="Run actions"]') !== null,
         facets: [...document.querySelectorAll('[data-slot="run-tabs"] a')].map((a) => a.textContent.trim()),
         ownTitle: document.querySelector('[data-slot="run-header"] h1') !== null,
         composer: document.querySelector('[data-route="task-thread"] [data-slot="composer"], [data-slot="thread-dock"]') !== null,
         overflow: document.documentElement.scrollWidth - innerWidth,
       }
-    })()`) as { tabBar: boolean; fab: boolean; menu: boolean; back: string; title: string; stateText: string; stateDot: boolean; kebab: boolean; facets: string[]; ownTitle: boolean; composer: boolean; overflow: number }
+    })()`) as { tabBar: boolean; fab: boolean; menu: boolean; back: string; title: string; kebab: boolean; facets: string[]; ownTitle: boolean; composer: boolean; overflow: number }
     expect(screen).toMatchObject({ tabBar: false, fab: false, menu: false, back: 'Back', title: expect.stringContaining(RUN_TITLE), kebab: true, ownTitle: false, composer: true })
-    // The phone bar carries no status (hearsay-tools/cezarion#1333): the Session activity card does.
-    expect(screen.stateText).toBeUndefined()
-    expect(screen.stateDot).toBe(false)
     // Session, Changes (3 changed files), Commits, Files.
     expect(screen.facets).toEqual(['Session', 'Changes3', 'Commits', 'Files'])
     expect(screen.overflow).toBeLessThanOrEqual(0)

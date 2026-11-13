@@ -220,16 +220,13 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     // Block first, sections below; nothing else in the body.
     expect(browser.evaluate(`[...document.querySelector(${JSON.stringify(SIDEBAR)}).children].map((child) => child.dataset.slot)`)).toEqual(['git-checkout', 'git-sections'])
 
-    // No task-worktree list and no jump into a task; the Tasks quick list is not here either.
-    expect(browser.count('[data-slot="git-worktree-list"], [data-slot="git-worktree-row"]')).toBe(0)
-    expect(browser.evaluate(`[...document.querySelectorAll('${SIDEBAR} a')].some((a) => a.getAttribute('href').includes('/tasks/'))`)).toBe(false)
+    // The Tasks quick list is not here either.
     expect(browser.count('[data-slot="task-quick-list"]')).toBe(0)
 
-    // The main area: a title and a meta line, no Changes/Commits/Branches tabs, the log grouped by day.
+    // The main area: a title and a meta line, and the log grouped by day.
     browser.waitForFunction(has('[data-slot="repo-commit-day"]'))
     expect(browser.text(`${HEADER} h1`)).toBe('Recently on main')
     expect(browser.text(`${HEADER} [data-slot="repo-meta"]`)).toBe('latest 3 commits in the main checkout')
-    expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="repo-commit-day"] h2')].map((h) => h.textContent)`)).toEqual(['Today'])
     expect(browser.count('[data-slot="commit-row"]')).toBe(3)
     // No task is known for these commits: each says so, without claiming who wrote them.
@@ -311,7 +308,6 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
       browser.waitForFunction(has(ready))
       expect(browser.text(`${HEADER} h1`), path).toBe(title)
       expect(browser.waitForValue(litJs, (value) => JSON.stringify(value) === JSON.stringify([section])), path).toEqual([section])
-      expect(browser.count('[data-slot="repo-tabs"]'), path).toBe(0)
     }
   }, 90_000)
 

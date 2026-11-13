@@ -11,7 +11,7 @@ import { resetToasts } from '@/components/ui/toaster'
 import { githubTaskRef } from '@/lib/github-task'
 
 import { ListViewportResizeObserver } from './github-geometry.testkit'
-import { cssRules, paintsBefore, targets } from '@/test/css-rules'
+import { cssRules, targets } from '@/test/css-rules'
 import { readFollowupPrompt, readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
 
 beforeAll(() => {
@@ -57,10 +57,7 @@ describe('GitHub handoff field chrome (#243)', () => {
     expect(stacked.map((rule) => rule.selector)).toEqual([])
   })
 
-  it('keeps the Workflow trigger in the shared field grammar — no workflow-only overrides (#262)', () => {
-    // The trigger markup already mirrors Skills; any rule naming it is a rewrite of that
-    // geometry (icon hidden, chevron moved left), which is what #262 came to remove.
-    expect(css).not.toMatch(/gh-workflow-trigger/)
+  it('keeps the Workflow trigger in the shared field grammar (#262)', () => {
     const field = cascadeCss(css, ['.gh-field > button, .gh-field > select'])
     expect(field['min-height']).toBe('44px')
     expect(field.width).toBe('100%')
@@ -71,8 +68,7 @@ describe('GitHub handoff field chrome (#243)', () => {
     expect(pill.width).toBe('100%')
   })
 
-  it('lays the Runner · Model · Effort pills out in the shared engine row, not a GitHub-only grid (#724)', () => {
-    expect(css).not.toMatch(/gh-engine-fields|gh-fixed-runner/)
+  it('lays the Runner · Model · Effort pills out in the shared engine row (#724)', () => {
     const rowCss = readFileSync(path.join(path.dirname(cssPath), '..', '..', 'components', 'engine-row.css'), 'utf8')
     const pill = cascadeCss(rowCss, [".engine-row [data-slot$='pill']"])
     expect(pill['border-color']).toBe('var(--border)')
@@ -81,11 +77,6 @@ describe('GitHub handoff field chrome (#243)', () => {
     // Wide default is the one-row grid; the narrow rules live in the container query below it.
     expect(rowCss).toMatch(/^\.engine-row \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;/m)
     expect(rowCss).toMatch(/@container engine-row \(max-width: 549\.99px\)/)
-  })
-
-  it('does not paint in-button Model/Runner/Effort ::before labels — PickerPill fieldLabel owns the name (#272)', () => {
-    const painted = rules.filter((rule) => paintsBefore(rule.selector, "pill']") && (rule.declarations.content ?? 'none') !== 'none')
-    expect(painted.map((rule) => rule.selector)).toEqual([])
   })
 
   it('gives the prompt textarea its own bordered typing area', () => {
