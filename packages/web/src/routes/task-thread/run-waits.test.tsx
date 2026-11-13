@@ -181,6 +181,8 @@ describe('RunWaitDetails', () => {
     ['running', 'CI result ready — current turn still working', 'Automatic check due — current turn still working'],
     ['waiting', 'CI result ready — waiting for capacity', 'Automatic check due — waiting for capacity'],
     ['queued', 'CI result ready — waiting for capacity', 'Automatic check due — waiting for capacity'],
+    // hearsay-tools/squawk#1238: a failed run holds them undelivered, never as a settled observation.
+    ['failed', 'CI result ready — not delivered; Continue delivers it, Stop discards it', 'Automatic check due — not delivered; Continue delivers it, Stop discards it'],
   ] as const)('describes a resolved wait honestly while %s', (status, ciLabel, timerLabel) => {
     renderWaits(run(status, { waits: [
       ciEntry({ phase: WAIT_PHASE.resolved, result: observed('passed') }),
