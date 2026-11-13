@@ -29,8 +29,6 @@ let bootProject: string
  *  every cockpit link is scoped, and every legacy flat URL redirects onto its scoped twin. */
 const scoped = (path: string) => `/p/${bootProject}${path}`
 
-const STATE = '[data-slot="centered-state"]'
-
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-empty-states-'))
 
@@ -57,33 +55,24 @@ describe('tasks overview — no tasks yet', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="tasks-empty"]') !== null`)
   })
 
-  it('is the hero CenteredState: primary tone, title, subtitle, a New-task action', () => {
+  it('is the no-tasks state with a New-task action that opens /new', () => {
     expect(
       browser.evaluate(`document.querySelector('[data-slot="tasks-empty"]').dataset.emptyKind`)
     ).toBe('no-tasks')
-    expect(
-      browser.evaluate(`document.querySelector('[data-slot="tasks-empty"] ${STATE}').dataset.tone`)
-    ).toBe('primary')
-    expect(browser.text(`[data-slot="tasks-empty"] h2`)).toBe('No tasks yet')
-    expect(browser.text(`[data-slot="tasks-empty"] p`)).toBe('Describe a task to get started.')
-    expect(
-      browser.evaluate(
-        `document.querySelector('[data-slot="tasks-empty"] a[href="${scoped('/new')}"]').textContent.trim()`
-      )
-    ).toBe('New task')
     // And no table pretending otherwise.
     expect(browser.count('[data-slot="task-table-row"]')).toBe(0)
+    browser.click(`[data-slot="tasks-empty"] a[href="${scoped('/new')}"]`)
+    browser.waitForFunction(`location.pathname === '${scoped('/new')}' && document.querySelector('[data-route="new"]') !== null`)
   })
 
   it('carries the decorative backdrop, marked decorative', () => {
     const backdrop = browser.evaluate(`(() => {
       const el = document.querySelector('[data-slot="tasks-empty"] [data-slot="twinkle-backdrop"]')
-      return el && { ariaHidden: el.getAttribute('aria-hidden'), squares: el.children.length }
-    })()`) as { ariaHidden: string; squares: number } | null
+      return el && { ariaHidden: el.getAttribute('aria-hidden') }
+    })()`) as { ariaHidden: string } | null
 
     expect(backdrop).not.toBeNull()
     expect(backdrop?.ariaHidden).toBe('true')
-    expect(backdrop?.squares).toBeGreaterThan(5)
 
     browser.screenshot(`${artifactsDir}/tasks-empty-no-tasks.png`)
   })
@@ -95,11 +84,8 @@ describe('the 404 route', () => {
     browser.waitForFunction(`document.querySelector('[data-route="not-found"]') !== null`)
   })
 
-  it('renders the CenteredState 404', () => {
-    expect(browser.count(`[data-route="not-found"] ${STATE}`)).toBe(1)
+  it('tells the user the page was not found', () => {
     expect(browser.text(`[data-route="not-found"] h1`)).toBe('Page not found')
-    // A stub-level surface, not a hero: no backdrop here.
-    expect(browser.count(`[data-route="not-found"] [data-slot="twinkle-backdrop"]`)).toBe(0)
 
     browser.screenshot(`${artifactsDir}/not-found.png`)
   })

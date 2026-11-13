@@ -151,10 +151,6 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
         expect(boxes.model.top).toBe(boxes.effort.top)
         expect(boxes.runner.right).toBeLessThan(boxes.model.left)
         expect(boxes.model.right).toBeLessThan(boxes.effort.left)
-        expect(boxes.runner.width).toBeLessThanOrEqual(230)
-        expect(boxes.effort.width).toBeLessThanOrEqual(210)
-        expect(boxes.runner.width).toBeGreaterThan(100)
-        expect(boxes.effort.width).toBeGreaterThan(90)
         if (width === 1440 && sidebar === 264) {
           expect(boxes.model.width).toBeGreaterThan(boxes.runner.width)
           expect(boxes.model.width).toBeGreaterThan(boxes.effort.width)

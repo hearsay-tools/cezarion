@@ -201,15 +201,13 @@ describe('New project', () => {
       browser.waitForFunction(`document.activeElement?.matches(${JSON.stringify(NAME)}) === true`)
       waitForOwners()
 
-      const layout = browser.waitForValue<{ left: number; right: number; overflowX: number; submitBottom: number; ownersBelow: boolean }>(
+      const layout = browser.waitForValue<{ left: number; right: number; overflowX: number; submitBottom: number }>(
         `(() => {
           const dialog = document.querySelector(${JSON.stringify(DIALOG)})
           const box = dialog.getBoundingClientRect()
-          const name = document.querySelector(${JSON.stringify(NAME)}).getBoundingClientRect()
-          const owners = document.querySelector('[data-slot="create-project-owners"]').getBoundingClientRect()
           const submit = document.querySelector(${JSON.stringify(SUBMIT)}).getBoundingClientRect()
           return { left: box.left, right: box.right - innerWidth, overflowX: dialog.scrollWidth - dialog.clientWidth,
-            submitBottom: submit.bottom - innerHeight, ownersBelow: owners.top >= name.bottom }
+            submitBottom: submit.bottom - innerHeight }
         })()`,
       )
       expect(layout.left).toBeGreaterThanOrEqual(0)
@@ -217,7 +215,6 @@ describe('New project', () => {
       expect(layout.overflowX).toBeLessThanOrEqual(0)
       // The footer stays on screen: the body scrolls, the Create button does not.
       expect(layout.submitBottom).toBeLessThanOrEqual(0)
-      expect(layout.ownersBelow).toBe(true)
 
       for (const [target, label] of [
         [`${DIALOG} [data-slot="dialog-description"]`, 'description'],

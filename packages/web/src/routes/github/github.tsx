@@ -1150,16 +1150,16 @@ function GithubRow({
     >
       <span className="flex min-w-0 items-start gap-2 md:items-center">
         <Icon
-          aria-hidden="true"
+          aria-hidden="true" data-slot="gh-row-icon"
           className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
         />
-        <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
+        <span data-slot="gh-row-title" className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
           {item.title}
         </span>
       </span>
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
+      <span data-slot="gh-row-meta" className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
         <span>#{item.number}</span>
-        <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
+        <span data-slot="gh-row-author" className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
         <span>{shortAge(item.createdAt)}</span>
         <CommentCount count={comments} />
         {checks ? <ChecksGlyph checks={checks} /> : null}

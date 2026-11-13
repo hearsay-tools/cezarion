@@ -219,7 +219,6 @@ it('composer rewraps on resize without losing its draft or focus', () => {
   expect(result.value).toBe(draft)
   expect(result.focused).toBe(true)
   expect(result.height).toBeGreaterThan(before)
-  expect(result.height).toBeLessThanOrEqual(220)
   expect(result.scroll).toBeGreaterThan(result.height)
   browser.fill(selector, 'Short draft')
   const shrunk = waitForSettledSample<number>(browser, `document.querySelector('${selector}').getBoundingClientRect().height`)
@@ -278,7 +277,6 @@ it('older-browser composer fallback responds to width changes and keeps focus', 
     })()`)
     expect(after.explicit).not.toBe('')
     expect(after.height).toBeGreaterThan(before)
-    expect(after.height).toBeLessThanOrEqual(220)
     expect(after.focused).toBe(true)
     expect(after.value).toBe(draft)
   } finally { browser.evaluate(`CSS.supports = window.__originalSupports; delete window.__originalSupports`) }

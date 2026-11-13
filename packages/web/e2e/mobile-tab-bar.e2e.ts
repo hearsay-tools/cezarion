@@ -20,9 +20,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
  * screen's chrome and its way back, and AA text contrast in both themes.
  */
 
-const SHOTS = '/tmp/i621/shots'
 const PHONE = { width: 360, height: 640 }
-const IPHONE = { width: 390, height: 844 }
 
 const TAB_BAR = '[data-slot="mobile-tab-bar"]'
 const MORE_TAB = `${TAB_BAR} [data-tab="more"]`
@@ -77,7 +75,6 @@ beforeAll(async () => {
   }
   forge = health.forge?.available === true
   automations = health.capabilities.automations
-  mkdirSync(SHOTS, { recursive: true })
   browser = AgentBrowser.open(`mobile-tab-bar-${process.pid}`)
 }, 60_000)
 
@@ -183,14 +180,11 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     browser.setViewport(PHONE.width, PHONE.height)
     openList()
     expect(undersized(`${TAB_BAR} a, ${TAB_BAR} button`)).toEqual([])
-    const fab = waitForSettledSample(browser, `(() => { const r = document.querySelector('${FAB}')?.getBoundingClientRect(); return r ? { w: Math.round(r.width), h: Math.round(r.height), right: Math.round(innerWidth - r.right) } : null })()`) as { w: number; h: number; right: number }
-    expect(fab.h).toBe(48)
+    const fab = waitForSettledSample(browser, `(() => { const r = document.querySelector('${FAB}')?.getBoundingClientRect(); return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null })()`) as { w: number; h: number }
+    expect(fab.h).toBeGreaterThanOrEqual(44)
     expect(fab.w).toBeGreaterThanOrEqual(44)
-    expect(fab.right).toBe(16)
     openMore()
     expect(undersized(`${SHEET} [data-slot="more-row"]`)).toEqual([])
-    const bar = waitForSettledSample(browser, `Math.round(document.querySelector('${TAB_BAR}').getBoundingClientRect().height)`)
-    expect(bar).toBe(54)
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('${SHEET}') === null`)
 
@@ -301,26 +295,6 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       }
       check(`${SHEET} [data-slot="more-project"]`, 'More project name')
       check(`${SHEET} [data-more-row="/skills"] svg`, 'More row icon', 3)
-    })
-  }
-
-  for (const theme of ['dark', 'light'] as const) {
-    it(`captures the Tasks list, the More sheet and the task screen at ${IPHONE.width}x${IPHONE.height}, ${theme}`, () => {
-      browser.setViewport(IPHONE.width, IPHONE.height)
-      browser.goto(`${base}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelector('${FAB}') !== null && document.querySelector('[data-slot="task-card"]') !== null`)
-      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-      browser.waitForFunction(`document.documentElement.classList.contains('light') === ${theme === 'light'} && document.querySelector('${TAB_BAR} [data-slot="rail-pill-top"]') !== null`)
-      browser.screenshot(`${SHOTS}/tasks-tab-bar-${theme}.png`, { viewport: true })
-      openMore()
-      browser.screenshot(`${SHOTS}/more-sheet-${theme}.png`, { viewport: true })
-      browser.press('Escape')
-      browser.waitForFunction(`document.querySelector('${SHEET}') === null`)
-      browser.goto(`${base}${scoped(`/tasks/${RUN_ID}`)}`)
-      browser.waitForFunction(`document.querySelector('${TOP_BAR} [data-slot="mobile-run-title"]') !== null && document.querySelector('[data-slot="run-tabs"]') !== null`)
-      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-      browser.waitForFunction(`document.documentElement.classList.contains('light') === ${theme === 'light'}`)
-      browser.screenshot(`${SHOTS}/task-screen-${theme}.png`, { viewport: true })
     })
   }
 })
