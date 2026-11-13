@@ -1161,6 +1161,10 @@ hearsay-tools/cezarion#3290).
   (`node_modules/.vite/vitest/`, or `packages/web/e2e/node_modules/.vite/vitest/` for the
   browser config). Vitest's sequencer runs cached failures first and orders the other
   files by cached duration, so without the cache the rerun keeps the first run's order.
+  A file over the per-file duration cap passed its tests, so the cache does not mark it
+  failed: the cap reporter (`.github/scripts/vitest-file-duration.mjs`) writes such files
+  to `node_modules/.vite/vitest/file-duration-cap.txt`, and the reset adds them to the
+  list and deletes that file.
 - The rerun step (id `rerun`, `Rerun server and cockpit unit suites with Squeal
   recording`; id `e2e-rerun`, `Rerun cockpit browser E2E`) runs the first step's script
   again: the whole shard, not only the failed files, because a failure can depend on

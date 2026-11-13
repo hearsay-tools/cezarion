@@ -105,6 +105,9 @@ export default defineConfig({ test: {
       const output = result.stdout + result.stderr;
       assert.equal(result.status, expected, output);
       if (expected) assert.match(output, /one\.test\.ts: 60000 ms; limit 60000 ms/);
+      // The merge-group rerun reset reads this list to name the file in the flake report.
+      const list = join(probe, 'node_modules/.vite/vitest/file-duration-cap.txt');
+      assert.equal(existsSync(list) && readFileSync(list, 'utf8'), expected ? `${join(probe, 'one.test.ts')}\n` : false);
       assert.ok(existsSync(join(probe, 'coverage/coverage-final.json')), 'coverage artifact missing');
     }
   } finally {

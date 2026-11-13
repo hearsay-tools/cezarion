@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { main, resetResults } = require('./vitest-rerun-reset.cjs');
+const { main, resetResults, CAP_FAILURES_FILE } = require('./vitest-rerun-reset.cjs');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const script = path.join(__dirname, 'vitest-rerun-reset.cjs');
@@ -80,6 +80,17 @@ test('the rerun sorts the shard as the first run did, and without the reset it w
   assert.notDeepEqual(await order(root), first, 'Vitest runs a cached failure first');
   reset(repo);
   assert.deepEqual(await order(root), first);
+});
+
+test('a file over the duration cap passed its tests and is still named, once, from the cap\'s list', async (t) => {
+  const { repo, root } = fixture(t);
+  assert.equal(runVitest(root).status, 1, 'the fixture\'s first run fails');
+  const { CAP_FAILURES_FILE: written } = await import('./vitest-file-duration.mjs');
+  assert.equal(CAP_FAILURES_FILE, written, 'the reset reads the list the cap writes');
+  const list = path.join(root, CAP_FAILURES_FILE);
+  fs.writeFileSync(list, `${path.join(root, 'passes.test.js')}\n${path.join(root, 'sub', 'fails.test.js')}\n`);
+  assert.deepEqual(reset(repo).names, ['pkg/passes.test.js', 'pkg/sub/fails.test.js']);
+  assert.equal(fs.existsSync(list), false, 'a later rerun must not read this run\'s list');
 });
 
 test('with no results cache it writes an empty list', (t) => {

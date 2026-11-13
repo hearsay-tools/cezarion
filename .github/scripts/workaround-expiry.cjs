@@ -4,13 +4,18 @@ const path = require('node:path');
 
 const TITLE = 'Remove workaround rules whose replacement issue closed';
 
-// Read marker comments outside fenced code, preserving source line numbers.
+// A code span renders its text, so a marker inside one is prose that names the marker.
+// It closes at the next backtick run of the same length (CommonMark), within one line here.
+const CODE_SPAN = /(?<!`)(`+)(?!`)(.*?[^`])\1(?!`)/g;
+
+// Read marker comments outside fenced code and code spans, preserving source line numbers.
 function markersIn(file, text) {
   const markers = [];
   let fence;
   let inComment = false;
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  for (const [index, source] of text.split(/\r?\n/).entries()) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(source);
+    const line = source.replace(CODE_SPAN, '');
     if (fence) {
       if (delimiter && delimiter[1][0] === fence[0] && delimiter[1].length >= fence.length && /^[ \t]*$/.test(delimiter[2])) fence = undefined;
       continue;

@@ -45,6 +45,17 @@ test('reader accepts standalone, inline and repeated markers; rejects malformed 
   assert.deepEqual(markersIn('x.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3']);
 });
 
+test('reader skips markers that prose names inside code spans', () => {
+  const text = [
+    'Delete the `<!-- until: a/b#1 -->` marker.',
+    'Also ``x ` <!-- until: a/b#2 --> y`` here.',
+    'Real rule `code` <!-- until: a/b#3 -->',
+    'Unclosed ` <!-- until: a/b#4 -->',
+    'Mismatched `` <!-- until: a/b#5 --> `',
+  ].join('\n');
+  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]), [[3, 'a/b#3'], [4, 'a/b#4'], [5, 'a/b#5']]);
+});
+
 test('reader skips backtick and tilde fences and reports the marker after each closing fence', () => {
   for (const character of ['`', '~']) {
     for (const length of [3, 4]) {
