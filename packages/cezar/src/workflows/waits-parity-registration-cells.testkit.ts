@@ -18,7 +18,7 @@ import { productName } from '../home/display.ts';
 
 // The registration part of the wait parity cells (`WAIT_PARITY_PARTS` in `waits-parity-catalog.testkit.ts`).
 // A wait parity file imports this module first, so it loads no other part's cells (hearsay-tools/cezarion#3242).
-export const { describeWaitParity } = waitPartDescribers('registration', registrationCells);
+export const { describeWaitParity, describeWaitParityFamily } = waitPartDescribers('registration', registrationCells);
 
 export function registrationCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
