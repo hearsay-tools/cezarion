@@ -155,14 +155,15 @@ export function baselineRules(dir = rulesDir): string[] {
 }
 
 const baselineFileSchema = z.object({
+  $comment: z.string().optional(),
   sites: z.array(z.object({ file: z.string(), rule: z.string(), site: z.string(), count: z.number() })),
 });
 
+const readBaselineFile = (rule: string, dir: string) => baselineFileSchema.parse(JSON.parse(readFileSync(baselinePath(rule, dir), 'utf8')));
+
 /** A rule with no baseline file allows no match at all. */
 export function readBaseline(rule: string, dir = rulesDir): BaselineEntry[] {
-  const path = baselinePath(rule, dir);
-  if (!existsSync(path)) return [];
-  return baselineFileSchema.parse(JSON.parse(readFileSync(path, 'utf8'))).sites;
+  return existsSync(baselinePath(rule, dir)) ? readBaselineFile(rule, dir).sites : [];
 }
 
 const key = (entry: { file: string; rule: string; site: string }) => JSON.stringify([entry.file, entry.rule, entry.site]);
@@ -207,26 +208,28 @@ export function shrink(baseline: BaselineEntry[], actual: BaselineEntry[]): Base
     .filter((entry) => entry.count > 0);
 }
 
-export function writeBaseline(rule: string, sites: BaselineEntry[], dir = rulesDir): void {
-  const file = {
-    $comment:
-      'Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match ' +
-      'so a moved line does not churn it. This list only shrinks: fix a match, then run ' +
-      'AST_GREP_RULES_UPDATE=1 npm run lint. Rules: .ai/ast-grep/README.md.',
-    sites,
-  };
-  writeFileSync(baselinePath(rule, dir), `${JSON.stringify(file, null, 2)}\n`);
+const DEFAULT_NOTE =
+  'Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match ' +
+  'so a moved line does not churn it. This list only shrinks: fix a match, then run ' +
+  'AST_GREP_RULES_UPDATE=1 npm run lint. Rules: .ai/ast-grep/README.md.';
+
+export function writeBaseline(rule: string, sites: BaselineEntry[], dir = rulesDir, $comment = DEFAULT_NOTE): void {
+  writeFileSync(baselinePath(rule, dir), `${JSON.stringify({ $comment, sites }, null, 2)}\n`);
 }
 
 /**
  * Update mode. A rule with no baseline file gets its first one, holding today's matches: that
  * starts a ratchet. After that the baseline is only ever lowered. A match the baseline does not
- * cover stays a failure, so the only way to land one is to use the owner the rule names.
+ * cover stays a failure, so the only way to land one is to use the owner the rule names. A
+ * lowered baseline keeps its own note, and one with nothing to lower is not written at all
+ * (hearsay-tools/squawk#1898).
  */
 export function updateBaseline(rule: string, actual: BaselineEntry[], dir = rulesDir): void {
   if (!existsSync(baselinePath(rule, dir))) {
     if (actual.length > 0) writeBaseline(rule, actual, dir);
     return;
   }
-  writeBaseline(rule, shrink(readBaseline(rule, dir), actual), dir);
+  const { $comment, sites } = readBaselineFile(rule, dir);
+  const lowered = shrink(sites, actual);
+  if (JSON.stringify(lowered) !== JSON.stringify(sites)) writeBaseline(rule, lowered, dir, $comment);
 }
