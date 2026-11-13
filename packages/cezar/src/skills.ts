@@ -57,10 +57,8 @@ export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.opencode/skills', source: 'agents' },
 ];
 
-/* Global skill libraries follow the user home, not an agent account. Resolve at read time;
-   under vitest omit real global sources so tests cannot read the developer’s library. */
+/* Global skill libraries follow the user home, not an agent account. Resolve at read time. */
 function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
-  if (process.env.VITEST) return [];
   return [
     { dir: join(homedir(), '.agents/skills'), source: 'global' },
     { dir: join(homedir(), '.claude/skills'), source: 'global' },
