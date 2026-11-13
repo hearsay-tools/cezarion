@@ -80,7 +80,7 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'text block of the first stream-json user message on stdin' },
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
   cwd: { honored: true, via: 'spawn cwd' },
-  toolGrant: { honored: true, via: '--allowedTools, through buildAllowedTools, with a bashAllowlist as Bash(<prefix>:*) entries, one per prefix; unset and an empty list send none' },
+  toolGrant: { honored: true, via: '--allowedTools, through buildAllowedTools, with a bashAllowlist as Bash(<prefix>:*) entries, one per prefix; unset sends none; an empty list sends --tools "" so no built-in tool exists, and --allowedTools names only the Squawk tools' },
   restrictCrossSessionMessaging: { honored: false, reason: 'SendMessage and ListAgents also reach the session\'s own subagents, so no outbound tool is separate from subagent messaging; inbound messages from other sessions are refused on every launch (crossSessionInbound, D3)' },
   additionalDirectories: { honored: true, via: '--add-dir, once per directory' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
@@ -812,28 +812,30 @@ function claudeToolArgs(spec: AgentRunSpec): string[] {
   // ListAgents also reach the session's own subagents, so no deny applies; inbound messages
   // from other sessions stay refused on every launch (crossSessionInbound, D3).
   const allowed = claudeAllowedTools(spec.toolGrant);
+  // An empty list removes every built-in tool; Squawk's own tools are MCP tools, so they stay.
+  if (allowed?.length === 0) args.push('--tools', '');
   if (spec.squawkTools) {
     const { name, command, args: toolArgs } = spec.squawkTools;
     args.push('--mcp-config', JSON.stringify({ mcpServers: { [name]: {
       command, args: toolArgs,
       env: Object.fromEntries(squawkToolEnvNames(spec.env ?? {}).map(key => [key, `\${${key}}`])),
     } } }));
-    if (allowed.length > 0) allowed.push(...squawkToolNames(spec.env ?? {}).map(tool => `mcp__${name}__${tool}`));
+    allowed?.push(...squawkToolNames(spec.env ?? {}).map(tool => `mcp__${name}__${tool}`));
   }
-  if (allowed.length > 0) {
+  if (allowed !== undefined && allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));
   }
   return args;
 }
 
 /**
- * The `--allowedTools` entries for each grant kind. No entries sends no flag, so
- * Claude's permission mode and the user's settings decide; an empty list does
- * the same (hearsay-tools/cezarion#1849).
+ * The `--allowedTools` entries for each grant kind. An unset grant sends no flag, so
+ * Claude's permission mode and the user's settings decide. An empty list sends
+ * `--tools ""` instead (hearsay-tools/squawk#1849).
  */
-function claudeAllowedTools(grant: ToolGrant): string[] {
+function claudeAllowedTools(grant: ToolGrant): string[] | undefined {
   switch (grant.kind) {
-    case 'unset': return [];
+    case 'unset': return undefined;
     case 'step-default':
     case 'inherited':
     case 'explicit': return buildAllowedTools(grant.tools, grant.bashAllowlist);
