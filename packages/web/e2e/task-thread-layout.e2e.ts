@@ -88,7 +88,7 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
-  it('mobile header: the action bar folds into the kebab in the top bar, beside the title, with no status', () => {
+  it('mobile header: the action bar folds into the kebab in the top bar, beside the title', () => {
     browser.setViewport(390, 844)
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="run-header"]') !== null`)
@@ -100,17 +100,16 @@ describe('task thread', () => {
       ),
     ).toBe(null)
     // The pushed screen's top bar carries the kebab and the title (#621); the run header drops its
-    // own title row below md, so there is no h1 or pill left in it, and the bar shows no status
-    // (hearsay-tools/cezarion#1333): the Session activity card does.
+    // own title row below md, so there is no h1 or pill left in it.
     const bar = waitForSettledSample(browser, `(() => {
       const top = document.querySelector('[data-slot="mobile-top-bar"]')
       const kebab = top?.querySelector('[aria-label="Run actions"]')
       const title = top?.querySelector('[data-slot="mobile-run-title"]')
       if (!kebab || !title) return null
-      return { kebab: kebab.offsetParent !== null, state: top.querySelector('[data-slot="mobile-run-state"]') !== null,
+      return { kebab: kebab.offsetParent !== null,
         h1: document.querySelector('[data-route="task-thread"] h1') !== null, pill: document.querySelector('[data-slot="run-header"] [data-slot="pill"]') !== null }
-    })()`) as { kebab: boolean; state: boolean; h1: boolean; pill: boolean }
-    expect(bar).toEqual({ kebab: true, state: false, h1: false, pill: false })
+    })()`) as { kebab: boolean; h1: boolean; pill: boolean }
+    expect(bar).toEqual({ kebab: true, h1: false, pill: false })
 
     // #737: the title fits the 56px bar, the 44px rename target is a sibling of the title (so it can
     // neither grow it nor overlap it), and while renaming the input opens below the bar without

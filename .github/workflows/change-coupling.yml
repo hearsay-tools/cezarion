@@ -25,10 +25,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
       - name: Generate reports
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:

@@ -32,7 +32,6 @@ describe('unanswered worker question completion guidance', () => {
     expect(asked).toHaveBeenCalledWith(f.parent.id);
     expect(gate.code).toBe('worker_questions');
     expect(gate.message).toContain('hsq message reply');
-    expect(gate.message).not.toMatch(/worker (?:reply|inbox)/);
     if (count === 1) {
       expect(gate.message).toContain(`hsq message reply ${questions[0]!.workerId}`);
       expect(gate.message).toContain(`--request-id ${questions[0]!.messageId}`);

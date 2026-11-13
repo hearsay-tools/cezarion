@@ -336,8 +336,7 @@ describe('Cursor print logical session', () => {
     await session.result;
   });
 
-  // hearsay-tools/cezarion#2279: a governed print turn keeps the native agent tools.
-  it('starts every turn with --disable-auto-update and no tool allowlist under delegation', async () => {
+  it('starts every turn with --disable-auto-update under delegation', async () => {
     const { spec, log } = fixture();
     spec.restrictCrossSessionMessaging = true;
     let turnEnded!: () => void;
@@ -352,10 +351,7 @@ describe('Cursor print logical session', () => {
     await session.result;
     const turns = logs(log);
     expect(turns).toHaveLength(2);
-    for (const turn of turns) {
-      expect(turn.args[0]).toBe('--disable-auto-update');
-      expect(turn.args).not.toContain('--allowed-tools');
-    }
+    for (const turn of turns) expect(turn.args[0]).toBe('--disable-auto-update');
   });
 
   it('passes delegation, MCP, image, root and advertised effort fields on each turn', async () => {

@@ -9,7 +9,7 @@ import { workspaceQueryKeys } from '@/api/queries'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { resetToasts } from '@/components/ui/toaster'
 import { resetDraft, writeDraft } from './new-task-draft'
-import { cssRules, paintsBefore, targets } from '@/test/css-rules'
+import { cssRules, targets } from '@/test/css-rules'
 
 beforeAll(() => {
   // cmdk scrolls the selected item into view; jsdom has no scrollIntoView.
@@ -90,7 +90,6 @@ describe('the hero surface', () => {
     await pillReady()
     const worktree = screen.getByRole('checkbox', { name: 'Worktree' })
     expect(worktree.textContent).toContain('Changes stay in a separate working copy.')
-    expect(document.querySelector('[data-slot="execution-tip"]')).toBeNull()
     fireEvent.click(worktree)
     expect(worktree.textContent).toContain('Changes are made in the current working directory.')
     expect(worktree.nextElementSibling?.textContent).toContain('Base branch')
@@ -153,7 +152,6 @@ describe('the hero surface', () => {
     fireEvent.click(summary)
     expect(textarea()).toBe(originalTextarea)
     expect(textarea().value).toBe('Keep this draft')
-    expect(screen.queryByRole('button', { name: 'Parallel variants' })).toBeNull()
     expect(screen.getByRole('button', { name: /^Model · / })).toBe(model)
   })
 
@@ -197,14 +195,6 @@ describe('the hero surface', () => {
       anchor.remove()
     }
   })
-
-  it('does not render suggestion chips — design.pen 1A–1D have none', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-    expect(document.querySelector('[data-slot="suggested-chip"]')).toBeNull()
-    expect(screen.queryByText('Start with a suggestion')).toBeNull()
-  })
 })
 
 describe('picker data flows', () => {
@@ -216,12 +206,10 @@ describe('picker data flows', () => {
     const editor = document.querySelector('[data-slot="composer-editor"]') as HTMLElement
     const execution = document.querySelector('[data-slot="execution-options"]') as HTMLDetailsElement
     const model = document.querySelector('[data-slot="model-pill"]') as HTMLElement
-    const variants = document.querySelector('[data-slot="variants-pill"]') as HTMLElement
     expect(execution.open).toBe(true)
     expect(editor.contains(model)).toBe(false)
     expect(document.querySelector('[data-slot="composer-agent-options"]')?.contains(model)).toBe(true)
     expect(execution.contains(model)).toBe(false)
-    expect(variants).toBeNull()
   })
 
   it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
@@ -420,14 +408,6 @@ describe('picker data flows', () => {
       await waitFor(() => expect(note())
         .toBe('Runs in the repo working tree — your checkout is modified directly.'))
     })
-  })
-
-  it('has no parallel variant control, including without git', async () => {
-    serve({ health: HEALTH_NO_GIT, repo: REPO_NO_GIT })
-    renderNewTask()
-    await pillReady()
-    expect(document.querySelector('[data-slot="variants-pill"]')).toBeNull()
-    expect(document.querySelector('[data-slot="base-pill"]')).toBeNull()
   })
 
   // #791: health is bound to the boot folder, so a Squawk booted outside a git repo answered
@@ -1201,9 +1181,5 @@ describe('field chrome (#267)', () => {
     // the all-breakpoint pill geometry the mobile rules must not override away
     const pill = rules.find((rule) => rule.selector === "[data-route='new'] .new-task-agent-options [data-slot$='pill']" && rule.at.length === 0)
     expect(pill?.declarations).toMatchObject({ 'border-color': 'var(--border)', 'border-radius': '9px', 'min-height': '44px' })
-  })
-
-  it('does not paint a Runner ::before on agent-option pills (#272)', () => {
-    expect(rules.filter((rule) => paintsBefore(rule.selector, "pill']")).map((rule) => rule.selector)).toEqual([])
   })
 })

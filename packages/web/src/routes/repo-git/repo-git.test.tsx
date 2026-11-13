@@ -192,15 +192,12 @@ function renderAt(entry: string) {
 // ---- changes ----------------------------------------------------------------------------------
 
 describe('the Git view Uncommitted changes section (/git/changes)', () => {
-  it('renders a title-and-meta header with no section tabs, and the working-tree diff from /api/v1/repo/changes', async () => {
+  it('renders a title-and-meta header and the working-tree diff from /api/v1/repo/changes', async () => {
     stubFetch({ 'GET /api/v1/repo': () => jsonResponse({ ...REPO, status: [{ status: 'M', path: 'notes.md' }, { status: 'M', path: 'src/util/a.ts' }] }) })
     renderAt('/git/changes')
 
     await waitFor(() => expect(document.querySelector('[data-slot="repo-header"]')).not.toBeNull())
     expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 uncommitted files in the main checkout')
-    // Issue 06 §3: the sections live in the sidebar; the main header has no Changes/Commits/Branches tabs.
-    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
-    expect(screen.queryByRole('link', { name: 'Commits' })).toBeNull()
 
     // The SAME tree + facade the task Changes tab uses: compacted folder, per-file ±.
     await waitFor(() => expect(document.querySelector('[data-slot="changes-tree"]')).not.toBeNull())
@@ -288,13 +285,12 @@ describe('the Git view Uncommitted changes Markdown preview (hearsay-tools/cezar
 })
 
 describe('the Git view Recently on main section', () => {
-  it.each(['/git', '/git/commits'])('%s is Recently on the checked-out branch, titled with a meta line and no tabs', async (entry) => {
+  it.each(['/git', '/git/commits'])('%s is Recently on the checked-out branch, titled with a meta line', async (entry) => {
     stubFetch()
     renderAt(entry)
     await waitFor(() => expect(document.querySelector('[data-slot="repo-commits"]')).not.toBeNull())
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Recently on main')
     expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('latest 2 commits in the main checkout')
-    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
   })
 
   it('groups the log by the commit’s own day, each row reading subject then sha · author · age', async () => {

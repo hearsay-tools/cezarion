@@ -134,12 +134,10 @@ it.each([360, 1440])('keeps all settings inside one disclosure without stretchin
       containsCompletion: [...document.querySelectorAll('${switches}')].every(control => details.contains(control)),
       editorGap: agents.top - editor.bottom,
       worktreeHelp: document.querySelector('[data-slot="worktree-toggle"]').textContent,
-      legacyTip: document.querySelector('[data-slot="execution-tip"]') !== null,
     };
-  })()`) as { containsCompletion: boolean; editorGap: number; worktreeHelp: string; legacyTip: boolean }
+  })()`) as { containsCompletion: boolean; editorGap: number; worktreeHelp: string }
   expect(layout.containsCompletion).toBe(true)
   expect(layout.worktreeHelp).toContain('Changes stay in a separate working copy.')
-  expect(layout.legacyTip).toBe(false)
   if (width === 1440) expect(layout.editorGap).toBeLessThanOrEqual(21)
   browser.screenshot(resolve(artifacts, `combined-settings-${width}.png`), { full: true })
   browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').focus()`)

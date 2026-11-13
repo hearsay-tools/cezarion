@@ -92,10 +92,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
 
       - name: Plan the release
         id: plan
@@ -157,10 +163,15 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
@@ -285,10 +296,15 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version-file: .node-version
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org

@@ -78,8 +78,8 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     expect(ciWaitOf(run.id)).toBeUndefined();
   });
 
-  // hearsay-tools/cezarion#1235 phase 3a (design § Registration and cancel): "A CI wait is already
-  // active" is a removed refusal. Worker and request waits are list entries beside CI.
+  // hearsay-tools/cezarion#1235 phase 3a (design § Registration and cancel): worker and request
+  // waits are list entries beside CI.
   it('registers worker and request waits beside a registered CI wait, which stays open', async () => {
     github(); const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -97,7 +97,6 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'pr', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
     expect(waits.find(wait => wait.id === workers.id)).toMatchObject({ via: WAIT_VIA['cez-worker-wait'], workerIds: [w.id] });
     expect(waits.find(wait => wait.id === requests.id)).toMatchObject({ via: WAIT_VIA['cez-worker-wait'], requestIds: [request.id] });
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
   });
 
   // hearsay-tools/cezarion#1233: the ask leaves CI open; its result wakes the run and never

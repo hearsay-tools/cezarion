@@ -71,7 +71,7 @@ interface SentRequest {
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-/** Fetch stub in the house style (inbox.test.tsx): records requests (bodies included), serves
+/** Fetch stub in the house style: records requests (bodies included), serves
  *  the fixtures, and lets a test override specific `METHOD path` keys — per call, so a 409
  *  can turn into a 201 on the retry. */
 function stubFetch(

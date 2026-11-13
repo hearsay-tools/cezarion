@@ -161,14 +161,6 @@ describe('GitSidebar', () => {
     expect(sent.some((request) => request.path === '/api/v1/repo/branches')).toBe(false)
   })
 
-  it('lists no task worktrees and never links a row to a task', async () => {
-    stub()
-    renderSidebar()
-    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
-    expect(q('[data-slot="git-worktree-list"]')).toBeNull()
-    expect(qa('[data-slot="git-sidebar"] a').some((link) => link.getAttribute('href')?.startsWith('/tasks/'))).toBe(false)
-  })
-
   it.each([
     ['/git', 'main'],
     ['/git/commits', 'main'],

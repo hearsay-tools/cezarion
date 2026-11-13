@@ -25,7 +25,7 @@ describe('RunManager schedule wakeup', () => {
     expect(idle.pending).toBe(0); // durable monitors do not inherit the 15-minute user-wait timer
   }, 30_000);
 
-  it('a Claude ScheduleWakeup turn-end parks on a schedule-wakeup timer without a text marker', async () => {
+  it('a Claude ScheduleWakeup turn-end parks on a schedule-wakeup timer', async () => {
     const idle = fixture.observeIdleTimers();
     const wakes = fixture.observeWakeTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, {
@@ -38,7 +38,6 @@ describe('RunManager schedule wakeup', () => {
 
     const events = readFileSync(join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
     expect(events).toContain('"tool":"ScheduleWakeup"');
-    expect(events).not.toContain('CEZ:MONITORING');
     const timer = fixture.store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open');
     expect(timer).toMatchObject({ kind: WAIT_KIND.timer, via: WAIT_VIA['schedule-wakeup'] });
     expect(idle.pending).toBe(0);

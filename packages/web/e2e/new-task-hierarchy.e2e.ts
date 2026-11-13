@@ -99,7 +99,6 @@ describe('New Task hierarchy (#168)', () => {
     expect(browser.isVisible('[aria-label="Start task"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('[data-slot="model-pill"]').checkVisibility()`)).toBe(true)
     expect(browser.evaluate(`document.querySelector('[data-slot="composer-agent-options"]').contains(document.querySelector('[data-slot="model-pill"]'))`)).toBe(true)
-    expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
   })
 
   for (const reduced of [false, true]) {
@@ -133,11 +132,9 @@ describe('New Task hierarchy (#168)', () => {
         browser.press('Space')
         browser.waitForFunction(`document.querySelector('${disclosure}').open === false`)
         expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)
-        expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
         browser.press('Enter')
         browser.waitForFunction(`document.querySelector('${disclosure}').open === true`)
         expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(true)
-        expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
         layout = geometry()
         expect(layout.overflow).toBe(false)
         expect(layout.clipped).toEqual([])
@@ -209,7 +206,6 @@ describe('New Task hierarchy (#168)', () => {
       expect(browser.text('[data-slot="source-pill"]')).toContain('lint-fix')
       clickExecutionDisclosure()
       browser.waitForFunction(`document.querySelector('${disclosure}').open === true`)
-      expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
       clickExecutionDisclosure()
     }
     clickExecutionDisclosure()

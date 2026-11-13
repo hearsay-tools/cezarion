@@ -52,7 +52,7 @@ test('only the report job has a write scope, and it runs no shell step', () => {
 test('every action is pinned to a full commit SHA, and every checkout drops its credentials', () => {
   for (const job of [plan, measure, report]) {
     for (const item of job.steps.filter(entry => entry.uses)) {
-      assert.match(item.uses, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, item.uses);
+      assert.match(item.uses, /^(?:[\w.-]+\/[\w.-]+@[0-9a-f]{40}|\.\/\.github\/actions\/node-dist)$/, item.uses);
       if (item.uses.startsWith('actions/checkout@')) assert.equal(item.with['persist-credentials'], false);
     }
   }

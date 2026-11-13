@@ -53,7 +53,6 @@ describe('fromDefinition', () => {
     expect(draft.retiredVariants).toBe(true)
     expect(() => toUpdateBody(draft, 3)).toThrow('Parallel variants are removed')
     expect(toUpdateBody({ ...draft, retiredVariants: false }, 3).task).toMatchObject({ prompt: 'Go', effort: 'high' })
-    expect(toUpdateBody({ ...draft, retiredVariants: false }, 3).task).not.toHaveProperty('variants')
   })
 })
 

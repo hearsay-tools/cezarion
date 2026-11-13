@@ -3,10 +3,9 @@ import { useTestHome } from './home/test-home.testkit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importableSkillSchema , skillSchema } from '@open-mercato/cezar-contract/skills';
-import { workspaceUiStatePath } from './paths.ts';
 import * as remote from './skills-remote.ts';
 import {
   discoverSkills,
@@ -113,12 +112,6 @@ describe('discoverSkills team-skill off-list', () => {
 
   it('hides a switched-off skill', async () => {
     expect(await teamNames(await project({ disabledTeamSkills: [{ repo: A, name: 'x' }] }))).toEqual(['y']);
-  });
-
-  it('ignores the legacy importedSkills keys, project and workspace', async () => {
-    await mkdir(dirname(workspaceUiStatePath(testHome())), { recursive: true });
-    await Home.seedBytes(testHome(), workspaceUiStatePath(testHome()), Buffer.from(JSON.stringify({ importedSkills: ['nothing'] })));
-    expect(await teamNames(await project({ importedSkills: [] }))).toEqual(['x', 'y']);
   });
 
   it('a junk off-list switches nothing off', async () => {

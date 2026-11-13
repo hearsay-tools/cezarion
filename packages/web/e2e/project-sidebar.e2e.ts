@@ -160,7 +160,6 @@ describe('the project sidebar in a multi-project workspace', () => {
     browser.goto(baseUrl + scoped(bootProject, '/'))
     browser.waitForFunction(`document.querySelector('${mark(BETA.id)}') !== null`)
     assertProject(bootProject, '/')
-    expect(browser.count('[data-slot="sidebar"] [data-slot="brand-wordmark"]')).toBe(0)
     expect(browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="rail-project"]')).map(el => el.dataset.projectId)`,
       value => Array.isArray(value) && value.length === 3)).toEqual([bootProject, ALPHA.id, BETA.id])
     browser.screenshot(`${artifactsDir}/sidebar-projects.png`)

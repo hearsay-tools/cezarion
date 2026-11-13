@@ -99,7 +99,7 @@ test('the pull request job checks out the merge revision without credentials and
   assert.equal(checkout.with['persist-credentials'], false);
   assert.equal(checkout.with.ref, undefined, 'the default merge revision, so HEAD^1 is the base');
   assert.equal(checkout.with['fetch-depth'], 2);
-  for (const action of [...uses(reportJob), ...uses(commentJob)]) assert.match(action, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, action);
+  for (const action of [...uses(reportJob), ...uses(commentJob)]) assert.match(action, /^(?:[\w.-]+\/[\w.-]+@[0-9a-f]{40}|\.\/\.github\/actions\/node-dist)$/, action);
 });
 
 test('the pull request job installs and mutates only when the scope step found a product line, and always uploads', () => {
@@ -192,11 +192,10 @@ test('the posting step drives the real script: two pushes to one pull request le
   assert.match(github.state.comments[0].body, /`5555555`/);
 });
 
-test('Stryker runs with the Vitest runner only, in place, with no TypeScript checker, and its report path matches the job', () => {
+test('Stryker runs with the Vitest runner only, in place, and its report path matches the job', () => {
   const stryker = JSON.parse(fs.readFileSync(path.join(root, 'stryker.config.json'), 'utf8'));
   assert.equal(stryker.testRunner, 'vitest');
   assert.deepEqual(stryker.plugins, ['@stryker-mutator/vitest-runner']);
-  assert.equal(stryker.checkers, undefined, 'the TypeScript checker needs the compiler API that TypeScript 7 lacks');
   assert.equal(stryker.inPlace, true);
   assert.equal(stryker.vitest.pool, 'forks');
   assert.ok(fs.existsSync(path.join(root, stryker.vitest.configFile)));

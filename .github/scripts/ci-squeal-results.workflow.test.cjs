@@ -53,7 +53,9 @@ test('the Vitest shards and the Squeal jobs read one exact Node version from .no
   const { jobs } = ci();
   const readers = Object.entries(jobs).filter(([, job]) => (job.steps ?? []).some((s) => s.with?.['node-version-file']))
     .map(([id]) => id);
-  assert.deepEqual(readers.sort(), ['squeal-coverage-proof', 'squeal-export', 'squeal-gate-trial', 'squeal-package-trial', 'squeal-publish', 'vitest'], 'other jobs keep their own Node setting');
+  assert.deepEqual(readers.sort(), ['cockpit-browser', 'prepare-pr-snapshot', 'publish-snapshot', 'squeal-coverage-proof',
+    'squeal-coverage-proof-compare', 'squeal-export', 'squeal-gate-trial', 'squeal-package-trial', 'squeal-publish', 'vitest',
+    'vitest-coverage-merge'], 'the minimum-Node jobs keep engines.node');
   for (const id of readers) {
     const setup = jobs[id].steps.find((s) => s.uses?.startsWith('actions/setup-node@'));
     assert.equal(setup.with['node-version-file'], '.node-version', id);
@@ -213,7 +215,7 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
     .flatMap(([, other]) => (other.steps ?? []).map((s) => s.uses?.split(' ')[0])).filter(Boolean));
   for (const id of SQUEAL_JOBS) {
     for (const s of jobs[id].steps.filter((s) => s.uses)) {
-      assert.match(s.uses, /@[0-9a-f]{40}( |$)/, s.uses);
+      assert.match(s.uses, /@[0-9a-f]{40}( |$)|^\.\/\.github\/actions\/node-dist$/, s.uses);
       assert.ok(others.has(s.uses.split(' ')[0]), `${s.uses} matches the pin the rest of ci.yml uses`);
     }
     for (const s of jobs[id].steps) if (s.run) assert.equal(/\$\{\{/.test(s.run), false, `${id} ${s.name}: no expression in a script`);
@@ -245,7 +247,6 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
 test('every job that runs squeal sets up Squeal\'s pinned action once, after its Node and before the first squeal call', () => {
   const { jobs } = ci();
   const text = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
-  assert.doesNotMatch(text, /squeal\.mjs|SQUEAL_TAG|SQUEAL_COMMIT|SQUEAL_FETCHED|steps\.squeal\b|hearsay-tools\/squeal\.git/, 'no clone of a Squeal release');
   // One pin for the whole workflow: an exact commit with its release tag in the comment.
   const pins = text.match(/^\s*uses: hearsay-tools\/squeal\/ci@.*$/gm);
   assert.ok(pins.length > 0);

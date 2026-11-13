@@ -981,7 +981,7 @@ each such webhook when it enters a state that webhook selects: **Needs you**, **
 Needs you is `task.question`; every other entry is `task.status`, and the body's `state` names the
 state. `task.subscribed` (when it opts in, at start or on hand-off) and **Send test** always go out.
 Each body carries the same slim projection `hsq task status` prints, under `task`. `hsq task start`
-opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
+opts in only with `--notify` (off by default); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or
 `hsq task notify <id> --message '…'`) turns it on later with a note for the bot. `notify` (and
 `send --notify`) on a worker's id is a usage error that names the parent to notify instead;

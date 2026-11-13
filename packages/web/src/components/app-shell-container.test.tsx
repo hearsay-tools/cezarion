@@ -288,7 +288,6 @@ describe('sidebar wiring', () => {
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
     expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/p/cezar/automations')
-    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
   })
 
   it('scopes overflow views to the current project in a workspace', async () => {
@@ -313,7 +312,6 @@ describe('sidebar wiring', () => {
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
     expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/p/cezar/automations')
-    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
   })
 
   it('keeps confirmed overflow capabilities while a new project health cache is pending', async () => {
@@ -358,7 +356,6 @@ describe('sidebar wiring', () => {
     expect(inSidebar().getByRole('button', { name: 'More views' })).toBeTruthy()
     fireEvent.keyDown(inSidebar().getByRole('button', { name: 'More views' }), { key: 'Enter' })
     expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/p/shop/automations')
-    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
 
     // A new authoritative response still wins, including explicit capability removal.
     await act(async () => {

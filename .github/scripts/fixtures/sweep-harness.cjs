@@ -46,6 +46,11 @@ function harness() {
   }
   throw new Error(`Unhandled fixture route ${route}`);
  }};
+ // Octokit's request hook: wraps whatever request function is installed now.
+ github.hook={wrap(name,wrapper){
+  const inner=github.request;
+  github.request=(route,args={})=>{const [method,url]=route.split(' ');return wrapper(()=>inner(route,args),{method,url,...args});};
+ }};
  return {state,calls,github};
 }
 module.exports={harness,run,job,stamp};

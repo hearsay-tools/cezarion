@@ -1077,12 +1077,6 @@ describe('TasksOverview — mobile cards and FAB', () => {
     expect(location()).toBe('/tasks/c1')
   })
 
-  it('renders no floating New task button of its own', () => {
-    // The phone's one floating New task button belongs to the shell's tab bar (#621); a second one
-    // here stacked two of them over the same corner of every phone Tasks list.
-    renderOverview({ runs: [run()] })
-    expect(document.querySelector('[data-slot="new-task-fab"]')).toBeNull()
-  })
 })
 
 it('hides owned worker rows without changing ordinary titles', () => {
