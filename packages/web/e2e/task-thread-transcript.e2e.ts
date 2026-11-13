@@ -141,7 +141,7 @@ describe('task thread', () => {
           const body = block.querySelector('[data-streamdown="code-block-body"]')
           const probe = document.createElement('span')
           probe.style.color = 'var(--syn-key)'
-          body.append(probe)
+          document.body.append(probe)
           const syn = getComputedStyle(probe).color
           probe.remove()
           return { syn, plain: getComputedStyle(body).color }
