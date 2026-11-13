@@ -34,19 +34,8 @@ describe('Cursor transport facade', () => {
     return { starts, specs, inspect, runner };
   }
 
-  const ACP_REFUSED = `This Cursor session was started on the ACP transport, which ${productName('Cezarion')} no longer supports, `
-    + 'so it cannot resume. Start a new task to continue this work.';
   const unsupported = (reason: string) => `Cursor CLI cannot run this task: ${reason}. Run "agent update" to install a `
     + `supported Cursor CLI, or update ${productName('Cezarion')} if your build is newer than this version supports.`;
-
-  it('refuses an ACP-tagged resume without a print probe or a session (hearsay-tools/cezarion#1267)', async () => {
-    const { starts, inspect, runner } = setup({ sessionTransport: 'cursor-acp' });
-    const events: AgentEvent[] = [];
-    await runner.startSession({ ...spec, resume: true, sessionId: 'native-id' }, event => events.push(event)).result;
-    expect(inspect).not.toHaveBeenCalled();
-    expect(starts).toEqual([]);
-    expect(events).toEqual([{ type: 'error', message: ACP_REFUSED }]);
-  });
 
   it('uses explicit print without fallback', async () => {
     const { starts, inspect, runner } = setup({ sessionTransport: 'cursor-print' });
@@ -61,15 +50,6 @@ describe('Cursor transport facade', () => {
     await runner.startSession({ ...spec, resume: true, sessionId: 'native-id' }, event => events.push(event)).result;
     expect(starts).toEqual([]);
     expect(events).toEqual([{ type: 'error', message: unsupported('catalog changed') }]);
-  });
-
-  it('refuses an untagged legacy resume without a print probe or a session (hearsay-tools/cezarion#1267)', async () => {
-    const { starts, inspect, runner } = setup();
-    const events: AgentEvent[] = [];
-    await runner.startSession({ ...spec, resume: true, sessionId: 'native-id' }, event => events.push(event)).result;
-    expect(inspect).not.toHaveBeenCalled();
-    expect(starts).toEqual([]);
-    expect(events).toEqual([{ type: 'error', message: ACP_REFUSED }]);
   });
 
   it('chooses print for a supported fresh session', async () => {

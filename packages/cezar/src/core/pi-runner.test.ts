@@ -1069,7 +1069,6 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
   // hearsay-tools/cezarion#2279: governed sessions keep the subagent extension.
   it('sends the ordinary argv under restrictCrossSessionMessaging', () => {
     const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault }, restrictCrossSessionMessaging: true });
-    expect(args).not.toContain('--exclude-tools');
     expect(args).toEqual(buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault } }));
     expect(args).toEqual(['--mode', 'rpc', ...squawkExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
   });

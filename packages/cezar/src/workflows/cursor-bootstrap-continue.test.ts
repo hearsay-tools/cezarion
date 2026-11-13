@@ -144,7 +144,6 @@ describe('Continue after a Cursor bootstrap crash', () => {
     await settled(id);
   });
 
-  // The real runner refuses this untagged resume: cursor-acp-continue.test.ts (hearsay-tools/cezarion#1267).
   it('hands an untagged confirmed session id to the runner with no transport', async () => {
     const id = failedCursorRun(CURSOR_SESSION_ID, true);
     const spec = await continueSpec(id);

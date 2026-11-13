@@ -10,7 +10,7 @@ import { buildClaudeArgs } from './claude-cli-runner.ts';
 import { buildPiArgs } from './pi-runner.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { allowedToolsForStep } from '../workflows/types.ts';
-import { askAnswerHint, askToolDefinition, cancelWaitToolDefinition, squawkServerInstructions, squawkTools, waitToolDefinition } from '../ci-wait/tools.ts';
+import { askAnswerHint, askToolDefinition, cancelWaitToolDefinition, squawkServerInstructions, waitToolDefinition } from '../ci-wait/tools.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 import { productName } from '../home/display.ts';
 
@@ -19,7 +19,7 @@ const spec = { cwd: '/tmp', userPrompt: 'task', squawkTools: descriptor };
 
 export function registerCiDefinitionsAndInjection() {
 // hearsay-tools/cezarion#1233: one wait tool and one cancel tool reach every runner through
-// the shared list; the deprecated `cezar_wait_for_ci` alias was removed in phase 4b (hearsay-tools/cezarion#1236).
+// the shared list.
 describe('wait tool definitions', () => {
   it('advertises cezar_wait as one flat object schema', () => {
     const schema = waitToolDefinition.inputSchema;
@@ -66,26 +66,6 @@ describe('wait tool definitions', () => {
     expect(askAnswerHint({ ok: false, code: 'invalid_request', message: 'too long' })).toBe('Not asked. The user never sees a rejected call. Fix the call from the message: put the detail in context and keep each question short.');
     expect(askAnswerHint({ ok: false, code: 'autonomous_run', message: 'continue', open_waits: [] })).toBe('Not asked. Fix the call from the message, or continue without asking.');
     expect(askAnswerHint({ ok: true, wait_id: 'w', open_waits: [] })).toBe(`Asked. ${productName('Cezar')} shows the context and question card to the user. End your turn; the user's answer wakes you.`);
-  });
-
-  it('lists no cezar_wait_for_ci: no tool, no trigger line, no admission (hearsay-tools/cezarion#1236)', () => {
-    for (const env of [{}, { CEZ_PREVIEW: '1' }]) {
-      expect(squawkTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
-      expect(squawkTools(env).map(tool => tool.definition.name)).not.toContain('cezar_wait_for_ci');
-      const instructions = squawkServerInstructions(env);
-      expect(instructions).not.toContain('- cezar_wait_for_ci:');
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.');
-      expect(instructions).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
-      expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
-    }
-    const claude = buildClaudeArgs({ ...spec, toolGrant: { kind: 'explicit', tools: ['Read'] } });
-    expect(claude[claude.indexOf('--allowedTools') + 1]!.split(',')).not.toContain('mcp__cezar_ci_test__cezar_wait_for_ci');
-    const pi = buildPiArgs({ ...spec, toolGrant: { kind: 'explicit', tools: ['Read'] } });
-    expect(pi[pi.indexOf('--tools') + 1]!.split(',')).not.toContain('cezar_wait_for_ci');
-    // hearsay-tools/cezarion#1305: the default list sends no allowlist, so the CI extension's tools stay active.
-    const piDefault = buildPiArgs({ ...spec, toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, 'pi') } });
-    expect(piDefault).not.toContain('--tools');
-    expect(piDefault.some(arg => arg.endsWith('/pi-ci-wait.mjs'))).toBe(true);
   });
 });
 

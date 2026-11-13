@@ -460,7 +460,6 @@
     "packages/cezar/src/workflows/model-identity-wiring.test.ts": 30048.962333000003,
     "packages/cezar/src/workflows/monitoring-channel-order.test.ts": 185838.519076,
     "packages/cezar/src/workflows/monitoring-turn.test.ts": 333875.99900899996,
-    "packages/cezar/src/workflows/old-engine-removed.test.ts": 96.85488699999999,
     "packages/cezar/src/workflows/pasted-attachments.test.ts": 39590.560237,
     "packages/cezar/src/workflows/permissions.test.ts": 50.52561099999997,
     "packages/cezar/src/workflows/pi-teardown.test.ts": 384.93486299999995,

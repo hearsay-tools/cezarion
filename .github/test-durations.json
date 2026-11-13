@@ -615,7 +615,6 @@
     "packages/cezar/src/workflows/model-identity-wiring.test.ts": 30398,
     "packages/cezar/src/workflows/monitoring-channel-order.test.ts": 93999,
     "packages/cezar/src/workflows/monitoring-turn.test.ts": 316866,
-    "packages/cezar/src/workflows/old-engine-removed.test.ts": 166,
     "packages/cezar/src/workflows/pasted-attachments.test.ts": 47092,
     "packages/cezar/src/workflows/peer-waits.test.ts": 11849,
     "packages/cezar/src/workflows/permissions.test.ts": 93,
