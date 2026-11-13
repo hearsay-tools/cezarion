@@ -303,7 +303,6 @@ export class WorkerCleanup {
       project.manager.requestWorkerStop(workerId);
       // Before either holder scan: the termination proof of a crashed generation scans the worktree too.
       servicesStopped = await stopWorktreeServices(project.root, workspace);
-      assertAttached();
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();
       key = observe();

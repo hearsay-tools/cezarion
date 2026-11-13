@@ -28,9 +28,10 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     const { workerId } = await settled();
     let release!: (value: boolean) => void;
     const gate = new Promise<boolean>(resolve => { release = resolve; });
-    vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
+    const terminating = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
     const explicit = f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 10_000 });
+    // The explicit attempt waits at the termination gate, after it stopped the worktree's services.
+    await vi.waitFor(() => expect(terminating).toHaveBeenCalled(), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const armed = () => [...workerCleanupInternals(f.service)].some(cleanup => cleanup.destroyRetryTimers.get('project')?.has(workerId));

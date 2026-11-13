@@ -23,8 +23,8 @@ function squealDaemonRuns(root: string): boolean {
 
 /** Bounded: what still holds the worktree afterwards is the holder scan's to report. It acts only on
  * a worktree whose ownership is proven at its own real path, so a redirected or replaced path never
- * reaches another checkout's services. False while a Squeal daemon of the worktree outlived its
- * stop, so the caller retries the stop in full. */
+ * reaches another checkout's services. False while a service of the worktree outlived its stop (a
+ * Squeal daemon still running, a test app still leased), so the caller retries the stop in full. */
 export async function stopWorktreeServices(repoRoot: string, workspace: WorkerWorkspace): Promise<boolean> {
   if (!await ownedWorktreePresent(repoRoot, workspace)) return true;
   const { path } = workspace;
@@ -35,6 +35,7 @@ export async function stopWorktreeServices(repoRoot: string, workspace: WorkerWo
     squealStopped = !squealDaemonRuns(path);
   }
   // The lease tool's own stop: an app no live lease holder uses. The removal claims it again.
-  await withIdleTestApp(path, async () => undefined).catch(() => undefined);
-  return squealStopped;
+  let appStopped = true;
+  await withIdleTestApp(path, async (_stopped, busy) => { appStopped = !busy; }).catch(() => { appStopped = false; });
+  return squealStopped && appStopped;
 }
