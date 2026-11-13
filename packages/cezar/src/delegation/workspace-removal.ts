@@ -1,6 +1,6 @@
 /** Checked removal of an owned worker workspace, on top of the record and Git layers. */
 import { fallbackProjectWriteError } from '../project-paths.ts';
-import { inspectGeneration } from './process-liveness.ts';
+import { describeProcesses, inspectGeneration } from './process-liveness.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
 import { entryExists as exists } from './entry-exists.ts';
 import { readdir } from 'node:fs/promises';
@@ -11,7 +11,6 @@ import { branchLog, checkedGit, gitCommonDir, liveGitDir, worktreeEntries } from
 import { cleanupSchema, hash, readIdentityFile, readReceipt, RECEIPT_CAP, receiptLocation, replaceIdentityFile, validateIntent, type Cleanup, type Receipt } from './workspace-record.ts';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
 
 async function verifyBranch(repoRoot: string, workspace: WorkerWorkspace, receipt: Receipt) {
   if (!receipt.branchIdentity) throw new Error('Branch creation identity absent');
@@ -62,7 +61,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let stranded: string | undefined; let testAppBlocker: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
-      : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
+      : heldBy.length ? `Owned resources retained: processes ${describeProcesses(heldBy)} may still hold the worker worktree or scratch; retry destroy after they exit`
       : testAppBlocker ? testAppBlocker
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
@@ -154,9 +153,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
-        // Preview release may itself terminate a known owned holder. Check unrelated holders
-        // only afterwards, immediately before destructive Git; they are never signalled.
-        checkUnheld(assertUnheld);
+        // Preview release and an idle test app's stop may each end a known owned holder. Check
+        // unrelated holders only afterwards, immediately before destructive Git; they are never signalled.
         const removed = await withIdleTestApp(workspace.path, async (_stopped, busy, reason) => {
           if (busy) testAppBlocker = reason;
           if (busy) { report?.unexplained?.(); return false; }

@@ -249,9 +249,10 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   // A Stop accepted before the process exited, on a run that settled before the Stop did
   // (settled.late-stop): stopping still set on load.
   { id: 'settled.stopping', states: ['review', 'done', 'failed'], trigger: 'A Stop was accepted before the process exited, after the run settled', firedBy: 'recovery', behavior: 'cancelled', exit: 'cancel-late', to: ['cancelled'], via: ['store:reconcileLoadedRun', 'store:settleLoadedStop', 'exits:applyExit'] },
-  // unified-waits lists no Stop on a settled run. cancel() records an owned worker cancelled at any
-  // status, and POST /runs/:id/cancel calls it on a settled worker too.
-  { id: 'worker.stop-settled', states: ['review', 'done', 'failed'], trigger: 'Stop on an owned worker that already settled', firedBy: 'human', when: 'an owned worker', behavior: 'cancelled: the settled status is replaced, and cancel() returns false', exit: 'stop-worker', to: ['cancelled'], via: ['cancel', 'persistWorkerCompletion', 'store:move'], pinnedBy: { file: 'workflows/run-states-worker.test.ts', test: 'Stop on a worker that settled done records it cancelled' } },
+  // A Stop on a live owned worker commits cancelled before the session stops. A settled worker keeps its
+  // status: cancel() returns false and writes nothing (hearsay-tools/squawk#1907).
+  { id: 'worker.stop', states: ENGINE_OWNED, trigger: 'Stop on a live owned worker', firedBy: 'human', when: 'an owned worker', behavior: 'cancelled at once; the session then stops', exit: 'stop-worker', to: ['cancelled'], via: ['cancel'], pinnedBy: { file: 'workflows/run-states-worker.test.ts', test: 'Stop on a worker that settled done keeps done' } },
+  { id: 'worker.stop-execution-end', states: ['failed'], trigger: 'The execution of a stopped owned worker ends after its failed Continue wrote failed', firedBy: 'runner', when: 'an owned worker Stop recorded cancelled', behavior: 'cancelled again', exit: 'stop-worker', to: ['cancelled'], via: ['persistWorkerCompletion'] },
   // A Stop on an owned worker commits cancelled at once, while its failed Continue still waits for
   // the process to exit. The failure then writes failed, and the Stop's cancel-late writes cancelled.
   { id: 'worker.stop-failed-continue', states: ['cancelled'], trigger: 'A failed Continue settles after Stop recorded the owned worker cancelled', firedBy: 'runner', when: 'an owned worker', behavior: 'failed until the session is released, then cancelled again (failed.late-stop)', exit: 'fail-continue', to: ['failed'], via: ['settleFailedContinuation'], pinnedBy: { file: 'workflows/worker-destroy.test.ts', test: 'post-spawn human flush failure retains resources until the session process closes' } },

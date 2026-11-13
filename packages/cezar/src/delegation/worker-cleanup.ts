@@ -7,7 +7,9 @@ import { releaseThenRemoveOwnedWorkspace } from './owned-workspace-release.ts';
 import { collectWorkerEvidence } from './results.ts';
 import { DelegationPolicyError } from './policy.ts';
 import { gitCommonDir } from './workspace-git.ts';
+import { describeProcesses } from './process-liveness.ts';
 import { WorkspaceHeldError } from './workspace-removal.ts';
+import { stopWorktreeServices } from './worktree-services.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 import type { DelegationProject, WorkerCleanupFactory } from './service.ts';
@@ -210,7 +212,7 @@ export class WorkerCleanup {
       const taken = project.manager.takeWorkerTerminationBlocker(workerId);
       const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
         : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live ${productName('cezar')} (pid ${taken.blocker.pid})`
-        : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
+        : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${describeProcesses(taken.blocker.pids)} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
       if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
       const result: WorkerDestroyResult = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
         : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
@@ -297,6 +299,9 @@ export class WorkerCleanup {
     try {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
+      // Before either holder scan: the termination proof of a crashed generation scans the worktree too.
+      await stopWorktreeServices(workspace.path);
+      assertAttached();
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();
       key = observe();
