@@ -8,9 +8,6 @@ import type { AutomationToolService, RunManager } from '../workflows/run.ts';
 import type { ProjectContext } from './project-context.ts';
 
 vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: true }));
-vi.doMock('../core/backend-detect.ts', async (original) => ({
-  ...await original<typeof import('../core/backend-detect.ts')>(), detectEnvironment: async () => [],
-}));
 const { AutomationStore } = await import('../automations/store.ts');
 const { WorkspaceAutomationScheduler } = await import('../automations/scheduler.ts');
 const { GithubPoller } = await import('../automations/github-poller.ts');
@@ -84,7 +81,7 @@ it.each(['registered', 'added', 'busy'] as const)('keeps poll and schedule state
     return startScheduler.call(this);
   });
   const server = startServer({ home, repoRoot: bootRoot, bootProjectId: boot.id, store: bootRuns, manager,
-    ownership, contexts, workspaceEvents: events, version: 'test', modelCatalog: new RunnerModelCatalog({ adapters: {} }),
+    ownership, contexts, workspaceEvents: events, version: 'test', modelCatalog: new RunnerModelCatalog({ adapters: {} }), detectEnvironment: async () => [],
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }) }, 0);
   try {
     if (!server.listening) await once(server, 'listening');
@@ -170,7 +167,7 @@ it('writes boot API state after the move and refuses scheduled-task tools under 
   let tools: AutomationToolService | undefined;
   const server = startServer({ home, repoRoot: root, bootProjectId: project.id, store: runs,
     manager: { isActive: () => false, setAutomationTools: (value: AutomationToolService) => { tools = value; } } as unknown as RunManager, ownership, version: 'test',
-    modelCatalog: new RunnerModelCatalog({ adapters: {} }),
+    modelCatalog: new RunnerModelCatalog({ adapters: {} }), detectEnvironment: async () => [],
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }) }, 0);
   try {
     if (!server.listening) await once(server, 'listening');
