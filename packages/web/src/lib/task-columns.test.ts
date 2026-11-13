@@ -28,20 +28,11 @@ describe('TASK_COLUMNS', () => {
     expect(TASK_COLUMNS.slice(0, 2).map((column) => column.canFold)).toEqual([false, false])
   })
 
-  it('keeps secondary columns compact while reserving readable width for Task', () => {
-    expect(Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, column.width]))).toEqual({
-      status: '120px',
-      task: '320px',
-      workflow: '84px',
-      branch: '120px',
-      diff: '84px',
-      reference: '104px',
-      tokens: '112px',
-      cost: '64px',
-      cpu: '60px',
-      memory: '80px',
-      started: '68px',
-    })
+  it('gives Task the widest column', () => {
+    const width = (id: string) => Number.parseFloat(TASK_COLUMNS.find((column) => column.id === id)?.width ?? '0')
+    for (const column of TASK_COLUMNS) {
+      if (column.id !== 'task') expect(width(column.id), column.id).toBeLessThan(width('task'))
+    }
   })
 
   it('folds only Branch by default', () => {

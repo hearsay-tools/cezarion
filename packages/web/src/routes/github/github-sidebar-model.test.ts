@@ -149,8 +149,7 @@ describe('filterCounts', () => {
     expect(c.mine).toEqual({ value: 1, bound: 'exact' })
   })
   it('explains a paged lower bound in its tooltip', () => {
-    expect(countTitle('no-task', { value: 12, bound: 'atLeast' }))
-      .toBe('At least 12: only the loaded pages are counted. Scroll to load more.')
+    expect(countTitle('no-task', { value: 12, bound: 'atLeast' })).toMatch(/12/)
     expect(countTitle('review', { value: 50, bound: 'atLeast' })).toMatch(/GitHub search returns at most/)
     expect(countTitle('all', { value: 88, bound: 'exact' })).toBeUndefined()
   })

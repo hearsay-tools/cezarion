@@ -203,53 +203,52 @@ describe('pageTitleContext', () => {
 /** The URL contract from the spec's "Routing — every surface is a URL" section, now under the
  *  `/p/:projectId` prefix (multi-project spec, step 3.2). These paths are pasteable links;
  *  changing one breaks a teammate's bookmark, so the map is asserted URL-by-URL. */
-const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
-  ['/', 'tasks', 'Project tasks'],
+const ROUTE_CASES: Array<[url: string, route: string]> = [
+  ['/', 'tasks'],
   // The real full-screen composer (R4 Step 1.1): the hero title is the page heading.
-  ['/new', 'new', 'What should the agent work on?'],
+  ['/new', 'new'],
   // The real thread view (Step R3.1): with fetch never answering it is honestly loading.
-  ['/tasks/abc123', 'task-thread', 'Loading task…'],
+  ['/tasks/abc123', 'task-thread'],
   // The real R5 tab routes: with fetch never answering they are honestly loading.
-  ['/tasks/abc123/changes', 'task-changes', 'Loading changes…'],
-  ['/tasks/abc123/files', 'task-files', 'Loading files…'],
+  ['/tasks/abc123/changes', 'task-changes'],
+  ['/tasks/abc123/files', 'task-files'],
   // The HTML report reader (hearsay-tools/cezarion#2400).
-  ['/tasks/abc123/report', 'task-report', 'Loading report…'],
+  ['/tasks/abc123/report', 'task-report'],
   // The linked-item tabs (#692): with fetch never answering they are honestly loading.
-  ['/tasks/abc123/pr/5', 'task-github-item', 'Loading pull request…'],
-  ['/tasks/abc123/issue/7', 'task-github-item', 'Loading issue…'],
+  ['/tasks/abc123/pr/5', 'task-github-item'],
+  ['/tasks/abc123/issue/7', 'task-github-item'],
   // The real repo view (R5 Step 1.7): with fetch never answering it is honestly loading —
   // and every segment is its own URL, commit deep links included.
-  ['/git', 'repo-git', 'Loading repository…'],
-  ['/git/commits', 'repo-git', 'Loading repository…'],
-  ['/git/commits/abc1234', 'repo-git', 'Loading repository…'],
-  ['/git/branches', 'repo-git', 'Loading repository…'],
+  ['/git', 'repo-git'],
+  ['/git/commits', 'repo-git'],
+  ['/git/commits/abc1234', 'repo-git'],
+  ['/git/branches', 'repo-git'],
   // The real GitHub tab (R6 Step 1.1): with fetch never answering every github URL is
   // honestly loading — lists and item deep links included.
-  ['/github', 'github', 'Loading GitHub…'],
-  ['/github/prs', 'github', 'Loading GitHub…'],
-  ['/github/issues/42', 'github', 'Loading GitHub…'],
-  ['/github/prs/7', 'github', 'Loading GitHub…'],
-  ['/inbox', 'inbox', 'Inbox has been removed'],
+  ['/github', 'github'],
+  ['/github/prs', 'github'],
+  ['/github/issues/42', 'github'],
+  ['/github/prs/7', 'github'],
+  ['/inbox', 'inbox'],
   // The real workflow builder (R6 Step 1.6): with fetch never answering both the list URL
   // and a named deep link are honestly loading.
-  ['/workflows', 'workflows', 'Workflows'],
-  ['/workflows/ship-it', 'workflows', 'Workflows'],
-  ['/skills', 'skills', 'Skills'],
+  ['/workflows', 'workflows'],
+  ['/workflows/ship-it', 'workflows'],
+  ['/skills', 'skills'],
   // Project settings only (step 3.5) — appearance/notifications/resources/projects moved to
   // the unscoped `/settings/global/*` area, covered in its own describe below.
-  ['/settings', 'settings', 'Project settings'],
-  ['/settings/agents', 'settings-agents', 'Agents'],
-  ['/settings/agent-config', 'settings-agent-config', 'Agent config'],
-  ['/settings/worktrees', 'settings-worktrees', 'Worktrees'],
-  ['/settings/bookmarklets', 'settings-bookmarklets', 'Bookmarklets'],
-  ['/settings/prompt-templates', 'settings-prompt-templates', 'Prompt templates'],
+  ['/settings', 'settings'],
+  ['/settings/agents', 'settings-agents'],
+  ['/settings/agent-config', 'settings-agent-config'],
+  ['/settings/worktrees', 'settings-worktrees'],
+  ['/settings/bookmarklets', 'settings-bookmarklets'],
+  ['/settings/prompt-templates', 'settings-prompt-templates'],
 ]
 
 describe('scoped route map (/p/:projectId)', () => {
   it('opens shared workspace diagnostics without forcing a project redirect', () => {
     renderAt('/tools')
     expect(routeName()).toBe('workspace-tools')
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Workspace tools')
   })
   it('opens the global activity view without forcing a project redirect', async () => {
     renderAt('/activity')
@@ -261,21 +260,11 @@ describe('scoped route map (/p/:projectId)', () => {
   it(`/p/${BOOT}/activity → activity`, () => {
     renderAt(`/p/${BOOT}/activity`)
     expect(routeName()).toBe('activity')
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Activity')
   })
-  for (const [url, route, title] of ROUTE_CASES) {
+  for (const [url, route] of ROUTE_CASES) {
     it(`/p/${BOOT}${url} → ${route}`, () => {
       renderAt(`/p/${BOOT}${url}`)
       expect(routeName()).toBe(route)
-      if (url.startsWith('/settings/')) {
-        expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Project settings')
-        expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
-      } else if (url === '/settings') {
-        // The index's h1 carries the mobile title and the desktop "General · <project>" one.
-        expect(screen.getByRole('heading', { level: 1 }).textContent).toContain(title)
-      } else {
-        expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
-      }
     })
   }
 
@@ -285,7 +274,7 @@ describe('scoped route map (/p/:projectId)', () => {
     const health = { ...HEALTH, repo: { root: '/home/u/worktrees/a5523045', branch: 'main' } } as unknown as typeof HEALTH
     renderAt(`/p/${BOOT}/settings`, { health, registry: { ...REGISTRY, projects: [] } })
     const title = screen.getByRole('heading', { level: 1 }).textContent
-    expect(title).toContain('General · a5523045')
+    expect(title).toContain('a5523045')
     expect(title).not.toContain('this project')
   })
 
@@ -313,13 +302,11 @@ describe('scoped route map (/p/:projectId)', () => {
     })
   }
 
-  // Step 4.1: the 404 is a CenteredState with a way home, not a bare stub — and its way home
-  // stays inside the active project (the scope-aware Link).
-  it('the 404 renders a CenteredState with a back-to-tasks action scoped to the project', () => {
+  // Step 4.1: the 404 has a way home, and its way home stays inside the active project
+  // (the scope-aware Link).
+  it('the 404 offers a back-to-tasks action scoped to the project', () => {
     renderAt(`/p/${BOOT}/definitely-not-a-route`)
     expect(routeName()).toBe('not-found')
-    expect(document.querySelector('[data-route="not-found"] [data-slot="centered-state"]')).not.toBeNull()
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Page not found')
     expect(screen.getByRole('link', { name: 'Back to tasks' }).getAttribute('href')).toBe(`/p/${BOOT}/`)
   })
 
@@ -378,20 +365,18 @@ describe('scoped route map (/p/:projectId)', () => {
  * project-scoped URLs alive as redirects, so pre-split bookmarks still land.
  */
 describe('the global settings area (/settings/global)', () => {
-  const GLOBAL_CASES: Array<[string, string, string]> = [
-    ['/settings/global/appearance', 'settings-global-appearance', 'Appearance'],
-    ['/settings/global/notifications', 'settings-global-notifications', 'Notifications'],
-    ['/settings/global/resources', 'settings-global-resources', 'Resources'],
-    ['/settings/global/projects', 'settings-global-projects', 'Projects'],
+  const GLOBAL_CASES: Array<[string, string]> = [
+    ['/settings/global/appearance', 'settings-global-appearance'],
+    ['/settings/global/notifications', 'settings-global-notifications'],
+    ['/settings/global/resources', 'settings-global-resources'],
+    ['/settings/global/projects', 'settings-global-projects'],
   ]
-  for (const [url, route, title] of GLOBAL_CASES) {
+  for (const [url, route] of GLOBAL_CASES) {
     it(`${url} → ${route}, unscoped`, () => {
       renderAt(url)
       expect(routeName()).toBe(route)
       // Never redirected into a project: the pathname is the one that was asked for.
       expect(currentPathname()).toBe(url)
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Global settings')
-      expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
 

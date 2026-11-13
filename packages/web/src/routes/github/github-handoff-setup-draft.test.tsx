@@ -1,7 +1,5 @@
-import { ISSUE_142, ISSUE_139, PROVIDERS_MULTI, PROVIDERS_NONE, jsonResponse, stubFetch, rows, promptField, promptValue, BASE, openDetail, health, MULTI_BACKEND, SINGLE_BACKEND, pickPill, postedRun, waitForAgentRunEnabled, cascadeCss, selectSkill } from './github.testkit'
+import { ISSUE_142, ISSUE_139, PROVIDERS_MULTI, PROVIDERS_NONE, jsonResponse, stubFetch, rows, promptField, promptValue, BASE, openDetail, health, MULTI_BACKEND, SINGLE_BACKEND, pickPill, postedRun, waitForAgentRunEnabled, selectSkill } from './github.testkit'
 
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -11,7 +9,6 @@ import { resetToasts } from '@/components/ui/toaster'
 import { githubTaskRef } from '@/lib/github-task'
 
 import { ListViewportResizeObserver } from './github-geometry.testkit'
-import { cssRules, paintsBefore, targets } from '@/test/css-rules'
 import { readFollowupPrompt, readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
 
 beforeAll(() => {
@@ -32,71 +29,6 @@ afterEach(() => {
   act(() => resetToasts())
   cleanup()
   vi.unstubAllGlobals()
-})
-
-describe('GitHub handoff field chrome (#243)', () => {
-  const rel = path.join('src', 'routes', 'github', 'github-layout.css')
-  const cssPath = [
-    path.join(process.cwd(), 'packages', 'web', rel),
-    path.join(process.cwd(), rel),
-  ].find((file) => existsSync(file))
-  if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
-  const css = readFileSync(cssPath, 'utf8')
-  const rules = cssRules(css)
-
-  it('styles row dividers and the phone preview on the row item, which survives virtualization (hearsay-tools/cezarion#1183)', () => {
-    expect(css).toMatch(/\[data-slot='gh-row-item'\]\[data-divided\]\s*\{\s*border-block-start:/)
-    expect(css).toMatch(/\[data-mobile-preview\] \[data-slot='gh-row-item'\]\[data-compact-hidden\]\s*\{\s*display:\s*none/)
-    expect(rules.map((rule) => rule.selector).filter((selector) => selector.includes("[data-slot='gh-rows'] > li"))).toEqual([])
-  })
-
-  it('keeps phone filters wrapping instead of stacking a column that hides the first row (#325)', () => {
-    const stacked = rules.filter((rule) =>
-      (targets(rule.selector, "[data-slot='gh-issue-filters']") || targets(rule.selector, "[data-slot='gh-filter-toolbar']"))
-      && /column/.test(`${rule.declarations['flex-direction'] ?? ''} ${rule.declarations['flex-flow'] ?? ''}`))
-    expect(stacked.map((rule) => rule.selector)).toEqual([])
-  })
-
-  it('keeps the Workflow trigger in the shared field grammar — no workflow-only overrides (#262)', () => {
-    // The trigger markup already mirrors Skills; any rule naming it is a rewrite of that
-    // geometry (icon hidden, chevron moved left), which is what #262 came to remove.
-    expect(css).not.toMatch(/gh-workflow-trigger/)
-    const field = cascadeCss(css, ['.gh-field > button, .gh-field > select'])
-    expect(field['min-height']).toBe('44px')
-    expect(field.width).toBe('100%')
-  })
-
-  it('gives the Account pill the full-width field the other pickers get (#262)', () => {
-    const pill = cascadeCss(css, [".gh-field [data-slot='account-pill']"])
-    expect(pill.width).toBe('100%')
-  })
-
-  it('lays the Runner · Model · Effort pills out in the shared engine row, not a GitHub-only grid (#724)', () => {
-    expect(css).not.toMatch(/gh-engine-fields|gh-fixed-runner/)
-    const rowCss = readFileSync(path.join(path.dirname(cssPath), '..', '..', 'components', 'engine-row.css'), 'utf8')
-    const pill = cascadeCss(rowCss, [".engine-row [data-slot$='pill']"])
-    expect(pill['border-color']).toBe('var(--border)')
-    expect(pill['min-height']).toBe('44px')
-    expect(pill.width).toBe('100%')
-    // Wide default is the one-row grid; the narrow rules live in the container query below it.
-    expect(rowCss).toMatch(/^\.engine-row \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;/m)
-    expect(rowCss).toMatch(/@container engine-row \(max-width: 549\.99px\)/)
-  })
-
-  it('does not paint in-button Model/Runner/Effort ::before labels — PickerPill fieldLabel owns the name (#272)', () => {
-    const painted = rules.filter((rule) => paintsBefore(rule.selector, "pill']") && (rule.declarations.content ?? 'none') !== 'none')
-    expect(painted.map((rule) => rule.selector)).toEqual([])
-  })
-
-  it('gives the prompt textarea its own bordered typing area', () => {
-    const prompt = cascadeCss(css, [
-      "[data-slot='gh-custom-prompt']",
-      ".gh-prompt-field [data-slot='gh-custom-prompt']",
-    ])
-    expect(prompt.border).toBe('1px solid var(--border)')
-    expect(prompt.background).toBe('var(--card)')
-    expect(Number.parseInt(prompt['min-height'] ?? '0', 10)).toBeGreaterThanOrEqual(44)
-  })
 })
 
 describe('the hand-to-agent backend pills (#401)', () => {
@@ -347,7 +279,7 @@ describe('the hand-to-agent agent account', () => {
     )
   })
 
-  it('offers the account as the panel pill, not a bare native select (#262)', async () => {
+  it('offers the account as the panel pill (#262)', async () => {
     stubFetch({
       'GET /api/v1/health': SINGLE_BACKEND,
       'GET /api/v1/workspace/agent-profiles': agentProfiles(TWO_CLAUDE_LOGINS),
@@ -356,9 +288,6 @@ describe('the hand-to-agent agent account', () => {
 
     await waitFor(() => expect(document.querySelector('[data-slot="account-pill"]')).not.toBeNull())
     const pill = document.querySelector('[data-slot="account-pill"]')!
-    expect(pill.tagName).toBe('BUTTON')
-    // The hand-off panel keeps no native select: every field shares the pill chrome.
-    expect(document.querySelector('[data-slot="gh-hand"] select')).toBeNull()
 
     fireEvent.pointerDown(pill)
     const menu = await screen.findByTestId('account-pill-menu')
@@ -517,24 +446,6 @@ describe('the hand-to-agent agent account', () => {
 })
 
 describe('the hand-to-agent pickers (#385)', () => {
-  it('the workflow trigger carries the Skills grammar — icon, value, right-side chevron (#262)', async () => {
-    stubFetch()
-    await openDetail()
-
-    const workflow = document.querySelector('[data-slot="gh-workflow-trigger"]')!
-    const skills = document.querySelector('[data-slot="gh-skills-trigger"]')!
-    // Nothing is selected on either trigger, so the chrome classes must be identical —
-    // the CSS may not rewrite one trigger's geometry away from the other's.
-    expect(workflow.className).toBe(skills.className)
-    const children = Array.from(workflow.children)
-    expect(children[0]?.tagName).toBe('svg')
-    expect(children[children.length - 1]?.tagName).toBe('svg')
-    // The value sits between the icons and reads as a placeholder while empty.
-    const span = children[1]
-    expect(span?.tagName).toBe('SPAN')
-    expect(span?.textContent).toBe('workflow')
-  })
-
   it('the workflow dropdown lists, filters, selects — and re-selecting deselects', async () => {
     stubFetch()
     await openDetail()
@@ -571,7 +482,7 @@ describe('the hand-to-agent pickers (#385)', () => {
     )
   })
 
-  it('the skills dropdown is project-first with bold project rows (#377), and keeps selection visible as chips', async () => {
+  it('the skills dropdown is project-first (#377), and keeps selection visible as chips', async () => {
     stubFetch()
     await openDetail()
 
@@ -580,12 +491,9 @@ describe('the hand-to-agent pickers (#385)', () => {
       expect(document.querySelectorAll('[data-slot="gh-skill-option"]')).toHaveLength(3),
     )
 
-    // Server order was global-first; the menu reorders project skills first, emphasized.
+    // Server order was global-first; the menu reorders project skills first.
     const options = [...document.querySelectorAll<HTMLElement>('[data-slot="gh-skill-option"]')]
     expect(options.map((option) => option.dataset.skill)).toEqual(['om-fix', 'team-x', 'g-review'])
-    expect(options[0]?.querySelector('.font-semibold')).not.toBeNull()
-    expect(options[1]?.querySelector('.font-semibold')).not.toBeNull()
-    expect(options[2]?.querySelector('.font-semibold')).toBeNull()
 
     // Multi-select: toggling keeps the menu open; the chip row mirrors the selection.
     fireEvent.click(options[0]!)

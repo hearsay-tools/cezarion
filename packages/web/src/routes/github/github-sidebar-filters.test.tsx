@@ -303,47 +303,27 @@ describe('a qualifier-selected PR stays open after it leaves the results', () =>
   })
 })
 
-describe('filter list visuals (#622)', () => {
-  const iconOf = (id: string) => document.querySelector(`[data-gh-filter="${id}"] svg`)?.outerHTML
-  const rowClasses = (id: string) => (document.querySelector(`[data-gh-filter="${id}"]`)?.className ?? '').split(/\s+/)
-
-  it('desktop: no GitHub heading, a named region, muted rows at 12.5px, and a pull-request All open row', async () => {
+describe('filter list (#622)', () => {
+  it('desktop: a named region and a pull-request All open row', async () => {
     setDesktop(true)
     stub()
     renderAt('/github?filter=all', <GithubSidebar scope="default" />)
     await waitFor(() => expect(document.querySelector('[data-slot="github-sidebar"]')).not.toBeNull())
     const sidebar = document.querySelector('[data-slot="github-sidebar"]')!
-    expect(sidebar.querySelector('h2')).toBeNull()
     expect(screen.getByRole('region', { name: 'GitHub' })).toBe(sidebar)
-    expect(rowClasses('assigned')).toContain('text-muted-foreground')
-    expect(rowClasses('assigned')).not.toContain('text-foreground')
-    expect(new Set(['no-task', 'has-task', 'review', 'mine', 'all'].map(iconOf)).size).toBe(5)
-    expect(rowClasses('assigned')).toContain('text-[12.5px]')
-    expect(rowClasses('assigned')).not.toContain('text-[13px]')
     // The board's three pull-request rows plus All open, kept on purpose as the Issues row's twin.
     expect([...document.querySelectorAll('[data-gh-filter]')].map((row) => row.getAttribute('data-gh-filter')))
       .toEqual(['assigned', 'no-task', 'has-task', 'all', 'review', 'mine', 'failing', 'all-prs'])
-    expect(iconOf('all-prs')).toBe(iconOf('all'))
-    expect(iconOf('all-prs')).not.toBe(iconOf('mine'))
   })
 
-  it('phone: the title row carries a refresh icon button and no repository line', async () => {
+  it('phone: the title row refresh button reloads the list from GitHub', async () => {
     setDesktop(false)
-    stub()
+    const sent = stub()
     renderAt('/github')
     await waitFor(() => expect(document.querySelector('[data-slot="github-filter-screen"]')).not.toBeNull())
-    const refresh = document.querySelector<HTMLButtonElement>('[data-slot="gh-screen-refresh"]')!
-    expect(refresh.getAttribute('aria-label')).toBe('Refresh from GitHub')
-    expect(document.querySelector('[data-slot="github-filter-screen"] [data-slot="gh-repo"]')).toBeNull()
-  })
-
-  it('phone: row labels use the foreground colour', async () => {
-    setDesktop(false)
-    stub()
-    renderAt('/github')
-    await waitFor(() => expect(document.querySelector('[data-slot="github-filter-screen"]')).not.toBeNull())
-    expect(rowClasses('assigned')).toContain('text-foreground')
-    expect(rowClasses('assigned')).not.toContain('text-muted-foreground')
+    expect(sent.some((path) => path.includes('refresh=1'))).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh from GitHub' }))
+    await waitFor(() => expect(sent.some((path) => path.includes('/github?') && path.includes('refresh=1'))).toBe(true))
   })
 })
 

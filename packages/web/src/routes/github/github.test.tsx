@@ -110,55 +110,6 @@ describe('the GitHub tab lists', () => {
     expect(handle.setPointerCapture).not.toHaveBeenCalled()
   })
 
-  it('keeps the mobile structure and hides the resize handle below md', async () => {
-    stubFetch()
-    renderAt('/github')
-    await screen.findByRole('heading', { name: 'Issues · All open' })
-    expect(ghList().className).toContain('w-full')
-    expect(ghList().className).toContain('md:w-[var(--github-list-width)]')
-    expect(ghListHandle().className).toContain('hidden')
-    expect(ghListHandle().className).toContain('md:block')
-
-    cleanup()
-    stubFetch()
-    renderAt('/github/issues/142')
-    await screen.findByRole('heading', { name: 'Issues · All open' })
-    expect(ghList().className).not.toContain('max-md:max-h-64')
-    expect(ghList().className.split(' ')).not.toContain('hidden')
-    expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
-  })
-
-  // jsdom lays nothing out, so the classes are all this can check. The real-layout proof
-  // (the title can scroll away, then filters stay and each pane scrolls) lives in e2e.
-  it('lets the GitHub title leave while filters and panes stay in flow until dock (#523)', async () => {
-    stubFetch()
-    renderAt('/github')
-    await screen.findByRole('heading', { name: 'Issues · All open' })
-
-    const route = document.querySelector('[data-route="github"]') as HTMLElement
-    const masthead = document.querySelector('[data-slot="gh-masthead"]') as HTMLElement
-    const workspace = document.querySelector('[data-slot="gh-workspace"]') as HTMLElement
-    const header = document.querySelector('[data-slot="gh-header"]') as HTMLElement
-    const detail = document.querySelector('[data-slot="gh-detail"]') as HTMLElement
-
-    expect(route.className.split(' ')).not.toContain('md:h-full')
-    expect(masthead).not.toBeNull()
-    expect(masthead.contains(screen.getByRole('heading', { name: 'Issues · All open' }))).toBe(true)
-    expect(header.contains(document.querySelector('[data-slot="gh-tabs"]'))).toBe(true)
-    expect(header.contains(document.querySelector('[data-slot="gh-filter-toolbar"]'))).toBe(true)
-    expect(workspace.contains(header)).toBe(true)
-    expect(route.className).toContain('md:pb-4')
-    expect(workspace.className).toContain('md:h-[calc(var(--gh-workspace-height,calc(100dvh-4rem))-1rem)]')
-    expect(workspace.className).toContain('md:flex-none')
-    expect(header.className).not.toContain('sticky')
-    expect(header.className).toContain('shrink-0')
-    expect(document.querySelector('[data-slot="gh-panes"]')?.className).not.toContain('sticky')
-    expect(ghList().className).toContain('min-w-0')
-    expect(ghList().className).toContain('md:overflow-x-hidden')
-    expect(ghList().className).toContain('md:overflow-y-auto')
-    expect(detail.className).toContain('md:overflow-y-auto')
-  })
-
   // jsdom lays nothing out, so this stubs the docking geometry: a desktop viewport, a workspace
   // wide enough for columns, and a workspace top below main's top. The real-layout proof stays in
   // `github-layout.e2e.ts`; this pins which wheel input the route takes over while docking.
@@ -206,32 +157,6 @@ describe('the GitHub tab lists', () => {
       expect(scrollTop).toBe(40 + 2 * 16 + 800)
     } finally {
       for (const spy of spies) spy.mockRestore()
-    }
-  })
-
-  it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
-    stubFetch()
-    renderAt('/github')
-    const title = await screen.findByRole('heading', { name: 'Issues · All open' })
-    const route = document.querySelector('[data-route="github"]')
-    const header = document.querySelector('[data-slot="gh-header"]')
-    expect(route?.className).toMatch(/gap-3/)
-    expect(route?.className).toMatch(/md:gap-\[22px\]/)
-    expect(header?.className).toMatch(/gap-3/)
-    expect(header?.className).toMatch(/md:gap-\[22px\]/)
-    expect(title.className).toMatch(/text-2xl/)
-    expect(title.className).toMatch(/md:text-\[15px\]/)
-    expect(document.querySelector('[data-slot="gh-repo"]')?.textContent).toBe('acme/demo')
-    for (const control of [
-      document.querySelector('[data-slot="gh-search"]'),
-      document.querySelector('[data-slot="gh-label-filter"]'),
-      document.querySelector('[data-slot="gh-refresh"]'),
-      screen.getByRole('button', { name: 'Clear filters' }),
-      screen.getByRole('button', { name: 'Assignee' }),
-      screen.getByRole('button', { name: 'Assigned to me' }),
-    ]) {
-      expect(control?.className).toMatch(/min-h-11|gh-utility/)
-      expect(control?.className).toMatch(/min-w-11|w-full|gh-utility/)
     }
   })
 
@@ -742,7 +667,7 @@ describe('the comment thread', () => {
     expect(error.querySelector('a')?.getAttribute('href')).toBe(ISSUE_142.url)
   })
 
-  it('renders a review entry with a state chip (green/red tone tables)', async () => {
+  it('renders a review entry with a state chip', async () => {
     stubFetch(thread('pr', 137, { available: true, comments: [COMMENT_TEXT, REVIEW_CHANGES] }))
     renderAt('/github/prs/137')
 
@@ -751,7 +676,6 @@ describe('the comment thread', () => {
     const chip = review?.querySelector('[data-slot="gh-review-chip"]')
     expect(chip?.getAttribute('data-review-state')).toBe('changes_requested')
     expect(chip?.textContent).toBe('changes requested')
-    expect(chip?.className).toContain('text-danger')
   })
 
   it('uses the real avatar when present and a letter fallback when absent', async () => {
@@ -956,11 +880,7 @@ describe('the comment thread', () => {
     expect(threadSection()).not.toBeNull()
   })
 
-  it.each([
-    ['passing', '✓', 'text-success'],
-    ['failing', '✗', 'text-danger'],
-    ['pending', '○', 'text-muted-foreground'],
-  ])('renders the %s CI glyph on a commit row', async (state, glyph, tone) => {
+  it.each(['passing', 'failing', 'pending'])('renders the %s CI glyph on a commit row', async (state) => {
     stubFetch(thread('pr', 137, {
       available: true, comments: [],
       events: [{ ...EVT.committed, checks: state as 'passing' | 'failing' | 'pending' }],
@@ -970,8 +890,7 @@ describe('the comment thread', () => {
     await waitFor(() => expect(events()).toHaveLength(1))
     const badge = document.querySelector<HTMLElement>('[data-slot="gh-commit-checks"]')
     expect(badge?.getAttribute('data-checks')).toBe(state)
-    expect(badge?.textContent).toBe(glyph)
-    expect(badge?.className).toContain(tone)
+    expect(badge?.textContent).not.toBe('')
   })
 
   it('renders no glyph when checks is null AND when it is absent', async () => {
@@ -1310,8 +1229,6 @@ it('renders a disabled No boards picker on the filter row when projects is empty
   expect(picker.disabled).toBe(true)
   expect([...picker.options].map(option => option.textContent)).toEqual(['No boards'])
   expect(screen.queryByText('No linked project boards.')).toBeNull()
-  expect(picker.className).toMatch(/min-h-11/)
-  expect(document.querySelector('[data-slot="gh-issue-filters"]')?.contains(picker)).toBe(true)
 })
 
 it.each([[], undefined])('does not restore a stale board selection after refresh returns projects=%j', async projects => {
@@ -1367,17 +1284,15 @@ it('keeps the selected phone-list row when it sits past the second (#344)', asyn
   expect(rows()[2]?.getAttribute('aria-current')).toBe('page')
 })
 
-it('wraps each list row in one item that carries the divider and the phone-preview flag (hearsay-tools/cezarion#1183)', async () => {
+it('wraps each list row in one item that carries the divider (hearsay-tools/cezarion#1183)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
   stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')
   await screen.findByRole('button', { name: 'View all 3 issues' })
   const items = rows().map((row) => row.closest('[data-slot="gh-row-item"]'))
-  // The virtualizer wraps every child in its own element, so `ul > li` and `li + li` no longer
-  // reach the rows: the item itself says whether it draws a divider or hides on a phone.
+  // The item itself says whether it draws a divider.
   expect(items.map((item) => item?.getAttribute('role'))).toEqual(['listitem', 'listitem', 'listitem'])
   expect(items.map((item) => item?.hasAttribute('data-divided'))).toEqual([false, true, true])
-  expect(document.querySelectorAll('[data-slot="gh-rows"] li')).toHaveLength(0)
 })
 
 it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {

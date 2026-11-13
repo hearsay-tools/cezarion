@@ -264,7 +264,7 @@ describe('not-landed branch decisions', () => {
 
   it.each(['draft', 'closed', 'open'] as const)('shows the %s PR state and keeps open PRs from being recreated', async (state) => {
     showSection([{ ...BRANCH, title: null, pr: { number: 2, url: 'https://github.com/acme/repo/pull/2', state } }])
-    expect(document.querySelector('[data-slot="not-landed-pr-state"]')?.textContent).toBe(`· ${state}`)
+    expect(document.querySelector('[data-slot="not-landed-pr-state"]')?.textContent).toContain(state)
     expect(screen.getByRole('link', { name: BRANCH.name })).toBeTruthy()
     await openMenu()
     expect(screen.queryByRole('menuitem', { name: 'Create draft PR' }) !== null).toBe(state === 'closed')

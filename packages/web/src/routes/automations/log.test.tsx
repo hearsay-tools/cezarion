@@ -45,14 +45,14 @@ it('renders manual and failed rows with their tones and the task link', async ()
   const items = within(log).getAllByRole('listitem')
   expect(items).toHaveLength(6)
   const pill = (item: HTMLElement) => item.querySelector('[data-slot="pill"]') as HTMLElement
-  const tone = (item: HTMLElement) => pill(item).querySelector('[data-slot="status-dot"]')?.className ?? ''
+  const tone = (item: HTMLElement) => pill(item).querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')
   expect(pill(items[0]!).textContent).toBe('Failed')
   expect(pill(items[2]!).textContent).toBe('Manual')
   expect(pill(items[3]!).textContent).toBe('Catch up')
-  expect(tone(items[0]!)).toContain('bg-danger')
-  expect(tone(items[2]!)).toContain('bg-success')
-  expect(tone(items[3]!)).toContain('bg-success')
-  expect(tone(items[4]!)).toContain('bg-soft-foreground')
+  expect(tone(items[0]!)).toBe('danger')
+  expect(tone(items[2]!)).toBe('success')
+  expect(tone(items[3]!)).toBe('success')
+  expect(tone(items[4]!)).toBe('neutral')
   expect(within(items[2]!).getByRole('link', { name: 'Open task' }).getAttribute('href')).toBe('/tasks/run-9')
   expect(within(items[5]!).getByRole('link', { name: 'Crash on save' }).getAttribute('href')).toBe('https://github.com/o/r/issues/12')
   expect(screen.getByText('Workflow “nope” does not exist.')).not.toBeNull()
@@ -104,7 +104,7 @@ it('renders a missed one-time row as Missed with a neutral tone', async () => {
   const log = await screen.findByRole('list', { name: 'Automation execution log' })
   const pill = within(log).getAllByRole('listitem')[0]!.querySelector('[data-slot="pill"]') as HTMLElement
   expect(pill.textContent).toBe('Missed')
-  expect(pill.querySelector('[data-slot="status-dot"]')?.className).toContain('bg-soft-foreground')
+  expect(pill.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
 })
 
 it('says so when nothing has run yet', async () => {

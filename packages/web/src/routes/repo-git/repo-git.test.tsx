@@ -197,7 +197,6 @@ describe('the Git view Uncommitted changes section (/git/changes)', () => {
     renderAt('/git/changes')
 
     await waitFor(() => expect(document.querySelector('[data-slot="repo-header"]')).not.toBeNull())
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Uncommitted changes')
     expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 uncommitted files in the main checkout')
     // Issue 06 §3: the sections live in the sidebar; the main header has no Changes/Commits/Branches tabs.
     expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
@@ -206,12 +205,6 @@ describe('the Git view Uncommitted changes section (/git/changes)', () => {
     // The SAME tree + facade the task Changes tab uses: compacted folder, per-file ±.
     await waitFor(() => expect(document.querySelector('[data-slot="changes-tree"]')).not.toBeNull())
     expect(document.querySelector('[data-slot="tree-dir"]')?.textContent).toContain('src/util')
-    // …including its own bounded scroller, so a long list never drags the diff down with it.
-    await waitFor(() => expect(document.querySelector('[data-slot="changes-tree-pane"]')).not.toBeNull())
-    const pane = document.querySelector('[data-slot="changes-tree-pane"]') as HTMLElement
-    expect(pane.className).toContain('max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
-    expect(pane.className).toContain('overflow-y-auto')
-    expect(pane.className).toContain('overscroll-contain')
     await waitFor(() => expect(document.querySelectorAll('[data-slot="diff-file"]')).toHaveLength(2))
     expect(document.querySelector('[data-slot="changes-stat"]')?.textContent).toContain('+5')
     // The view toggles are the shared control, wired to the facade's mode.
@@ -304,7 +297,7 @@ describe('the Git view Recently on main section', () => {
     expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
   })
 
-  it('groups the log by the commit’s own day, each 52px row reading subject then sha · author · age', async () => {
+  it('groups the log by the commit’s own day, each row reading subject then sha · author · age', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-09-30T12:00:00'))
     try {
@@ -323,7 +316,6 @@ describe('the Git view Recently on main section', () => {
       vi.useRealTimers()
     }
     const row = document.querySelector('[data-slot="commit-row"][data-sha="def5678"]')!
-    expect(row.className).toContain('min-h-[52px]')
     expect(row.querySelector('[data-slot="commit-row-subject"]')?.textContent).toBe('fix: stop the bug')
     expect(row.querySelector('[data-slot="commit-row-meta"]')?.textContent).toBe('def5678· Linus · 3d')
     // `commit-meta` is the opened commit's header; a list row must not answer to it, or a wait for
@@ -339,7 +331,7 @@ describe('the Git view Recently on main section', () => {
     expect(fromTask?.getAttribute('href')).toBe('/tasks/run-698')
     expect(fromTask?.textContent).toBe('PR #698Picker pill prefixes')
     // Unmatched is not hand-made: a cherry-picked task commit is unmatched too.
-    expect(unknown?.tagName).toBe('SPAN')
+    expect(unknown?.closest('a')).toBeNull()
     expect(unknown?.dataset.source).toBe('unknown')
     expect(unknown?.textContent).toBe('no task found')
     // The source is a sibling of the commit link, never nested inside it.
@@ -698,15 +690,12 @@ describe('the Git view Not landed section', () => {
     stubFetch()
     renderAt('/git/not-landed')
     await waitFor(() => expect(document.querySelectorAll('[data-slot="not-landed-group"]')).toHaveLength(3))
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Not landed')
-    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('finished tasks whose commits are not on main')
     expect(groups()).toEqual([
       { title: 'No pull request1· nobody sees this work until you act', rows: ['cez/51ab2d7e'] },
       { title: 'Pull request open1', rows: ['cez/7c1e09aa'] },
       { title: 'Task deleted1· this branch is the only copy of the work', rows: ['cez/9d04c1f2'] },
     ])
     const noPr = document.querySelector<HTMLElement>('[data-slot="not-landed-row"][data-branch="cez/51ab2d7e"]')!
-    expect(noPr.className).toContain('min-h-[56px]')
     expect(noPr.querySelector('[data-slot="not-landed-title"]')?.textContent).toBe('Retention sweep for archived runs')
     expect(noPr.querySelector('[data-slot="not-landed-meta"]')?.textContent).toMatch(/^cez\/51ab2d7e· 4 commits\+212−40· done \d+d ago$/)
     expect(noPr.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('success')

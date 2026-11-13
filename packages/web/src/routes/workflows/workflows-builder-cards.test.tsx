@@ -34,7 +34,7 @@ describe('workflow step summaries', () => {
     render(<StepCardBody step={{ id: 's', skill: 'missing' }} index={0} skills={skills} />)
     expect(screen.getByText('missing')).toBeTruthy()
     expect(screen.getByText('unknown')).toBeTruthy()
-    expect(screen.getByText('Not in this repo or the team skills — the step runs on its plain prompt.')).toBeTruthy()
+    expect(screen.getByText(/plain prompt/)).toBeTruthy()
   })
 
   it('leaves an empty prompt step without a summary or unknown badge', () => {

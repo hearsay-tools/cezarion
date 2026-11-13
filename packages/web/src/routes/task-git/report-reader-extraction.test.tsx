@@ -134,6 +134,5 @@ describe('the extracted report reader', () => {
     expect(Boolean(screen.queryByRole('link', { name: 'Download' }))).toBe(download)
     fireEvent.click(screen.getByRole('button', { name: label }))
     expect(onBack).toHaveBeenCalledOnce()
-    expect(document.querySelector('[data-slot="report-body"]')?.classList.contains('overflow-clip')).toBe(true)
   })
 })

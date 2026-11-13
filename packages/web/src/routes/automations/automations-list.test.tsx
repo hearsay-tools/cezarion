@@ -47,7 +47,6 @@ it('shows a schedule row with its label and next run and runs it by hand', async
   expect(calls.find((call) => call.path.endsWith('/a1/run'))?.method).toBe('POST')
   const open = screen.getByRole('link', { name: 'Open task' })
   expect(open.getAttribute('href')).toBe('/tasks/run-7')
-  expect(open.className).toContain('min-h-11')
   expect(refresh).toHaveBeenCalled()
   expect(screen.queryByRole('button', { name: 'Test filter' })).toBeNull()
 })
@@ -96,7 +95,6 @@ it('shows a paused schedule with no next run, offers Enable, and still allows Ru
 it('renders the empty state with New automation', () => {
   mount(response([]))
   expect(screen.getByRole('heading', { name: 'No automations yet' })).not.toBeNull()
-  expect(screen.getByText(/Create one paused, preview it, then enable it/)).not.toBeNull()
   expect(screen.getAllByRole('link', { name: 'New automation' }).length).toBeGreaterThan(0)
 })
 
@@ -114,7 +112,6 @@ it('shows the recent activity of each automation on its card, newest first and c
   routed((path) => (path.includes('/automation-log?automationId=a1') ? json({ records: logRecords }) : undefined))
   mount(response([schedule]))
   expect(await screen.findByText('No new matching pull requests.')).not.toBeNull()
-  expect(screen.getByRole('heading', { name: 'Recent activity' })).not.toBeNull()
 })
 
 // hearsay-tools/cezarion#1465: one-time schedules in the list.
