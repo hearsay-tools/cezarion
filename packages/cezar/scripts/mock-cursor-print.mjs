@@ -61,7 +61,7 @@ if (freshTag) {
   writeFileSync(stateFile, JSON.stringify({ origin }));
 }
 // One process per turn: the session's opening scenario comes from its tag, not a latch.
-const silentOrigin = /^silent-tail/.test(origin ?? '');
+const silentOrigin = (origin ?? '').startsWith('silent-tail');
 const prompt = silentOrigin ? rawPrompt : answerNudge(rawPrompt);
 const frame = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const assistant = text => frame({ type: 'assistant', session_id: id,
