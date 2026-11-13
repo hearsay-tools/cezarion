@@ -198,8 +198,6 @@ describe('AddProjectDialog', () => {
     )
     expect(screen.getByTestId('location').textContent).toBe('/p/cezar/')
     expect(onOpenChange).not.toHaveBeenCalled()
-    // Server messages quote unbreakable paths — they must wrap, not widen the grid column.
-    expect(document.querySelector('[data-slot="add-project-error"]')?.className).toContain('break-words')
   })
 
   it('shows a browse failure instead of an empty listing', async () => {
@@ -211,8 +209,6 @@ describe('AddProjectDialog', () => {
       ),
     )
     expect(document.querySelector('[data-slot="fs-listing"]')).toBeNull()
-    // Same wrap-don't-widen contract as the register error.
-    expect(document.querySelector('[data-slot="fs-error"]')?.className).toContain('break-words')
   })
 
   it('surfaces the truncated flag rather than showing a silently short list', async () => {

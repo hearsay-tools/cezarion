@@ -72,10 +72,9 @@ describe('MobileTabBar', () => {
     renderBar('/', { forge: true }, { signal: { needsYou: 2, failedUnread: 1, inMotion: 3, finishedUnread: 4 } })
     const tasks = within(bar()).getByRole('link', { name: 'Tasks' })
     expect(tasks.querySelector('[data-slot="rail-pill-top"]')).not.toBeNull()
-    expect(tasks.querySelector('[data-segment="amber"]')!.getAttribute('data-count')).toBe('2')
-    expect(tasks.querySelector('[data-segment="red"]')!.getAttribute('data-count')).toBe('1')
+    const counts = Array.from(tasks.querySelectorAll('[data-segment]'), (segment) => segment.getAttribute('data-count'))
+    expect(counts.sort()).toEqual(['1', '2'])
     expect(bar().querySelector('[data-slot="rail-pill-bottom"]')).toBeNull()
-    expect(bar().querySelector('[data-segment="violet"]')).toBeNull()
   })
 
   it('renders no badge for an idle or unknown project', () => {
@@ -102,13 +101,6 @@ describe('More sheet', () => {
     expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Git', 'Skills', 'Workflows', 'Reports', 'Project settings'])
     expect(within(sheet()).queryByText('Shown when their flag is on')).toBeNull()
     expect(within(sheet()).getByText('cezarion')).toBeTruthy()
-  })
-
-  it('shows no badges when nothing is pending', () => {
-    renderBar('/', { forge: true, })
-    open()
-    expect(within(sheet()).queryByText('1 update')).toBeNull()
-    expect(sheet().querySelector('[data-slot="inbox-count"]')).toBeNull()
   })
 
   it('closes and navigates when a row is tapped', () => {

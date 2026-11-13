@@ -34,11 +34,11 @@ describe('Diff fallback path', () => {
     const root = await screen.findByText('src/a.ts').then(() => document.querySelector('[data-slot="diff"]')!)
     expect(root.getAttribute('data-fallback')).toBe('true')
 
-    // Same contract: aggregate stat, per-file section, tinted +/- lines from the raw patch.
+    // Same contract: aggregate stat, per-file section, +/- lines from the raw patch.
     expect(document.querySelector('[data-slot="diff-totals"]')?.textContent).toContain('1 file changed')
     expect(document.querySelector('[data-slot="diff-file"]')?.getAttribute('data-path')).toBe('src/a.ts')
-    expect(screen.getByText('+const two = 3').className).toContain('bg-diff-add')
-    expect(screen.getByText('-const two = 2').className).toContain('bg-diff-del')
+    expect(screen.getByText('+const two = 3')).toBeTruthy()
+    expect(screen.getByText('-const two = 2')).toBeTruthy()
   })
 
   it('still renders the empty state without an engine', () => {

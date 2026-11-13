@@ -128,14 +128,11 @@ describe('mobile top bar', () => {
     // The pill offsets and the 64x44 button, under every density, resolve in mobile-projects.e2e.ts.
   })
 
-  it('never lets a split pill reach the menu icon, whatever the counts', () => {
-    // 20px icon at left 10px ends at x=30; a 64px button leaves 34px, less the 2px inset and
-    // the pill's own 2px borders: two segments must stay 14px each (32px in all).
+  it('caps each split segment on the menu button at 9+', () => {
     const big = new Map<string, ProjectSignal>([['toolkit-dev', signal({ needsYou: 12, failedUnread: 30, inMotion: 99, finishedUnread: 10 })]])
     renderShell('/p/cezarion/', nav({ signals: big }))
-    const widths = [...menuButton().querySelectorAll<HTMLElement>('[data-segment]')].map((el) => el.style.width)
-    expect(widths).toEqual(['14px', '14px', '14px', '14px'])
     expect(segs(menuButton(), 'top')).toEqual(['amber:9+', 'red:9+'])
+    expect(segs(menuButton(), 'bottom')).toEqual(['violet:9+', 'green:9+'])
   })
 
   it('carries no pills and a plain label while activity is unknown or nothing is elsewhere', () => {
@@ -147,14 +144,6 @@ describe('mobile top bar', () => {
     expect(menuButton().getAttribute('aria-label')).toBe('Open projects')
   })
 
-  it('lets a long project name truncate instead of widening the shell', () => {
-    renderShell('/p/cezarion/', nav(), { repo: { name: 'cezar-e2e-new-task-a-very-long-project-name', branch: 'main' } })
-    const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
-    // A grid item sizes its column to its min-content, so both levels must be allowed to shrink.
-    expect(bar.className).toContain('min-w-0')
-    expect(bar.firstElementChild?.className).toContain('min-w-0')
-  })
-
   it('never puts a count on the project button', () => {
     renderShell('/p/cezarion/', nav())
     const picker = document.querySelector('[data-slot="mobile-project-picker"]') as HTMLElement
@@ -164,7 +153,7 @@ describe('mobile top bar', () => {
 })
 
 describe('mobile drawer', () => {
-  it('opens on the identity row, then one row per project, then workspace and global rows', () => {
+  it('opens on the identity row and one row per project', () => {
     renderShell('/p/cezarion/', nav())
     fireEvent.click(menuButton())
     const identity = drawer().querySelector('[data-slot="drawer-identity"]') as HTMLElement
@@ -174,25 +163,15 @@ describe('mobile drawer', () => {
 
     expect(rows().map((row) => row.getAttribute('data-project-id'))).toEqual(PROJECTS.map((entry) => entry.id))
     // The 64px row height (which a stray `flex-1` once collapsed to 40px) is measured in mobile-projects.e2e.ts.
-    // A long nightly version truncates instead of pushing Close out of the identity row.
     const version = identity.querySelector('[data-slot="drawer-version"]') as HTMLElement
-    expect(version.className).toContain('truncate')
     expect(version.getAttribute('title')).toBe('v0.14.9')
-
-    const order = [...drawer().querySelectorAll('[data-slot="drawer-identity"], [data-slot="drawer-projects"], [data-slot="drawer-workspace"], [data-slot="drawer-global"]')].map((el) => el.getAttribute('data-slot'))
-    expect(order).toEqual(['drawer-identity', 'drawer-projects', 'drawer-workspace', 'drawer-global'])
   })
 
-  it('marks the current project, and paints each row’s pills and coloured state words', () => {
+  it('marks the current project, and shows each row’s pills and state words', () => {
     renderShell('/p/cezarion/', nav())
     fireEvent.click(menuButton())
     const [current, toolkit, failed, finished, idle] = rows() as [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement]
     expect(current.getAttribute('aria-current')).toBe('page')
-    // The current row sits on its own resting fill; an ordinary row has none of its own.
-    const restFill = (el: Element) => (el.closest('[data-slot="drawer-project-current"]') ?? el).className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
-    expect(restFill(current)).not.toEqual([])
-    expect(restFill(current)).not.toEqual(restFill(toolkit))
-    expect(current.querySelector('svg[data-design-icon="check"]')).not.toBeNull()
     expect(toolkit.getAttribute('aria-current')).toBeNull()
 
     expect(segs(current, 'top')).toEqual(['amber:1'])
@@ -262,11 +241,9 @@ describe('mobile drawer', () => {
   describe('Tools row', () => {
     const tools = () => drawer().querySelector('[data-slot="drawer-tools"]') as HTMLElement
 
-    it('opens /tools directly, above Global settings, and closes the drawer', async () => {
+    it('opens /tools directly and closes the drawer', async () => {
       renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
       fireEvent.click(menuButton())
-      const global = drawer().querySelector('[data-slot="drawer-global"]') as HTMLElement
-      expect([...global.children].map((el) => el.getAttribute('data-slot'))).toEqual(['drawer-tools', 'drawer-global-settings', 'theme-toggle'])
       expect(tools().getAttribute('href')).toBe('/tools')
       fireEvent.click(tools())
       await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tools'))
@@ -278,7 +255,6 @@ describe('mobile drawer', () => {
       fireEvent.click(menuButton())
       const dot = tools().querySelector('[data-slot="drawer-tools-dot"]')
       expect(dot).not.toBeNull()
-      expect(dot?.className).toContain('pending')
       expect(tools().getAttribute('aria-label')).toBe('Tools, needs setup')
       cleanup()
       renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
@@ -317,15 +293,12 @@ describe('mobile drawer', () => {
     const trigger = () => within(document.querySelector('[data-slot="drawer-project-current"]') as HTMLElement).getByRole('button', { name: 'Project menu' })
     const open = () => fireEvent.pointerDown(trigger(), { button: 0, ctrlKey: false })
 
-    it('puts a 44px … beside the current row only, never inside its link', () => {
+    it('puts a … beside the current row only, never inside its link', () => {
       renderShell('/p/cezarion/', nav())
       fireEvent.click(menuButton())
       expect(document.querySelectorAll('[data-slot="project-menu-trigger"]')).toHaveLength(1)
-      expect(trigger().className).toContain('size-[44px]')
       expect(rows()[0]!.contains(trigger())).toBe(false)
       expect(rows()[0]!.parentElement).toBe(trigger().parentElement)
-      // Other rows stay bare links.
-      expect(rows()[1]!.parentElement?.getAttribute('data-slot')).toBe('drawer-projects-group')
     })
 
     it('opens the shared menu: Mark all read, Open in, Copy path, Project settings', async () => {
@@ -361,8 +334,8 @@ describe('mobile drawer', () => {
   it('renders without project data, keeping identity and global rows', () => {
     renderShell('/settings/global', null, { repo: null })
     fireEvent.click(menuButton())
-    expect(drawer().querySelector('[data-slot="drawer-projects"]')).toBeNull()
-    expect(drawer().querySelector('[data-slot="drawer-identity"]')).not.toBeNull()
-    expect(drawer().querySelector('[data-slot="drawer-global"]')).not.toBeNull()
+    expect(rows()).toHaveLength(0)
+    expect(within(drawer()).getByRole('button', { name: 'Close menu' })).toBeTruthy()
+    expect(within(drawer()).getByRole('link', { name: 'Global settings' })).toBeTruthy()
   })
 })

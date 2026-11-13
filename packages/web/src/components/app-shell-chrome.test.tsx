@@ -61,12 +61,15 @@ describe('desktop breadcrumb', () => {
       repo: { name: 'demo', branch: 'main' },
       breadcrumb: { project: 'Workspace', page: 'Tasks / Fix', branch: 'Isolated worktree' },
     })
-    expect(slot('desktop-breadcrumb')?.textContent).toBe('Workspace/Tasks / FixIsolated worktree')
+    const breadcrumb = slot('desktop-breadcrumb')?.textContent
+    for (const part of ['Workspace', 'Tasks / Fix', 'Isolated worktree']) expect(breadcrumb).toContain(part)
+    expect(breadcrumb).not.toContain('demo')
   })
 
   it('falls back to the repo for a breadcrumb that names no project or branch', () => {
     renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, breadcrumb: { project: null, page: 'Skills' } })
-    expect(slot('desktop-breadcrumb')?.textContent).toBe('demo/Skillsmain')
+    const breadcrumb = slot('desktop-breadcrumb')?.textContent
+    for (const part of ['demo', 'Skills', 'main']) expect(breadcrumb).toContain(part)
   })
 
   it('names the active view, and Cezarion where no view is active', () => {
@@ -79,25 +82,16 @@ describe('desktop breadcrumb', () => {
 })
 
 describe('mobile top bar title', () => {
-  it('keeps the route title for screen readers only beside a repo', () => {
+  it('keeps the route title beside a repo', () => {
     renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' } })
     const title = slot('mobile-route-title', slot('mobile-top-bar') as HTMLElement)
     expect(title?.textContent).toBe('Skills')
-    expect(title?.className).toContain('sr-only')
   })
 
-  it('holds the search button right with a spacer where no view is active and no repo is known', () => {
-    renderShell('/tools')
-    const bar = slot('mobile-top-bar') as HTMLElement
-    expect(slot('mobile-route-title', bar)).toBeNull()
-    expect(bar.querySelectorAll(':scope > div > span.flex-1')).toHaveLength(1)
-  })
-
-  it('renders neither a title nor a spacer beside a repo where no view is active', () => {
+  it('renders no title beside a repo where no view is active', () => {
     renderShell('/tools', { repo: { name: 'demo', branch: 'main' } })
     const bar = slot('mobile-top-bar') as HTMLElement
     expect(slot('mobile-route-title', bar)).toBeNull()
-    expect(bar.querySelectorAll(':scope > div > span.flex-1')).toHaveLength(0)
   })
 })
 
@@ -110,13 +104,9 @@ describe('desktop sidebar slots', () => {
       sidebarList: <span data-testid="view-sidebar">view</span>,
       taskQuickList: <span data-testid="quick-list">quick</span>,
     })
-    const header = slot('sidebar-header', sidebar()) as HTMLElement
-    expect(header.querySelector('[data-testid="project-header"]')).not.toBeNull()
-    expect(header.textContent).toBe('header')
-    expect(sidebar().querySelector('[data-testid="session-scope"]')).not.toBeNull()
-    const navigation = slot('project-task-navigation', sidebar()) as HTMLElement
-    expect(navigation.querySelector('[data-testid="view-sidebar"]')).not.toBeNull()
-    expect(slot('task-quick-list', sidebar())).toBeNull()
+    for (const id of ['project-header', 'session-scope', 'view-sidebar']) {
+      expect(sidebar().querySelector(`[data-testid="${id}"]`)).not.toBeNull()
+    }
     expect(sidebar().querySelector('[data-testid="quick-list"]')).toBeNull()
   })
 

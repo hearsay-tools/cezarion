@@ -345,7 +345,7 @@ export function CommandPalette() {
       // are typing into never moves.
       className={`${dock} translate-y-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl`}
       overlayClassName={docked ? 'bg-transparent' : undefined}
-      contentProps={docked ? { 'data-voice-proposal': 'true' } : undefined}
+      contentProps={docked ? { 'data-voice-proposal': 'true', 'data-dock': proposal?.kind === 'tell' ? 'top' : 'bottom' } : undefined}
     >
       {/* The body mounts only while the dialog is open (Radix portals nothing when closed), so
           its queries — notably the skills fetch — run on first open, never on app boot. */}

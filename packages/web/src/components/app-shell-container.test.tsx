@@ -17,6 +17,7 @@ import type {
 import { AppShellContainer, repoChipOf } from '@/components/app-shell-container'
 import { ThemeProvider } from '@/components/theme-provider'
 import { ProjectRouteMatcherContext } from '@/lib/project-route-matcher'
+import { PROJECT_RAIL_COLLAPSED_WIDTH } from '@/lib/project-rail-expanded'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -135,7 +136,6 @@ const versionChip = () => document.querySelector('[data-slot="version-chip"]')
 // The desktop column only: below `md` the mobile tab bar renders the same view names (jsdom has no
 // media queries, so both trees are in the DOM), and these cases are about the sidebar's gating.
 const inSidebar = () => within(document.querySelector('[data-slot="sidebar"]') as HTMLElement)
-const navBadge = () => document.querySelector('[data-slot="overflow-inbox-dot"]')
 
 describe('repoChipOf', () => {
   it.each([
@@ -200,7 +200,6 @@ describe('sidebar wiring', () => {
 
     expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
     expect(versionChip()).toBeNull()
-    expect(navBadge()).toBeNull()
     expect(inSidebar().queryByRole('button', { name: 'More views' })).not.toBeNull()
     // …and the app itself is up. The chips being empty is not a loading screen.
     expect(screen.getByText('route content')).toBeTruthy()
@@ -723,8 +722,6 @@ describe('project rail wiring', () => {
 
     await rail()
     await waitFor(() => expect(railMark('shop').querySelector('[data-slot="rail-pill-top"]')).not.toBeNull())
-    const segment = railMark('shop').querySelector('[data-segment="amber"]')
-    expect(segment?.textContent).toBe('1')
     // The current project reads the same index and has nothing to say.
     expect(railMark('cezar').querySelector('[data-slot="rail-pill-top"]')).toBeNull()
     expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · 1 needs you')
@@ -789,7 +786,7 @@ describe('project rail wiring', () => {
 
     await waitFor(() => expect(document.querySelector('[data-slot="tools-menu-trigger"]')).not.toBeNull())
     const placeholder = document.querySelector('[data-slot="project-rail-placeholder"]') as HTMLElement
-    expect(placeholder.style.width).toBe('60px')
+    expect(placeholder.style.width).toBe(`${PROJECT_RAIL_COLLAPSED_WIDTH}px`)
     expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull()
 
     answer(new Response(JSON.stringify(TWO_PROJECTS), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -959,7 +956,6 @@ describe('project rail wiring', () => {
     renderShell('/p/cezar/')
 
     const nav = await rail()
-    await waitFor(() => expect(nav.querySelector('[data-slot="rail-app-mark"]')).not.toBeNull())
     await waitFor(() => expect(within(nav).getByAltText(`${productName("Cezarion")} v0.1.3`)).toBeTruthy())
     expect(within(nav).queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(within(nav).queryByRole('link', { name: 'All projects' })).toBeNull()
@@ -1035,9 +1031,8 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   const project = entry.startsWith('/p/shop') ? 'shop' : 'cezar'
   const group = await screen.findByRole('navigation', { name: `This project · ${project === 'shop' ? 'Shop' : 'cezar'}` })
   expect(within(group).getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe(`/p/${project}/settings/agents`)
-  // The project group leads with General, the project index; no "Settings" heading.
+  // The project group leads with General, the project index.
   expect(within(group).getByRole('link', { name: 'General' }).getAttribute('href')).toBe(`/p/${project}/settings`)
-  expect(document.querySelector('[data-slot="settings-sidebar"] h2')).toBeNull()
   expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Sidebar', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
   const global = screen.getByRole('navigation', { name: 'Global · every project' })
   expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')

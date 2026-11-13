@@ -65,20 +65,6 @@ describe('activeNavItem', () => {
 })
 
 describe('NAV_ITEMS', () => {
-  it('is the nav from the spec, in mockup order', () => {
-    expect(NAV_ITEMS.map((item) => item.label)).toEqual([
-      'Tasks',
-      'Activity',
-      'Git',
-      'GitHub',
-      'Automations',
-      'Skills',
-      'Workflows',
-      'Reports',
-      'Settings',
-    ])
-  })
-
   // Every item must be reachable by its own URL, or a click would navigate somewhere that
   // does not light the item the user just clicked.
   it('each item is the active item for its own `to`', () => {

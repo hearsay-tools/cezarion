@@ -97,6 +97,7 @@ export function GithubTemplateInput({
                 role="option"
                 aria-selected={chosen}
                 data-index={index}
+                data-value={suggestion.slug}
                 data-slot="create-project-template-option"
                 // mousedown would move focus off the input; the pick happens on click.
                 onMouseDown={(event) => event.preventDefault()}

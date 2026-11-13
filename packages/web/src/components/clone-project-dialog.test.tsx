@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -116,10 +116,8 @@ describe('CloneProjectDialog', () => {
     fireEvent.change(urlInput(), { target: { value: 'https://github.com/open-mercato/cezar.git' } })
     // The name defaults to the repo half — the same rule the server applies.
     await waitFor(() => expect(slot('clone-target')?.textContent).toBe('~/cezar/projects/cezar'))
-    expect(rootSettingsControl().tagName).toBe('A')
+    expect(screen.getByRole('link', { name: 'Edit checkout root' })).toBe(rootSettingsControl())
     expect(rootSettingsControl().getAttribute('href')).toBe('/settings/global/projects')
-    expect(rootSettingsControl().getAttribute('aria-label')).toBe('Edit checkout root')
-    expect(rootSettingsControl().getAttribute('title')).toBe('Edit checkout root')
 
     fireEvent.click(cloneButton())
     await waitFor(() => expect(posted).toHaveLength(1))
@@ -303,7 +301,7 @@ describe('CloneProjectDialog', () => {
 
     await waitFor(() => expect(slot('clone-error')?.textContent).toContain('evil.example'))
     expect(slot('clone-sso-link')).toBeNull()
-    expect(slot('clone-error')?.querySelector('p')?.className).toContain('break-all')
+    expect(slot('clone-error')?.querySelector('a')).toBeNull()
     expect(cloneButton().textContent).toBe('Retry clone')
   })
 

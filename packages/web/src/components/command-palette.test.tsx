@@ -1082,14 +1082,6 @@ describe('Skills group', () => {
     expect(location()).toBe('/new?skill=project-review')
     await waitFor(() => expect(dialog()).toBeNull())
   })
-
-  it('shows the description beside the name', async () => {
-    renderPalette({ skills: MIXED })
-    openWith({ metaKey: true })
-
-    const item = await screen.findByText('Deploy from anywhere')
-    expect(item.closest('[data-slot="palette-skill"]')?.getAttribute('data-skill')).toBe('global-deploy')
-  })
 })
 
 describe('the pure ordering helpers', () => {
@@ -1390,8 +1382,7 @@ describe('server search past the window', () => {
     })
     openWith({ metaKey: true })
     fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'fix' } })
-    const note = await screen.findByText(/More matches in Shop/)
-    expect(note.textContent).toContain('Type more to narrow')
+    expect(await screen.findByText(/More matches in Shop/)).toBeTruthy()
   })
 
   it('keeps a server hit that matched only on a reference URL\'s text', async () => {

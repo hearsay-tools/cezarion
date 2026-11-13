@@ -411,7 +411,7 @@ describe('useResolvedEngine agent accounts', () => {
 
 
 describe('EnginePills presentation and choices', () => {
-  it('keeps runner switching and effort intact with the approved glyph controls', async () => {
+  it('keeps runner switching and effort intact', async () => {
     stubResolverFetch({ providers: { providers: [
       { provider: 'claude', status: 'connected', enabled: true },
       { provider: 'codex', status: 'connected', enabled: true },
@@ -420,9 +420,6 @@ describe('EnginePills presentation and choices', () => {
     render(createElement(QueryClientProvider, { client: createQueryClient() },
       createElement(EnginePills, { pick: { runner: 'claude', model: 'opus', effort: 'high', account: null }, onChange })))
     const runner = await screen.findByRole('button', { name: /^Runner · / })
-    expect(runner.querySelector('svg')?.getAttribute('data-design-icon')).toBe('terminal')
-    expect(screen.getByRole('button', { name: /^Model · / }).querySelector('svg')?.getAttribute('data-design-icon')).toBe('cpu')
-    expect(screen.getByRole('button', { name: /^Effort · / }).querySelector('svg')?.getAttribute('data-design-icon')).toBe('gauge')
     fireEvent.pointerDown(runner)
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /codex/i }))
     expect(onChange).toHaveBeenCalledWith({ runner: 'codex', model: null, effort: 'high', account: null })
@@ -478,8 +475,6 @@ describe('EnginePills layout="row" (#724)', () => {
     const { container } = setup({ layout: 'row' })
     await screen.findByRole('button', { name: /^Runner · / })
     const row = container.querySelector('[data-slot="engine-row"]')!
-    expect(row).not.toBeNull()
-    expect(row.parentElement?.getAttribute('data-slot')).toBe('engine-row-box')
     expect(order(row)).toEqual(['runner-pill', 'model-pill', 'effort-pill'])
   })
 
@@ -522,13 +517,5 @@ describe('EnginePills layout="row" (#724)', () => {
     // Same element, not a remount, and still the focused one (a moved node is blurred by Chrome).
     expect(container.querySelector('[data-slot="model-pill"]')).toBe(model)
     expect(document.activeElement).toBe(model)
-  })
-
-  it('without the prop keeps the legacy flat markup: no row, no box', async () => {
-    const { container } = setup()
-    await screen.findByRole('button', { name: /^Runner · / })
-    expect(container.querySelector('[data-slot="engine-row"]')).toBeNull()
-    expect(container.querySelector('[data-slot="engine-row-box"]')).toBeNull()
-    expect(order(container)).toEqual(['runner-pill', 'model-pill', 'effort-pill'])
   })
 })

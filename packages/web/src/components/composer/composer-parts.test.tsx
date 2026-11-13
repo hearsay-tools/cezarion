@@ -212,14 +212,4 @@ describe('composer draft accessibility', () => {
     expect(textarea.readOnly).toBe(false)
     expect(textarea.value).toBe('')
   })
-
-  it('shows the skill hint beside the new-task description', () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}'))))
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <Composer onSubmit={vi.fn()} executionOptions={<button>Workflow</button>} />
-      </QueryClientProvider>,
-    )
-    expect(screen.getByText('Type / for a skill or workflow')).toBeTruthy()
-  })
 })

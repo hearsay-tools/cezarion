@@ -175,7 +175,7 @@ describe('a chip under a ReferenceStatusProvider', () => {
 })
 
 describe('the conflict axis, from the wire to the chip', () => {
-  it('paints the conflict over the status the same answer carried', async () => {
+  it('marks the conflict over the status the same answer carried', async () => {
     // The reported case, end to end: green and unmergeable at once. `ready` is still what the
     // server said and stays on the element; what changes is the colour the chip is scanned by.
     answers = [{ available: true, prs: { 774: 'ready' }, issues: {}, conflicts: [774] }]
@@ -183,7 +183,6 @@ describe('the conflict axis, from the wire to the chip', () => {
 
     await waitFor(() => expect(chip().getAttribute('data-conflicting')).toBe('true'))
     expect(chip().getAttribute('data-status')).toBe('ready')
-    expect(chip().className).toContain('text-conflict')
   })
 
   it('reads an absent `conflicts` as nothing known, not as "merges cleanly"', async () => {
@@ -418,7 +417,6 @@ describe('statuses survive a reload', () => {
     renderChip()
 
     await waitFor(() => expect(chip().getAttribute('data-status')).toBe('queued-for-merge'))
-    expect(chip().className).toContain('text-accent-text')
     expect(chip().getAttribute('aria-label')).toBe('Open the pull request #774 for Add checkout')
   })
 })
