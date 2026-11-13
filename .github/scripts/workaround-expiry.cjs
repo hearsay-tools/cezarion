@@ -30,9 +30,11 @@ function maskCodeSpans(line, inComment) {
       inComment = end < 0;
       i = stop;
     } else if (line.startsWith('<!--', i)) {
-      text += '<!--';
-      inComment = true;
-      i += 4;
+      // `<!-->` and `<!--->` are whole comments in CommonMark; any other `<!--` opens one.
+      const short = /^<!---?>/.exec(line.slice(i))?.[0];
+      text += short ?? '<!--';
+      inComment = !short;
+      i += (short ?? '<!--').length;
     } else if (line[i] === '\\') {
       text += line.slice(i, i + 2);
       i += 2;
