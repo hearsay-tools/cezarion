@@ -45,32 +45,20 @@ test('reader accepts standalone, inline and repeated markers; rejects malformed 
   assert.deepEqual(markersIn('x.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3']);
 });
 
-test('reader skips markers that prose names inside code spans', () => {
+test('only markers that end a line count; prose that names a marker does not', () => {
   const text = [
     'Delete the `<!-- until: a/b#1 -->` marker.',
-    'Also ``x ` <!-- until: a/b#2 --> y`` here.',
-    'Real rule `code` <!-- until: a/b#3 -->',
-    'Unclosed ` <!-- until: a/b#4 -->',
-    'Mismatched `` <!-- until: a/b#5 --> `',
-    'Escaped \\` <!-- until: a/b#6 --> `code`',
-    '<!-- ` --> <!-- until: a/b#7 --> `code`',
-    '<`example`!-- until: a/b#8 -->',
-    '<!-- a comment that spans lines `',
-    'still the comment --> <!-- until: a/b#9 --> `x`',
-    'text <!--> `<!-- until: a/b#10 -->`',
-    'text <!---> `<!-- until: a/b#11 -->`',
-    'text <!-->',
-    '`<!-- until: a/b#12 -->` <!-- until: a/b#13 -->',
-    'Rule <span title="`">text</span> <!-- until: a/b#14 --> `code`',
-    "Rule <a href='x`y' data-x=`z>link</a> <!-- until: a/b#15 --> `code`",
-    'See <https://example.com/`> <!-- until: a/b#16 --> `code`',
-    'Mail <me`x@example.com> <!-- until: a/b#17 --> `code`',
-    'Not a tag <1 x> `<!-- until: a/b#18 -->`',
-    'Escaped \\<!-- until: a/b#19 --> is text, and so is \\\\ before <!-- until: a/b#20 -->',
-    'A backslash before a letter \\x stays, then `<!-- until: a/b#21 -->`',
+    '`<!-- until: a/b#2 -->` in the same PR.',
+    'Rule text <!-- until: a/b#3 -->',
+    'Rule text <!-- until: a/b#4 --> <!-- until: a/b#5 --> \t',
+    '<!-- until: a/b#6 -->',
+    'Quoted `<!-- until: a/b#7 -->` then a rule <!-- until: a/b#8 -->',
+    'Rule <!-- until: a/b#9 --> and more prose',
+    '[link](url "`") <!-- until: a/b#10 --> `code`',
+    'Ends in a span `<!-- until: a/b#11 -->`',
   ].join('\n');
-  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]), [[3, 'a/b#3'], [4, 'a/b#4'], [5, 'a/b#5'],
-    [6, 'a/b#6'], [7, 'a/b#7'], [10, 'a/b#9'], [14, 'a/b#13'], [15, 'a/b#14'], [16, 'a/b#15'], [17, 'a/b#16'], [18, 'a/b#17'], [20, 'a/b#20']]);
+  assert.deepEqual(markersIn('spec.md', text).map(m => [m.line, m.issue]),
+    [[3, 'a/b#3'], [4, 'a/b#4'], [4, 'a/b#5'], [5, 'a/b#6'], [6, 'a/b#8']]);
 });
 
 test('reader skips backtick and tilde fences and reports the marker after each closing fence', () => {

@@ -4,84 +4,13 @@ const path = require('node:path');
 
 const TITLE = 'Remove workaround rules whose replacement issue closed';
 
-// The start of the backtick run of exactly `length` at or after `from`, or -1.
-function backtickRun(line, from, length) {
-  for (let start = from; start < line.length;) {
-    if (line[start] !== '`') { start++; continue; }
-    let end = start;
-    while (line[end] === '`') end++;
-    if (end - start === length) return start;
-    start = end;
-  }
-  return -1;
-}
+const MARKER = /<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g;
+// A rule's marker stands on its own line or ends the rule's line (docs/sdlc/friction.md
+// § Where a new agent rule goes). Prose that names a marker, in a code span or mid-sentence,
+// is followed by more text on its line, so only this trailing run of markers counts.
+const TRAILING_MARKERS = new RegExp(`(?:${MARKER.source}[ \\t]*)+$`);
 
-// CommonMark raw HTML other than comments, and autolinks (spec 0.31.2, sections 6.5 and 6.6):
-// the only inline constructs that outrank a code span. Read within one line here.
-const TAG_NAME = '[A-Za-z][A-Za-z0-9-]*';
-const ATTRIBUTE = `\\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\\s*=\\s*(?:[^"'=<>\`\\s]+|'[^']*'|"[^"]*"))?`;
-const LABEL = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?';
-const RAW_HTML = new RegExp([
-  `<${TAG_NAME}(?:${ATTRIBUTE})*\\s*\\/?>`,
-  `<\\/${TAG_NAME}\\s*>`,
-  '<\\?.*?\\?>',
-  '<![A-Za-z][^>]*>',
-  '<!\\[CDATA\\[.*?\\]\\]>',
-  '<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\\s<>]*>',
-  `<[A-Za-z0-9.!#$%&'*+/=?^_\`{|}~-]+@${LABEL}(?:\\.${LABEL})*>`,
-].join('|'), 'y');
-
-// The characters a backslash escapes: ASCII punctuation (spec 0.31.2, section 2.4).
-const ESCAPABLE = /^[!-/:-@[-`{-~]$/;
-
-// The end of the raw HTML tag or autolink that starts at `at`, or -1.
-function rawHtmlEnd(line, at) {
-  RAW_HTML.lastIndex = at;
-  return RAW_HTML.test(line) ? RAW_HTML.lastIndex : -1;
-}
-
-// One left-to-right pass, as CommonMark reads inline text: whichever of raw HTML, an autolink
-// or a code span starts first wins, and an escaped backtick opens nothing. A code span renders
-// its text, so a marker inside one is prose that names the marker: blank the span with spaces,
-// so that the text on its two sides is not joined. Code spans are read within one line here.
-function maskCodeSpans(line, inComment) {
-  let text = '';
-  for (let i = 0; i < line.length;) {
-    if (inComment) {
-      const end = line.indexOf('-->', i);
-      const stop = end < 0 ? line.length : end + 3;
-      text += line.slice(i, stop);
-      inComment = end < 0;
-      i = stop;
-    } else if (line.startsWith('<!--', i)) {
-      // `<!-->` and `<!--->` are whole comments in CommonMark; any other `<!--` opens one.
-      const short = /^<!---?>/.exec(line.slice(i))?.[0];
-      text += short ?? '<!--';
-      inComment = !short;
-      i += (short ?? '<!--').length;
-    } else if (rawHtmlEnd(line, i) > i) {
-      const stop = rawHtmlEnd(line, i);
-      text += line.slice(i, stop);
-      i = stop;
-    } else if (line[i] === '\\' && ESCAPABLE.test(line[i + 1] ?? '')) {
-      // An escaped character is literal text: it opens no code span, comment or tag.
-      text += '\\ ';
-      i += 2;
-    } else if (line[i] === '`') {
-      let open = i;
-      while (line[open] === '`') open++;
-      const close = backtickRun(line, open, open - i);
-      const stop = close < 0 ? open : close + open - i;
-      text += close < 0 ? line.slice(i, stop) : ' '.repeat(stop - i);
-      i = stop;
-    } else {
-      text += line[i++];
-    }
-  }
-  return { text, inComment };
-}
-
-// Read marker comments outside fenced code and code spans, preserving source line numbers.
+// Read the markers that end lines outside fenced code, preserving source line numbers.
 function markersIn(file, text) {
   const markers = [];
   let fence;
@@ -96,9 +25,11 @@ function markersIn(file, text) {
       fence = delimiter[1];
       continue;
     }
-    const masked = maskCodeSpans(line, inComment);
-    inComment = masked.inComment;
-    for (const match of masked.text.matchAll(/<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g)) {
+    for (const token of line.matchAll(/<!--|-->/g)) {
+      if (token[0] === '<!--') inComment = true;
+      else inComment = false;
+    }
+    for (const match of (TRAILING_MARKERS.exec(line)?.[0] ?? '').matchAll(MARKER)) {
       markers.push({ file, line: index + 1, issue: match[1] });
     }
   }

@@ -321,7 +321,8 @@ A friction fix often adds a rule that agents must follow. First ask whether code
 test or a script can make the rule unnecessary. If so, file that change, and write
 the rule only until it lands, citing the issue that removes it.
 Put `<!-- until: <owner>/<repo>#<n> -->` on its own line beside the rule or
-at the end of the rule's line. The weekly workaround-expiry workflow scans
+at the end of the rule's line. Only a marker that ends its line counts, so prose
+can name a marker in a code span. The weekly workaround-expiry workflow scans
 tracked Markdown files and reports markers whose issue is closed, including
 issues in other repositories. Unreadable issues appear in the log and cleanup
 issue alongside expired markers; the run exits non-zero after publishing them.
