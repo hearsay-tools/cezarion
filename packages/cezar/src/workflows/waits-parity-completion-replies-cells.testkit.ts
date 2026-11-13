@@ -75,16 +75,16 @@ export function completionRepliesCells(runners: RunnerId[], it: typeof registerT
       const commits = recordCommits(join(root, '.ai/cezar'));
       sessionOf(p.id).end();
       const refusal = liveRefusal(w);
+      const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
       await until(() => prompted(runner, refusal).length > 0, () => timeline(p.id));
       const next = await replyBlockedAgain(p.id, reply, w, () => blockingWorker(p.id));
-      await until(() => workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
+      await until(() => workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting' && refusals().some(input => !!input.deliveredAt), () => timeline(p.id));
       // hearsay-tools/cezarion#1805: the refusal is queued with its charge, so no reopened store
       // delivers it uncharged.
       commits.expectEveryCommit(p.id, row => !row.agentInputs?.some(input => input.text.includes(refusal)) || row.automaticWakes === wakes + 1, 'a queued refusal and its charge');
       expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
       expect(prompted(runner, refusal)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
-      const inputs = store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
-      expect(inputs).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
+      expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
       expect(store.getRun(p.id)?.automaticWakes).toBe(wakes + 1);
       expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)))
         .toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES}): workers_outstanding` })]);
@@ -104,12 +104,15 @@ export function completionRepliesCells(runners: RunnerId[], it: typeof registerT
       const silence = silenceRefusals();
       const { p, w } = await parentWithWorker(runner);
       const refusal = `Workers are still live: ${w.id}.`;
+      const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
       sessionOf(p.id).end();
+      // The reply bound can fire before the native ACK that writes `deliveredAt` (OpenCode's HTTP
+      // reply): wait for that checkpoint before `silence` fires the bound.
+      await until(() => refusals().some(input => !!input.deliveredAt));
       await silence(runner, refusal);
       await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
       expect(prompted(runner, refusal)).toHaveLength(1);
-      expect(store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)))
-        .toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
+      expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
       expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
       expect(nudgeNotes(p.id)).toHaveLength(1);
       expect(workerWaits(p.id)).toEqual([]);

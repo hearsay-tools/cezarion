@@ -122,7 +122,7 @@ export function closedCells(runners: RunnerId[], it: typeof registerTest = regis
       try {
         sessionOf(p.id).end();
         await until(() => counted);
-        await until(() => prompted(runner, refusal).length > 0 && parkedOnWorkersTimer(p.id));
+        await until(() => prompted(runner, refusal).length > 0 && parkedOnWorkersTimer(p.id) && refusals()[0]?.deliveredAt !== undefined);
         expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
         expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(2);
         expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
@@ -165,14 +165,14 @@ export function closedCells(runners: RunnerId[], it: typeof registerTest = regis
         expect(refusals()[0]!.deliveredAt).toBeUndefined();
         if (variant === 'closing') closes = 1;
         expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
-        if (runner === 'claude') {
-          if (variant === 'closing') {
-            await refusalStep(runner, p.id, 'U22k: Continue session close', () => closes === 0);
-            await refusalStep(runner, p.id, 'U22k: Continue retry native admission', () => prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS);
-          }
-          await refusalStep(runner, p.id, 'U22k: Continue native refusal receipt', () => prompted(runner, refusal).length > 0);
-          await refusalStep(runner, p.id, 'U22k: Continue delivery checkpoint', () => refusals()[0]?.deliveredAt !== undefined);
+        if (variant === 'closing') {
+          await refusalStep(runner, p.id, 'U22k: Continue session close', () => closes === 0);
+          await refusalStep(runner, p.id, 'U22k: Continue retry native admission', () => prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS);
         }
+        await refusalStep(runner, p.id, 'U22k: Continue native refusal receipt', () => prompted(runner, refusal).length > 0);
+        // The prompt record and the reply bound can both precede the native ACK that writes
+        // `deliveredAt` (OpenCode's HTTP reply): wait for that checkpoint before the bound fires.
+        await refusalStep(runner, p.id, 'U22k: Continue delivery checkpoint', () => refusals()[0]?.deliveredAt !== undefined);
         if (variant === 'silent') {
           await silence!(runner, refusal);
           await refusalStep(runner, p.id, 'U22k: Continue no-reply final park', () => noReplyNotes(p.id).length === 1 && gated(p.id));
@@ -246,7 +246,7 @@ export function closedCells(runners: RunnerId[], it: typeof registerTest = regis
             expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
             expect(semaphore.busy()).toBe(0);
           } else {
-            await until(() => prompted(runner, refusal).length > before && parkedOnWorkersTimer(p.id));
+            await until(() => prompted(runner, refusal).length > before && parkedOnWorkersTimer(p.id) && refusals().some(input => !!input.deliveredAt));
             expect(closes).toBe(0);
             expect(store.getRun(p.id)?.waitDeliveryFailures).toBeUndefined();
           }
