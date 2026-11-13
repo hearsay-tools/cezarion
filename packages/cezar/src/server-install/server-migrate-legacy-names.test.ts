@@ -4,9 +4,7 @@ import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Home } from '../home/home.ts';
 import { serverInstanceForPort } from '../home/entry.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { cleanStoreRoots, storeRoot } from '../home/store.testkit.ts';
-import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { runDeploy, runUninstall, type RunOptions } from './engine.ts';
 import { runServerMigrateCommand } from './migrate-cli.ts';
 import { createUbuntuVps } from './platforms/ubuntu-vps.ts';
@@ -21,12 +19,12 @@ function runOptions(f: ServerFixture, instance: string): RunOptions {
     now: '2026-11-07T00:00:00.000Z', ui: createAutoUi(), runner: f.host, instance };
 }
 
-describe('after the switch, a pre-switch install keeps its recorded cezar names', () => {
-  const rebranded = createUbuntuVps({ rebrand: true });
+describe('an install made before the rename keeps its recorded cezar names', () => {
+  const strategy = createUbuntuVps();
 
   it('server-uninstall removes the recorded cezar unit, site and htpasswd', async () => {
     const f = sharedHome();
-    await expect(runUninstall(rebranded, runOptions(f, 'shop'))).resolves.toMatchObject({ status: 'complete' });
+    await expect(runUninstall(strategy, runOptions(f, 'shop'))).resolves.toMatchObject({ status: 'complete' });
     expect(f.host.exists('/etc/systemd/system/cezar-shop.service')).toBe(false);
     expect(f.host.exists('/etc/nginx/sites-available/cezar-shop')).toBe(false);
     expect(f.host.exists('/etc/cezar/htpasswd-shop')).toBe(false);
@@ -37,7 +35,7 @@ describe('after the switch, a pre-switch install keeps its recorded cezar names'
 
   it('server-deploy restarts the recorded cezar unit', async () => {
     const f = sharedHome();
-    await expect(runDeploy(rebranded, runOptions(f, 'default'))).resolves.toMatchObject({ status: 'complete' });
+    await expect(runDeploy(strategy, runOptions(f, 'default'))).resolves.toMatchObject({ status: 'complete' });
     expect(f.host.commands).toContain('systemctl --user restart cezar.service');
     expect(f.host.commands.join('\n')).not.toContain('hearsay-squawk');
   });
@@ -46,31 +44,19 @@ describe('after the switch, a pre-switch install keeps its recorded cezar names'
     const ctx = { home: Home.sandbox(storeRoot()), state: { schema: 1, installed: false, primaryPort: 4321, steps: {} }, instance: 'default',
       ui: { ...createAutoUi(), text: async () => 'ops', password: async () => 'longenough' } as Ui, runner: serverFixture().host,
       save: async () => {}, dryRun: true, assumeYes: true, reconfigure: new Set(), repoRoot: '/srv/repo', now: '2026-11-07T00:00:00.000Z', prefs: {} } as InstallContext;
-    const step = (id: string) => rebranded.steps(ctx).find(s => s.id === id)!;
+    const step = (id: string) => strategy.steps(ctx).find(s => s.id === id)!;
     const proxy = (await step('nginx-proxy').run(ctx))?.artifacts.flatMap(a => a.kind === 'owned' && a.path ? [a.path] : []);
     expect(proxy).toEqual(['/etc/nginx/sites-available/hearsay-squawk', '/etc/nginx/sites-enabled/hearsay-squawk', '/etc/hearsay-squawk/htpasswd']);
     expect((await step('autostart').run(ctx))?.artifacts[0]?.name).toBe('hearsay-squawk.service');
   });
 
-  it.each([[true, 'hearsay-squawk-shop'], [false, 'cezar-shop']])('service hints name the selected unit (rebrand %s)', async (rebrand, hint) => {
+  it('service hints name the new unit', async () => {
     const lines: string[] = [];
     const ctx = { home: Home.sandbox(storeRoot()), state: { schema: 1, installed: false, primaryPort: 4322, steps: {} }, instance: 'shop',
       ui: { ...createAutoUi(), info: (m: string) => { lines.push(m); } } as Ui, runner: serverFixture().host,
       save: async () => {}, dryRun: true, assumeYes: true, reconfigure: new Set(), repoRoot: '/srv/repo', now: '2026-11-07T00:00:00.000Z', prefs: {} } as InstallContext;
-    await createUbuntuVps({ rebrand }).steps(ctx).find(s => s.id === 'autostart')!.run(ctx);
-    expect(lines.join('\n')).toContain(`systemctl --user enable --now ${hint})`);
-  });
-});
-
-describe('with the switch off', () => {
-  it('does not register server-migrate and the platform moves nothing', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    expect(SUBCOMMAND_NAMES).not.toContain('server-migrate');
-    expect(await loadSubcommand('server-migrate')).toBeUndefined();
-    expect(await loadSubcommand('server-migrate', undefined, true)).toBeTypeOf('function');
-    const f = sharedHome();
-    const ctx = { state: { schema: 1, installed: true, primaryPort: 4321, steps: {} }, instance: 'default', runner: f.host, dryRun: true } as unknown as InstallContext;
-    await expect(createUbuntuVps({ rebrand: false }).migrate!(ctx)).resolves.toEqual({ moved: [], leftAloneForeign: [], errors: [] });
+    await createUbuntuVps().steps(ctx).find(s => s.id === 'autostart')!.run(ctx);
+    expect(lines.join('\n')).toContain('systemctl --user enable --now hearsay-squawk-shop)');
   });
 });
 
@@ -79,7 +65,7 @@ describe('cez server-migrate', () => {
     const f = serverFixture();
     installInstance(f, { instance: 'default', port: 4321 });
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps({ rebrand: true }) };
+    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps() };
     await expect(runServerMigrateCommand(['--dry-run'], f.env, homes)).resolves.toBe(0);
     expect(log.mock.calls.flat().join('\n')).toContain('default: file /etc/cezar/htpasswd → /etc/hearsay-squawk/htpasswd (copied; old file kept)');
     expect(f.host.commands).toEqual([]);
@@ -105,7 +91,7 @@ describe('cez server-migrate --dry-run writes nothing', () => {
   it.each(['unmarked', 'unjournaled', 'current'])('leaves every file unchanged across repeated dry runs of a %s home', async mode => {
     const f = sharedHome();
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps({ rebrand: true }) };
+    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps() };
     // Simulate old homes and upgrades that have no version history yet.
     if (mode !== 'current') rmSync(join(f.legacy.root, '.versions'), { recursive: true, force: true });
     if (mode === 'unmarked') rmSync(join(f.legacy.root, 'install.json'));
@@ -119,7 +105,7 @@ describe('cez server-migrate --dry-run writes nothing', () => {
   it('a real run leaves no rotating backup of the install locks it took', async () => {
     const f = sharedHome();
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps({ rebrand: true }) };
+    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps() };
     await expect(runServerMigrateCommand(['--yes'], f.env, homes)).resolves.toBe(0);
     expect(tree(f.directory).filter(entry => entry.includes('backups/') && entry.includes('install.lock'))).toEqual([]);
   });
@@ -135,6 +121,3 @@ describe('cockpit lease instance', () => {
     expect(serverInstanceForPort(home, 9999)).toBe('default');
   });
 });
-
-// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
-vi.mock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

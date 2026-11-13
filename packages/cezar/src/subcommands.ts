@@ -7,10 +7,9 @@
 import type { Home } from './home/home.ts';
 import { resolveHome } from './home/resolve.ts';
 import { readInstallMarker } from './home/install-marker.ts';
-import { REBRAND_SWITCH } from './home/switch.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
-export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'job', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate', 'server-migrate', 'migrate-project'] : [])] as const;
+export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'job', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', 'migrate', 'server-migrate', 'migrate-project'] as const;
 
 /** An unreadable marker still marks the split home as in use: list it, as before the fallback. */
 function hasInstallMarker(root: string): boolean {
@@ -18,21 +17,21 @@ function hasInstallMarker(root: string): boolean {
 }
 
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
-export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env }), rebrand = REBRAND_SWITCH): Promise<SubcommandRunner | undefined> {
-  if (rebrand && name === 'migrate') return (await import('./home/migration-cli.ts')).runMigrationCommand;
-  if (rebrand && name === 'migrate-project') return (await import('./project-migration/cli.ts')).migrateProjectRunner(env => {
-    return [resolveHome({ purpose: 'cli', env, layout: 'legacy' }), resolveHome({ purpose: 'cli', env, layout: 'split' })];
-  });
-  if (rebrand && name === 'server-migrate') return async (argv, env) => {
-    const legacy = resolveHome({ purpose: 'cli', env, layout: 'legacy' }), target = resolveHome({ purpose: 'cli', env, layout: 'split' });
-    return (await import('./server-install/migrate-cli.ts')).runServerMigrateCommand(argv, env, { legacy, target });
-  };
+export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env })): Promise<SubcommandRunner | undefined> {
   switch (name) {
+    case 'migrate': return (await import('./home/migration-cli.ts')).runMigrationCommand;
+    case 'migrate-project': return (await import('./project-migration/cli.ts')).migrateProjectRunner(env => {
+      return [resolveHome({ purpose: 'cli', env, layout: 'legacy' }), resolveHome({ purpose: 'cli', env, layout: 'split' })];
+    });
+    case 'server-migrate': return async (argv, env) => {
+      const legacy = resolveHome({ purpose: 'cli', env, layout: 'legacy' }), target = resolveHome({ purpose: 'cli', env, layout: 'split' });
+      return (await import('./server-install/migrate-cli.ts')).runServerMigrateCommand(argv, env, { legacy, target });
+    };
     case 'backup': return async (argv, env) => {
       const selected = home(env);
-      const source = rebrand && selected.layout === 'split' && argv[0] === 'list' && !hasInstallMarker(selected.config)
+      const source = selected.layout === 'split' && argv[0] === 'list' && !hasInstallMarker(selected.config)
         ? resolveHome({ purpose: 'cli', env, layout: 'legacy' }) : selected;
-      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, source, undefined, { contained: source !== selected });
+      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, source, { contained: source !== selected });
     };
     case 'discover': return (await import('./discovery/cli.ts')).runDiscoverCommand;
     case 'artifact': return (await import('./artifacts/cli.ts')).runArtifactCommand;

@@ -19,7 +19,6 @@ vi.mock('./product-name', async importOriginal => {
     ...actual,
     productCommand: () => actual.productCommand(state.identity),
     productNpx: () => actual.productNpx(state.identity),
-    productPackageNpx: () => actual.productPackageNpx(state.identity),
     productName: (legacy: 'cezar' | 'Cezar' | 'Cezarion') => actual.productName(legacy, state.identity),
   }
 })
@@ -34,9 +33,9 @@ const draft = fromDefinition({
   task: { prompt: 'Check', worktree: true },
 })
 
-describe.each([false, true])('browser command hints (switch %s)', rebrand => {
+describe('browser command hints', () => {
   it('uses the shared command for both generated automation forms', () => {
-    state.identity = readProductIdentity(rebrand)
+    state.identity = readProductIdentity()
     expect(cliOf(draft)).toBe(`${state.identity.command} automation add --name 'Nightly' --cron '0 4 * * *' --prompt 'Check'`)
     const json = cliOf({ ...draft, description: 'Details' })
     expect(json.startsWith(`${state.identity.command} automation create --json '`)).toBe(true)
@@ -44,13 +43,13 @@ describe.each([false, true])('browser command hints (switch %s)', rebrand => {
   })
 
   it('names the command that resumes an owned worker', () => {
-    state.identity = readProductIdentity(rebrand)
+    state.identity = readProductIdentity()
     expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined))
       .toContain(`with ${state.identity.command} worker resume`)
   })
 
   it('renders the automation, remote settings and npm hints from the shared identity', () => {
-    state.identity = readProductIdentity(rebrand)
+    state.identity = readProductIdentity()
     // Queries stay pending; seeded sources expose the remote hint without a network dependency.
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     const client = createQueryClient()
@@ -67,7 +66,7 @@ describe.each([false, true])('browser command hints (switch %s)', rebrand => {
     expect(screen.getByText(`${state.identity.command} automation schema`)).toBeTruthy()
     expect(screen.getByText(`${state.identity.command} remote-settings enable`)).toBeTruthy()
     expect(screen.getByText(state.identity.npx)).toBeTruthy()
-    expect(state.identity.npx).toBe(rebrand ? 'npx -p @hearsay-tools/squawk hsq' : 'npx cezarion')
+    expect(state.identity.npx).toBe('npx -p @hearsay-tools/squawk hsq')
     expect(screen.getAllByText((text) => text.includes(`${state.identity!.command} automation add`)).length).toBeGreaterThan(0)
   })
 })

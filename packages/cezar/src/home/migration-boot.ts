@@ -4,7 +4,6 @@ import type { Home } from './home.ts';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolveHome } from './resolve.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 import { assertNoMigration } from './migration-guard.ts';
 import { migrationHolderLive } from './migration-claim.ts';
 import { readInstallMarker, type InstallMarker } from './install-marker.ts';
@@ -14,7 +13,7 @@ import { finishDeferredAccounts } from './migration-accounts.ts';
 import { listServerInstances } from '../server-install/state.ts';
 import { MIGRATABLE_PLATFORM_IDS } from '../server-install/types.ts';
 
-export interface MigrationBootOptions { enabled?: boolean; legacy?: Home; deferFresh?: boolean }
+export interface MigrationBootOptions { legacy?: Home; deferFresh?: boolean }
 export type MigrationBootResult = { kind: 'ready' } | { kind: 'staged' } | { kind: 'fresh'; prepare: () => void } | { kind: 'legacy'; home: Home };
 
 /**
@@ -23,9 +22,8 @@ export type MigrationBootResult = { kind: 'ready' } | { kind: 'staged' } | { kin
  * stages the home and rolls every instance back on failure (spec §4 "Server installs").
  */
 export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
-  deferFresh = false, enabled = REBRAND_SWITCH, legacy = enabled ? resolveHome({ purpose: 'cli', env, layout: 'legacy' }) : undefined,
+  deferFresh = false, legacy = resolveHome({ purpose: 'cli', env, layout: 'legacy' }),
 }: MigrationBootOptions = {}): MigrationBootResult {
-  if (!enabled || !legacy) return { kind: 'ready' };
   if (migrationHolderLive(legacy.root)) assertNoMigration(legacy.root);
   if (migrationHolderLive(home.config)) assertNoMigration(home.config);
   // The serve lifecycle prepares the selected home again. Never migrate a legacy fallback into itself.
@@ -44,7 +42,7 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
   if (deferFresh && !marker && !existsSync(legacy.root)) {
     return { kind: 'fresh', prepare: () => {
       // A legacy server install or a staged group can appear before the first write. Never write the split home then.
-      if (prepareMigrationHome(home, env, { enabled, legacy }).kind === 'ready') return;
+      if (prepareMigrationHome(home, env, { legacy }).kind === 'ready') return;
       throw new Error(commandText(`[hsq] refusing to write home ${home.root}: a server install in ${legacy.root} must move first. Run hsq server-migrate.`));
     } };
   }

@@ -16,7 +16,6 @@ on:
     paths:
       - 'packages/desktop/**'
       - 'packages/cezar/src/home/identity.ts'
-      - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
       - '.github/actions/node-dist/**'
@@ -28,7 +27,6 @@ on:
     paths:
       - 'packages/desktop/**'
       - 'packages/cezar/src/home/identity.ts'
-      - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
       - '.github/actions/node-dist/**'

@@ -68,14 +68,14 @@ it('D1: a crash after deferred configDir publication repairs the record without 
   store.move(run.id, 'start'); store.flush();
   try { migrateLegacyHome(legacy, target); } finally { store.close(); }
   vi.spyOn(migrationRecord, 'writeMigrationRecord').mockImplementation(() => { throw new Error('crash before record publication'); });
-  expect(() => prepareMigrationHome(target, env, { enabled: true, legacy })).toThrow('crash before record publication');
+  expect(() => prepareMigrationHome(target, env, { legacy })).toThrow('crash before record publication');
   const destination = join(target.data, 'accounts', account.id);
   expect(json(target.agentAccounts).accounts[0].configDir).toBe(destination);
   expect(readMigrationRecord(target)!.deferredAccounts).toHaveLength(1);
   rawJson(join(destination, 'auth.json'), { secret: 'refreshed live credentials' });
   rawJson(join(destination, 'session.json'), { live: true });
   vi.restoreAllMocks();
-  prepareMigrationHome(target, env, { enabled: true, legacy });
+  prepareMigrationHome(target, env, { legacy });
   expect(readMigrationRecord(target)!.deferredAccounts).toEqual([]);
   expect(json(join(destination, 'auth.json')).secret).toBe('refreshed live credentials');
   expect(json(join(destination, 'session.json'))).toEqual({ live: true });
@@ -176,10 +176,10 @@ it('step 7: a live registered run defers its account; the next boot copies it af
     expect(readMigrationRecord(target)!.deferredAccounts).toEqual([{ id: account.id, configDir: account.configDir }]);
     expect(json(target.agentAccounts).accounts[0].configDir).toBe(account.configDir);
     expect(existsSync(join(target.data, 'accounts', account.id))).toBe(false);
-    prepareMigrationHome(target, env, { enabled: true, legacy });
+    prepareMigrationHome(target, env, { legacy });
     expect(readMigrationRecord(target)!.deferredAccounts).toHaveLength(1);
   } finally { store.close(); }
-  prepareMigrationHome(target, env, { enabled: true, legacy });
+  prepareMigrationHome(target, env, { legacy });
   expect(readMigrationRecord(target)!.deferredAccounts).toEqual([]);
   expect(json(target.agentAccounts).accounts[0].configDir).toBe(join(target.data, 'accounts', account.id));
   expect(getHomeRecovery(target)).toEqual({ files: [] });
@@ -198,11 +198,11 @@ it('a deferred account stays deferred while a project registered only in the mig
   const live = second.createRun({ title: 'live in migrated home', workflow: 'quick-task', task: 'test', steps: [], agentProfile: account.id });
   second.move(live.id, 'start'); second.flush();
   try {
-    prepareMigrationHome(target, env, { enabled: true, legacy });
+    prepareMigrationHome(target, env, { legacy });
     expect(readMigrationRecord(target)!.deferredAccounts).toEqual([{ id: account.id, configDir: account.configDir }]);
     expect(json(target.agentAccounts).accounts[0].configDir).toBe(account.configDir);
   } finally { second.close(); }
-  prepareMigrationHome(target, env, { enabled: true, legacy });
+  prepareMigrationHome(target, env, { legacy });
   expect(json(target.agentAccounts).accounts[0].configDir).toBe(join(target.data, 'accounts', account.id));
 });
 

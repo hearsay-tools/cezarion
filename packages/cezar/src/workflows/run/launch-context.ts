@@ -40,15 +40,15 @@ export interface LaunchContextHost {
  *  write-probed here, on the last common path before a spawn, so an unusable
  *  temp directory throws `AgentTempDirError` at the caller rather than
  *  turning into empty command output inside a running agent. */
-export function agentEnv({ dataDir }: LaunchContext, cockpit: CockpitAddress, runId: string, rebrand?: boolean): Record<string, string> {
+export function agentEnv({ dataDir }: LaunchContext, cockpit: CockpitAddress, runId: string): Record<string, string> {
   return {
-    ...productEnvEntries('ARTIFACTS_DIR', provisionArtifactDirectory(dataDir, runId), rebrand),
-    ...productEnvEntries('HANDOFF_FILE', handoffPath(dataDir, runId), rebrand),
-    ...productEnvEntries('TASK_ID', runId, rebrand),
+    ...productEnvEntries('ARTIFACTS_DIR', provisionArtifactDirectory(dataDir, runId)),
+    ...productEnvEntries('HANDOFF_FILE', handoffPath(dataDir, runId)),
+    ...productEnvEntries('TASK_ID', runId),
     // Shadow a path inherited from an older parent process.
-    ...productEnvEntries('TODOS_FILE', '', rebrand),
+    ...productEnvEntries('TODOS_FILE', ''),
     ...agentTmpEnv(dataDir, runId),
-    ...(cockpit ? { ...productEnvEntries('COCKPIT_URL', cockpit.origin, rebrand), ...productEnvEntries('PROJECT_ID', cockpit.projectId, rebrand) } : {}),
+    ...(cockpit ? { ...productEnvEntries('COCKPIT_URL', cockpit.origin), ...productEnvEntries('PROJECT_ID', cockpit.projectId) } : {}),
   };
 }
 

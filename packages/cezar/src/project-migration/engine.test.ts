@@ -6,7 +6,6 @@ import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { readArtifact, artifactDirectory } from '../artifacts/store.ts';
 import { verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
 import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
@@ -73,7 +72,7 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
     // A store opened on the project reads the moved rows, artifacts, handoffs and receipts, and the
     // emptied legacy directory neither shadows them nor gains a run store.
-    const store = RunStore.open(REBRAND_SWITCH ? project.newDir : project.dataDir);
+    const store = RunStore.open(project.newDir);
     try {
       expect(store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
       expect(store.sourceDataDir(TASK)).toBe(project.newDir);
@@ -149,20 +148,20 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 });
 
 
-describe('without a release', () => {
-  it('registers migration only behind the release switch, and refuses to run without the fence held by this process', async () => {
-    for (const name of ['migrate', 'server-migrate', 'migrate-project']) {
-      expect(SUBCOMMAND_NAMES.includes(name)).toBe(REBRAND_SWITCH);
+describe('migration entry points', () => {
+  it('registers the migration commands, and refuses to run without the fence held by this process', async () => {
+    for (const name of ['migrate', 'server-migrate', 'migrate-project'] as const) {
+      expect(SUBCOMMAND_NAMES.includes(name)).toBe(true);
     }
     const src = join(import.meta.dirname, '..');
     const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter(path => path.endsWith('.ts') && !/\.(?:test|testkit)\.ts$/.test(path) && !path.startsWith('project-migration'))
       .map(path => ({ path, text: readFileSync(join(src, path), 'utf8') }));
-    // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry, and the switch-gated starts.
+    // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry.
     expect(sources.filter(({ text }) => /project-migration\//.test(text)).map(({ path }) => path).sort()).toEqual([
       'artifacts/cli.ts', 'cli-dispatch.ts', 'project-commands.ts', 'serve-command.ts', 'server/project-context.ts',
       'server/server.ts', 'server/start-server.ts', 'server/workspace-projects.ts', 'subcommands.ts']);
-    // The command, and the cockpit's prepare step (recovery, then the automatic move), each move behind the release switch.
+    // The command, and the cockpit's prepare step (recovery, then the automatic move).
     expect(sources.filter(({ text }) => /\bmigrateProject(?:Offline)?\(|\bmoveProjectWhenIdle\(|\bprepare(?:Project|Projects|BeforeTicks)\(|project-migration\/cli\.ts/.test(text))
       .map(({ path }) => path).sort()).toEqual(['serve-command.ts', 'server/project-context.ts', 'server/server.ts', 'server/start-server.ts', 'subcommands.ts']);
     const root = join(import.meta.dirname, 'nowhere');

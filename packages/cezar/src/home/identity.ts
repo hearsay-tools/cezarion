@@ -1,5 +1,3 @@
-import { REBRAND_SWITCH } from './switch.ts';
-
 /** The shipped identity. Its unscoped alias package makes `npx cezarion` work. */
 export type LegacyProductIdentity = {
   rebrand: false;
@@ -33,10 +31,11 @@ export type RebrandProductIdentity = {
 /** Shared product names for the CLI, browser and native build tools. */
 export type ProductIdentity = LegacyProductIdentity | RebrandProductIdentity;
 
+/** The new identity by default; `false` names the old one, which compatibility packages and old-app builds still carry. */
+export function productIdentity(rebrand?: true): RebrandProductIdentity;
 export function productIdentity(rebrand: false): LegacyProductIdentity;
-export function productIdentity(rebrand: true): RebrandProductIdentity;
-export function productIdentity(rebrand?: boolean): ProductIdentity;
-export function productIdentity(rebrand: boolean = REBRAND_SWITCH): ProductIdentity {
+export function productIdentity(rebrand: boolean): ProductIdentity;
+export function productIdentity(rebrand = true): ProductIdentity {
   return rebrand ? {
     rebrand, displayName: 'Squawk', command: 'hsq', npmPackage: '@hearsay-tools/squawk',
     npmAlias: null, npmAliasDirectory: null, npx: 'npx -p @hearsay-tools/squawk hsq', envPrefix: 'HSQ_',
@@ -56,9 +55,8 @@ export function scopedNpxCommand(identity: ProductIdentity, version?: string): s
 }
 
 /** The one-off command that runs `version` (or the latest) without a global install. */
-export function npxCommand(version?: string, rebrand: boolean = REBRAND_SWITCH): string {
-  const identity = productIdentity(rebrand);
-  return identity.rebrand ? scopedNpxCommand(identity, version) : `npx ${identity.npmAlias}${version ? `@${version}` : ''}`;
+export function npxCommand(version?: string): string {
+  return scopedNpxCommand(productIdentity(), version);
 }
 
 /** Additive binary names. Package aliases have separate ownership rules. */

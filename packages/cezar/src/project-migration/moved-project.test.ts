@@ -1,10 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
-const release = vi.hoisted(() => ({ enabled: true }));
-vi.mock('../home/switch.ts', () => ({ get REBRAND_SWITCH() { return release.enabled; } }));
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
@@ -27,8 +25,7 @@ import { buildMigrationProject, git, projectSnapshot, removeMigrationProject, TA
 import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /**
- * The write root of a moved project (hearsay-tools/cezarion#3150), with the release switch on
- * through the test seam: the completed migration's marker makes `projectPaths` write `.ai/squawk/`
+ * The write root of a moved project (hearsay-tools/cezarion#3150): the completed migration's marker makes `projectPaths` write `.ai/squawk/`
  * and read `.ai/cezar/` as the fallback; an unmoved project keeps writing `.ai/cezar/`.
  */
 
@@ -49,7 +46,7 @@ function newTask(root: string): string {
   } finally { store.close(); }
 }
 
-describe('a moved project with the release switch on', { timeout: TIMEOUT }, () => {
+describe('a moved project', { timeout: TIMEOUT }, () => {
   let project: MigrationProject;
   beforeAll(async () => { project = await buildMigrationProject({ linked: false, checkpoint }); }, TIMEOUT);
   afterAll(() => { if (project) removeMigrationProject(project); });
@@ -57,7 +54,6 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
   const homes: string[] = [];
   beforeEach(() => {
     project.restore();
-    release.enabled = true;
     homes.push(mkdtempSync(join(realpathSync(tmpdir()), 'cez-moved-project-home-')));
     useTestHome(Home.sandbox(homes.at(-1)!));
   });
@@ -208,13 +204,5 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
     git(project.root, 'mv', '.ai/cezar/.gitignore', '.ai/squawk/.gitignore');
     ensureDataGitignore(project.root);
     expect(readFileSync(join(project.newDir, '.gitignore'), 'utf8').split('\n')).toContain('runs.db');
-  });
-
-  it('keeps writing .ai/cezar/ with the switch off, marker or not', async () => {
-    await migrate(project);
-    expect(projectMoveMarked(project.root)).toBe(true);
-    release.enabled = false;
-    expect(projectPaths(project.root)).toEqual({ write: project.dataDir, reads: [project.dataDir, project.newDir] });
-    expect(fallbackProjectWriteError(project.newDir)).toMatch(/Cannot write read-only project data/);
   });
 });

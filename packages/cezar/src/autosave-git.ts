@@ -10,9 +10,9 @@ import { watchAutosaveHolders } from './autosave-holders.ts';
 import { watchWindowsAutosave } from './autosave-windows.ts';
 
 /** The legacy marker stays present for process-attribution readers during the rename. */
-export function autosaveOwnerEnv(marker: string, source: NodeJS.ProcessEnv = process.env, rebrand?: boolean): NodeJS.ProcessEnv {
+export function autosaveOwnerEnv(marker: string, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const kept = Object.fromEntries(Object.entries(source).filter(([name]) => !/^(CEZ|HSQ)_AUTOSAVE_OWNER$/i.test(name)));
-  return { ...kept, ...productEnvEntries('AUTOSAVE_OWNER', marker, rebrand) };
+  return { ...kept, ...productEnvEntries('AUTOSAVE_OWNER', marker) };
 }
 
 /** Internal budgets, shared by every autosave command; no user configuration required. */

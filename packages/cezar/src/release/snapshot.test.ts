@@ -165,11 +165,6 @@ describe('stampManifests', () => {
       dependencies: { '@open-mercato/cezar-api-client': '^0.1.5' },
       devDependencies: { '@open-mercato/cezar': '^0.1.5' },
     },
-    alias: {
-      name: 'cezar-cli',
-      version: '0.1.5',
-      dependencies: { '@open-mercato/cezar': '^0.1.5' },
-    },
   });
 
   it('stamps every manifest to the snapshot version and pins each sibling exact', () => {
@@ -177,10 +172,7 @@ describe('stampManifests', () => {
     expect(stamped.apiClient.version).toBe('0.1.5-pr482.123');
     expect(stamped.cezar.version).toBe('0.1.5-pr482.123');
     expect(stamped.web.version).toBe('0.1.5-pr482.123');
-    expect(stamped.alias!.version).toBe('0.1.5-pr482.123');
-    // Exact, no range: `npx cezar-cli@<v>` must run this PR's code, and the service must
-    // resolve the api-client it was cut with.
-    expect(stamped.alias!.dependencies).toEqual({ '@open-mercato/cezar': '0.1.5-pr482.123' });
+    // Exact, no range: the service must resolve the api-client it was cut with.
     expect(stamped.cezar.devDependencies).toEqual({
       '@open-mercato/cezar-api-client': '0.1.5-pr482.123',
     });
@@ -202,11 +194,9 @@ describe('stampManifests', () => {
           dependencies: { '@old/client': '^0.1.5' },
           devDependencies: { '@pat-lewczuk/cezar': '^0.1.5' },
         },
-        alias: { name: 'cezar-cli', version: '0.1.5', dependencies: { '@pat-lewczuk/cezar': '^0.1.5' } },
       },
       '0.1.5-develop.7',
     );
-    expect(stamped.alias!.dependencies).toEqual({ '@pat-lewczuk/cezar': '0.1.5-develop.7' });
     expect(stamped.cezar.dependencies).toEqual({ '@old/client': '0.1.5-develop.7' });
     expect(stamped.web.dependencies).toEqual({ '@old/client': '0.1.5-develop.7' });
     expect(stamped.web.devDependencies).toEqual({ '@pat-lewczuk/cezar': '0.1.5-develop.7' });
@@ -216,27 +206,8 @@ describe('stampManifests', () => {
     const manifests = set();
     const stamped = stampManifests(manifests, '0.1.5-main.9');
     expect(manifests.cezar.version).toBe('0.1.5');
-    expect(manifests.alias!.dependencies).toEqual({ '@open-mercato/cezar': '^0.1.5' });
+    expect(manifests.web.devDependencies).toEqual({ '@open-mercato/cezar': '^0.1.5' });
     expect(stamped.cezar.bin).toEqual({ cezar: 'dist/index.js' });
-  });
-
-  it('lets the alias inherit repository/homepage/bugs from the service so provenance validates', () => {
-    const repository = { type: 'git', url: 'https://github.com/open-mercato/cezar' };
-    const manifests = set();
-    manifests.cezar = {
-      ...manifests.cezar,
-      repository,
-      homepage: 'https://example.test',
-      bugs: { url: 'https://example.test/issues' },
-    };
-    const stamped = stampManifests(manifests, '0.1.5-pr482.123');
-    expect(stamped.alias!.repository).toEqual(repository);
-    expect(stamped.alias!.homepage).toBe('https://example.test');
-    expect(stamped.alias!.bugs).toEqual({ url: 'https://example.test/issues' });
-  });
-
-  it('leaves the alias untouched when the service declares no repository', () => {
-    expect('repository' in stampManifests(set(), '0.1.5-pr482.123').alias!).toBe(false);
   });
 });
 

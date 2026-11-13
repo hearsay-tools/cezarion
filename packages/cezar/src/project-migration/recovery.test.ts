@@ -26,12 +26,11 @@ import { clearProjectProbeCache, registerProject } from '../workspace/projects.t
 import { writeSettledJournal } from './project-migration.testkit.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
 import { prepareBeforeTicks, prepareProjects } from './auto.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /**
  * Early recovery of an unfinished project migration (hearsay-tools/cezarion#3089): every entry
- * finishes the journal under the exclusive fence before it reads the project, with the release switch off,
+ * finishes the journal under the exclusive fence before it reads the project,
  * and a journal that cannot finish keeps the project closed with a usable error.
  */
 
@@ -102,10 +101,6 @@ function serve(root: string) {
 }
 
 describe('early recovery of an unfinished project migration', () => {
-  it('runs with the release switch off, as shipped', () => {
-    expect(REBRAND_SWITCH).toBe(false);
-  });
-
   it('costs nothing without a journal and finishes one under a temporary claim', async () => {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-recovery-'));
     roots.push(root);
@@ -296,6 +291,3 @@ describe('a journal that cannot finish', () => {
 function migrationLock(root: string): string {
   return join(root, '.ai/squawk-migration.lock');
 }
-
-// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
-vi.mock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

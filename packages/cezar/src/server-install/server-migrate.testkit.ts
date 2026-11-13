@@ -44,7 +44,7 @@ export function certbotSite(site: string, domain: string, listen = '443 ssl'): s
 
 /** A completed pre-switch install: running unit, enabled site, htpasswd and its server record. */
 export function installInstance({ host, legacy }: ServerFixture, spec: InstanceSpec): ServerState {
-  const names = ubuntuNames(spec.instance, false);
+  const names = ubuntuNames(spec.instance, { legacy: true });
   const scope = spec.scope ?? 'user';
   const unitPath = scope === 'user' ? join(host.userUnitDir, names.unit) : `/etc/systemd/system/${names.unit}`;
   const unit = systemdUnit('/srv/repo', spec.port, scope, '/usr/bin/node /opt/cezar/dist/index.js')
@@ -82,7 +82,7 @@ export function installInstance({ host, legacy }: ServerFixture, spec: InstanceS
 
 export function serverMigrate(f: ServerFixture, over: Partial<ServerMigrateOptions> = {}) {
   return runServerMigrate({
-    legacy: f.legacy, target: f.target, strategy: () => createUbuntuVps({ rebrand: true }), dryRun: false, assumeYes: true,
+    legacy: f.legacy, target: f.target, strategy: () => createUbuntuVps(), dryRun: false, assumeYes: true,
     repoRoot: '/srv/repo', now: '2026-11-07T00:00:00.000Z', ui: createAutoUi(), runner: f.host, env: f.env, ...over,
   });
 }

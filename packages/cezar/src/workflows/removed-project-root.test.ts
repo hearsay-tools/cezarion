@@ -3,16 +3,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import type { AgentRunSpec, AgentRunner } from '../core/agent-runner.ts';
 
-const release = { enabled: true };
-vi.doMock('../home/switch.ts', () => ({ get REBRAND_SWITCH() { return release.enabled; } }));
-const { CLAUDE_SPEC_SUPPORT } = await import('../core/claude-cli-runner.ts');
-const { projectMovedMarker, projectPaths } = await import('../project-paths.ts');
-const { setRunStatus } = await import('../runs/run-store.testkit.ts');
-const { RunStore } = await import('../runs/store.ts');
-const { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } = await import('./fixture-manager.testkit.ts');
+import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
+import { projectMovedMarker, projectPaths } from '../project-paths.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { RunStore } from '../runs/store.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } from './fixture-manager.testkit.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -22,11 +20,7 @@ afterEach(async () => {
   }
 });
 
-it.each([
-  { enabled: false, entry: 'Continue' }, { enabled: true, entry: 'Continue' },
-  { enabled: false, entry: 'recovery' }, { enabled: true, entry: 'recovery' },
-])('$entry uses the current repo after its old root is removed (switch=$enabled)', async ({ enabled, entry }) => {
-  release.enabled = enabled;
+it.each(['Continue', 'recovery'])('%s uses the current repo after its old root is removed', async entry => {
   const scratch = mkdtempSync(join(tmpdir(), 'cez-removed-root-'));
   roots.push(scratch);
   const oldRoot = join(scratch, 'old');
@@ -65,7 +59,6 @@ it.each([
 });
 
 it.each([false, true])('still refuses a legacy checkout inside a real migrated project (checkout exists=%s)', checkoutExists => {
-  release.enabled = true;
   const scratch = mkdtempSync(join(tmpdir(), 'cez-existing-root-'));
   roots.push(scratch);
   const current = join(scratch, 'current');

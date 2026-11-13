@@ -8,7 +8,9 @@ import { applyMigrationReport } from '../migration-report.ts';
 import { createAutoUi } from '../ui.ts';
 import { STEP_STATUSES, freshServerState, type InstallContext, type StepArtifact } from '../types.ts';
 
-const strategy = createMacosxNgrok({ rebrand: true });
+const strategy = createMacosxNgrok();
+/** A plist as an install made before the rename wrote it: the old label. */
+const legacyLabel = (xml: string) => xml.replaceAll('tools.hearsay.squawk.', 'ai.cezar.');
 
 describe('macOS launchd migration', () => {
   let root: string;
@@ -57,7 +59,7 @@ describe('macOS launchd migration', () => {
   function plant(agent: 'cockpit' | 'ngrok', owned = true, argv = ['/n/npx', '--yes', 'cezarion']): StepArtifact {
     const name = `ai.cezar.${agent}`;
     const path = join(dir, `${name}.plist`);
-    writeFileSync(path, agent === 'cockpit' ? squawkLaunchdPlist('/repo', 4321, argv, false) : launchdPlist(4321, 'ops:secret', undefined, '/opt/homebrew/bin/ngrok', false), { mode: 0o600 });
+    writeFileSync(path, legacyLabel(agent === 'cockpit' ? squawkLaunchdPlist('/repo', 4321, argv) : launchdPlist(4321, 'ops:secret', undefined, '/opt/homebrew/bin/ngrok')), { mode: 0o600 });
     loaded.add(name);
     const artifact: StepArtifact = { kind: 'owned', type: 'launchd', name, path };
     ctx.state.steps[agent === 'cockpit' ? 'autostart' : 'ngrok'] = { status: STEP_STATUSES[1], created: owned ? { artifacts: [artifact] } : null };
@@ -197,7 +199,7 @@ describe('macOS launchd migration', () => {
     expect(existsSync(report.moved[0]!.backup!.path!)).toBe(true);
     expect((await strategy.rollbackMigration!(ctx, report)).errors).toEqual([]);
     expect(existsSync(report.moved[0]!.backup!.path!)).toBe(false);
-    const rotated = launchdPlist(4321, 'ops:rotated-secret', undefined, '/opt/homebrew/bin/ngrok', false);
+    const rotated = legacyLabel(launchdPlist(4321, 'ops:rotated-secret', undefined, '/opt/homebrew/bin/ngrok'));
     writeFileSync(old.path!, rotated);
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
@@ -214,7 +216,7 @@ describe('macOS launchd migration', () => {
     failBootstrap = 'tools.hearsay.squawk.ngrok';
     expect((await strategy.migrate!(ctx)).errors).toHaveLength(1);
     expect(existsSync(`${old.path}.migrated`)).toBe(false);
-    writeFileSync(old.path!, launchdPlist(4321, 'ops:rotated-secret', undefined, '/opt/homebrew/bin/ngrok', false));
+    writeFileSync(old.path!, legacyLabel(launchdPlist(4321, 'ops:rotated-secret', undefined, '/opt/homebrew/bin/ngrok')));
     failBootstrap = undefined;
     const next = await strategy.migrate!(ctx);
     expect(next.errors).toEqual([]);
@@ -268,9 +270,8 @@ describe('macOS launchd migration', () => {
     expect(commands).toEqual([]);
   });
 
-  it('makes the switch-off migration a no-op and the dry-run report a preview', async () => {
+  it('makes the dry-run report a preview', async () => {
     const old = plant('ngrok');
-    expect(await createMacosxNgrok({ rebrand: false }).migrate!(ctx)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
     ctx.dryRun = true;
     const report = await strategy.migrate!(ctx);
     expect(report.moved).toHaveLength(1);
@@ -349,7 +350,7 @@ describe('macOS launchd migration', () => {
     const old = plant(agent, false);
     const legacyXml = readFileSync(old.path!, 'utf8');
     const path = join(dir, `tools.hearsay.squawk.${agent}.plist`);
-    writeFileSync(path, agent === 'cockpit' ? squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true) : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
+    writeFileSync(path, agent === 'cockpit' ? squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion']) : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok'));
     loaded.add(`tools.hearsay.squawk.${agent}`);
     const step = strategy.steps(ctx).find((s) => s.id === (agent === 'cockpit' ? 'autostart' : 'ngrok'))!;
     await step.check(ctx);
@@ -368,8 +369,8 @@ describe('macOS launchd migration', () => {
     const name = `tools.hearsay.squawk.${agent}`;
     const path = join(dir, `${name}.plist`);
     writeFileSync(path, agent === 'cockpit'
-      ? squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)
-      : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
+      ? squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'])
+      : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok'));
     loaded.add(name);
     const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
     const created = { artifacts: [{ kind: 'owned' as const, type: 'launchd', name, path }] };
@@ -409,7 +410,7 @@ describe('macOS launchd migration', () => {
     const oldXml = readFileSync(old.path!, 'utf8');
     const name = `tools.hearsay.squawk.${agent}`;
     const path = join(dir, `${name}.plist`);
-    const foreignXml = squawkLaunchdPlist('/foreign', 9876, ['/usr/bin/foreign'], true).replace('tools.hearsay.squawk.cockpit', name);
+    const foreignXml = squawkLaunchdPlist('/foreign', 9876, ['/usr/bin/foreign']).replace('tools.hearsay.squawk.cockpit', name);
     writeFileSync(path, foreignXml);
     loaded.add(name);
     ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
@@ -427,7 +428,7 @@ describe('macOS launchd migration', () => {
     plant('cockpit');
     const name = 'tools.hearsay.squawk.cockpit';
     const path = join(dir, `${name}.plist`);
-    writeFileSync(path, squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true));
+    writeFileSync(path, squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion']));
     loaded.add(name);
     const created = await strategy.steps(ctx).find((s) => s.id === 'autostart')!.run(ctx);
     expect(created!.artifacts[0]!.name).toBe(name);
@@ -438,7 +439,7 @@ describe('macOS launchd migration', () => {
     const old = plant('ngrok');
     const name = 'tools.hearsay.squawk.ngrok';
     const path = join(dir, `${name}.plist`);
-    writeFileSync(path, launchdPlist(4321, 'ops:old-secret', undefined, '/n/ngrok', true));
+    writeFileSync(path, launchdPlist(4321, 'ops:old-secret', undefined, '/n/ngrok'));
     ctx.state.steps.ngrok!.created!.artifacts.push({ kind: 'owned', type: 'launchd', name, path });
     loaded.add(name);
     ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
@@ -505,7 +506,7 @@ describe('macOS launchd migration', () => {
       expect(readFileSync(artifact.path!, 'utf8')).toContain(`<string>${artifact.name}</string>`);
       expect(statSync(artifact.path!).mode & 0o777).toBe(0o600);
     }
-    expect(squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)).toContain('<string>tools.hearsay.squawk.cockpit</string>');
-    expect(launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true)).toContain('<string>tools.hearsay.squawk.ngrok</string>');
+    expect(squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'])).toContain('<string>tools.hearsay.squawk.cockpit</string>');
+    expect(launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok')).toContain('<string>tools.hearsay.squawk.ngrok</string>');
   });
 });

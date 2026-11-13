@@ -110,10 +110,10 @@ it('T1: after a fresh boot, an older binary that writes legacy config.json does 
   const legacy = homePaths(old, join(root, 'cache'), old);
   const target = Home.sandbox(join(root, 'new'), { layout: 'split' });
   const env = { HOME: root, SHELL: '/bin/bash' };
-  prepareOperatorHome(target, 'serve', env, { enabled: true, legacy });
+  prepareOperatorHome(target, 'serve', env, { legacy });
   new HomeStore(target).writeJson(target.workspaceConfig, { projects: [], saved: 'split home' });
   rawJson(legacy.workspaceConfig, { projects: [{ id: 'old', root: '/old' }] }); // Older binary.
-  expect(prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toBe(target);
+  expect(prepareOperatorHome(target, 'serve', env, { legacy })).toBe(target);
   expect(json(target.workspaceConfig).saved).toBe('split home');
   expect(readMigrationRecord(target)!.files).toEqual([]);
   expect(json(legacy.workspaceConfig).projects[0].id).toBe('old');

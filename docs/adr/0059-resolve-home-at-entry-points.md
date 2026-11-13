@@ -34,9 +34,10 @@ full-env or explicit passthrough. Platform layout values use the separate
 Legacy resolution still reads only `HOME_LOCATING_ENV`. Empty `CEZ_HOME` falls
 back; nonempty legacy values, including relative paths and whitespace, stay literal.
 
-`home/switch.ts` declares `REBRAND_SWITCH = false`. P2a-1 adds split paths behind
-that gate. `resolveHome({ purpose, env?, layout?, platform? })` supports explicit
-layout and platform selection for tests without mocking the gate. Resolution stays
+P2a-1 added split paths behind a release constant, `REBRAND_SWITCH`. The rebrand
+release (v0.18.0) turned it on and hearsay-tools/squawk#3450 removed it: split is the
+default layout. `resolveHome({ purpose, env?, layout?, platform? })` supports explicit
+layout and platform selection for tests and for reading the legacy home. Resolution stays
 pure. Windows resolution uses `path.win32`, including when tested on another OS.
 
 ## Transition

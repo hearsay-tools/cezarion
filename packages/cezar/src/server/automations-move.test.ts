@@ -6,22 +6,20 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AutomationToolService, RunManager } from '../workflows/run.ts';
 import type { ProjectContext } from './project-context.ts';
-
-vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: true }));
-const { AutomationStore } = await import('../automations/store.ts');
-const { WorkspaceAutomationScheduler } = await import('../automations/scheduler.ts');
-const { GithubPoller } = await import('../automations/github-poller.ts');
-const { RunStore } = await import('../runs/store.ts');
-const { Home } = await import('../home/home.ts');
-const { projectPaths } = await import('../project-paths.ts');
-const { registerProject, listProjects } = await import('../workspace/projects.ts');
-const { CockpitOwnership } = await import('./cockpit-ownership.ts');
-const { ProjectContexts } = await import('./project-context.ts');
-const { createRunner } = await import('../core/runner-factory.ts');
-const { RunnerModelCatalog } = await import('../core/runner-model-catalog.ts');
-const { ProviderAuthService } = await import('../core/provider-auth.ts');
-const { startServer } = await import('./start-server.ts');
-const { WorkspaceEventBus } = await import('./server.ts');
+import { AutomationStore } from '../automations/store.ts';
+import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
+import { GithubPoller } from '../automations/github-poller.ts';
+import { RunStore } from '../runs/store.ts';
+import { Home } from '../home/home.ts';
+import { projectPaths } from '../project-paths.ts';
+import { registerProject, listProjects } from '../workspace/projects.ts';
+import { CockpitOwnership } from './cockpit-ownership.ts';
+import { ProjectContexts } from './project-context.ts';
+import { createRunner } from '../core/runner-factory.ts';
+import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
+import { ProviderAuthService } from '../core/provider-auth.ts';
+import { startServer } from './start-server.ts';
+import { WorkspaceEventBus } from './server.ts';
 
 const temporary: string[] = [];
 function directory(): string {

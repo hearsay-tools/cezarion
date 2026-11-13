@@ -1,13 +1,12 @@
 import { commandText } from '../home/command.ts';
 import { BINARY_NAMES, NPM_LAUNCH_PACKAGES, productIdentity } from '../home/identity.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { StepAborted } from './steps.ts';
 import type { InstallContext } from './types.ts';
 
-const OFFICIAL_CLI_PKG = productIdentity().npmAlias ?? productIdentity().npmPackage;
+const OFFICIAL_CLI_PKG = productIdentity().npmPackage;
 
 const DEFAULT_RECONFIGURE_HINT = commandText(`  cez server-install --platform ubuntu-vps --reconfigure autostart`);
 
@@ -21,9 +20,9 @@ function npxCacheDir(): string {
 
 /** The npx arguments a service unit runs. npm refuses the unscoped name `hsq`, so the
  *  new package runs its `hsq` binary through `-p`. */
-export function npxLaunchArgs(rebrand = REBRAND_SWITCH): string[] {
-  const identity = productIdentity(rebrand);
-  return identity.rebrand ? ['--yes', '-p', identity.npmPackage, identity.command] : ['--yes', identity.npmAlias];
+export function npxLaunchArgs(): string[] {
+  const identity = productIdentity();
+  return ['--yes', '-p', identity.npmPackage, identity.command];
 }
 
 /** The exact npx executable and requested package, including systemctl's argv[] form.

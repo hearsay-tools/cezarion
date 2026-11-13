@@ -24,7 +24,7 @@ export function bundledWorkerInvocation(command: 'worker' | 'discover' | 'messag
   return [process.execPath, ...(source ? ['--import', import.meta.resolve('tsx')] : []), entry].map(quote).join(' ') + ` ${command}`;
 }
 
-export function provisionDelegationSession(options: { projectId: string; runId: string; store: RunStore; credentials: CredentialRegistry; url: string; rebrand?: boolean }): DelegationSession | undefined {
+export function provisionDelegationSession(options: { projectId: string; runId: string; store: RunStore; credentials: CredentialRegistry; url: string }): DelegationSession | undefined {
   delegationEndpoint(options.url);
   const run = options.store.getRun(options.runId);
   if (!run || run.delegation?.role === 'invalid') return;
@@ -67,7 +67,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   // alone marks it as a controller-bound session, so `cez discover` refuses instead of falling
   // back to the cockpit, as it does for any partial credential.
   if (!worker && !workersOn && !messagingOn && !owned && !owesRequests) {
-    return { restrictCrossSessionMessaging: true, env: { ...productEnvEntries('DELEGATION_URL', options.url, options.rebrand) }, revoke: () => {},
+    return { restrictCrossSessionMessaging: true, env: { ...productEnvEntries('DELEGATION_URL', options.url) }, revoke: () => {},
       instructions: `${productName('Cezar')} workers and task messaging are off for this task; a human can turn them on in the task menu, and they reach you at your next session. ${subagentOnly}` };
   }
   // Root authority is durable before a token exists. The switches never edit it: they are read per call.
@@ -139,7 +139,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   options.store.registerSessionSecret(token);
   return {
     restrictCrossSessionMessaging: true,
-    env: { ...productEnvEntries('DELEGATION_URL', options.url, options.rebrand), ...productEnvEntries('DELEGATION_TOKEN', token, options.rebrand) },
+    env: { ...productEnvEntries('DELEGATION_URL', options.url), ...productEnvEntries('DELEGATION_TOKEN', token) },
     instructions: run.delegation?.role === 'worker'
       ? [
         `You are an owned ${productName('cezar')} worker. Your parent run ID is ${run.delegation.parentRunId}.`,

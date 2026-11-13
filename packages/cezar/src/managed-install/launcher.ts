@@ -20,17 +20,17 @@ import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 const PATH_MARKER = '# cezar managed install';
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
-export function posixLauncher(env: NodeJS.ProcessEnv, home: Home, name?: BinaryName, rebrand = productIdentity().rebrand): string {
+export function posixLauncher(env: NodeJS.ProcessEnv, home: Home, name?: BinaryName): string {
   // `CEZ_HOME` is honoured at run time too, so a launcher written under the default home keeps
   // working when the user later sets it — the launcher recomputes, it does not bake the path in.
   const homeExpr = home.layout === 'split' ? shellQuote(home.data)
     : home.rootOverride ? shellQuote(home.rootOverride) : '"${CEZ_HOME:-$HOME/.cezar}"';
-  const identity = productIdentity(rebrand);
-  const packageName = rebrand ? '$CEZ_PACKAGE' : PACKAGE_NAME;
-  const packageChoice = rebrand ? `CEZ_PACKAGE=${shellQuote(identity.npmPackage)}
+  const identity = productIdentity();
+  const packageName = '$CEZ_PACKAGE';
+  const packageChoice = `CEZ_PACKAGE=${shellQuote(identity.npmPackage)}
 if [ ! -f "$CEZ_VERSIONS/${CURRENT_LINK}/node_modules/$CEZ_PACKAGE/dist/index.js" ]; then CEZ_PACKAGE=${shellQuote(PACKAGE_NAME)}; fi
-` : '';
-  const useTarget = rebrand ? `[ ! -f "$CEZ_VERSIONS/$2/node_modules/${identity.npmPackage}/dist/index.js" ] && ` : '';
+`;
+  const useTarget = `[ ! -f "$CEZ_VERSIONS/$2/node_modules/${identity.npmPackage}/dist/index.js" ] && `;
   const useNotice = name ? `  NOTICE_ENTRY="$CEZ_VERSIONS/${CURRENT_LINK}/node_modules/${packageName}/dist/use-command-notice.js"
   if [ -f "$NOTICE_ENTRY" ] && command -v node >/dev/null 2>&1; then
     node "$NOTICE_ENTRY" ${quoteShellWord(name)}
@@ -38,12 +38,12 @@ if [ ! -f "$CEZ_VERSIONS/${CURRENT_LINK}/node_modules/$CEZ_PACKAGE/dist/index.js
 ` : '';
   const namedEntry = name ? `NAMED_ENTRY="$CEZ_VERSIONS/${CURRENT_LINK}/node_modules/${packageName}/dist/${name}.js"\nif [ -f "$NAMED_ENTRY" ]; then ENTRY="$NAMED_ENTRY"; fi\n` : '';
   return `#!/bin/sh
-${rebrand ? `# ${identity.command} managed install` : PATH_MARKER} — do not edit; \`${rebrand ? identity.command : 'cez'} install\` regenerates this file.
+# ${identity.command} managed install — do not edit; \`${identity.command} install\` regenerates this file.
 CEZ_MANAGED_HOME=${homeExpr}
 CEZ_VERSIONS="$CEZ_MANAGED_HOME/versions"
 ${packageChoice}ENTRY="$CEZ_VERSIONS/${CURRENT_LINK}/node_modules/${packageName}/dist/index.js"
 
-# \`${rebrand ? identity.command : 'cezar'} use <id>\` flips the active version without starting cezar — works even when the
+# \`${identity.command} use <id>\` flips the active version without starting cezar — works even when the
 # active version has no idea what a managed install is.
 if [ "$1" = "use" ] && [ -n "$2" ]; then
 ${useNotice}  if ${useTarget}[ ! -f "$CEZ_VERSIONS/$2/node_modules/${PACKAGE_NAME}/dist/index.js" ]; then
@@ -70,17 +70,15 @@ ${namedEntry}exec node "$ENTRY" "$@"
 `;
 }
 
-export function windowsLauncher(env: NodeJS.ProcessEnv, home: Home, name?: BinaryName, rebrand = productIdentity().rebrand): string {
+export function windowsLauncher(env: NodeJS.ProcessEnv, home: Home, name?: BinaryName): string {
   const path = home.layout === 'split' ? win32.join : join;
   const root = path(home.data, 'versions', CURRENT_LINK, 'node_modules');
   const legacy = path(root, ...PACKAGE_NAME.split('/'), 'dist', 'index.js').replaceAll('%', '%%');
-  const active = path(root, ...productIdentity(rebrand).npmPackage.split('/'), 'dist', 'index.js').replaceAll('%', '%%');
-  const entry = rebrand ? '%CEZ_ENTRY%' : legacy;
-  const header = rebrand
-    ? `@echo off\r\nrem # ${productIdentity(rebrand).command} managed install\r\nset "CEZ_ENTRY=${active}"\r\nif not exist "%CEZ_ENTRY%" set "CEZ_ENTRY=${legacy}"\r\n`
-    : `@echo off\r\nrem ${PATH_MARKER}\r\n`;
+  const active = path(root, ...productIdentity().npmPackage.split('/'), 'dist', 'index.js').replaceAll('%', '%%');
+  const entry = '%CEZ_ENTRY%';
+  const header = `@echo off\r\nrem # ${productIdentity().command} managed install\r\nset "CEZ_ENTRY=${active}"\r\nif not exist "%CEZ_ENTRY%" set "CEZ_ENTRY=${legacy}"\r\n`;
   if (name) {
-    const namedEntry = rebrand ? `%CEZ_ENTRY:index.js=${name}.js%` : entry.replace(/index\.js$/, `${name}.js`);
+    const namedEntry = `%CEZ_ENTRY:index.js=${name}.js%`;
     return `${header}if exist "${namedEntry}" (\r\n  node "${namedEntry}" %*\r\n) else (\r\n  node "${entry}" %*\r\n)\r\n`;
   }
   return `${header}node "${entry}" %*\r\n`;
@@ -112,7 +110,7 @@ function writeLauncher(path: string, contents: string, platform: NodeJS.Platform
 }
 
 /** Write each supported binary launcher. Returns the bin directory. */
-export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand, platform: NodeJS.Platform = process.platform): string {
+export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home, platform: NodeJS.Platform = process.platform): string {
   const dir = binDir(env, home);
   assertSquawkHomeWriteIsSandboxed(dir, env);
   assertSquawkHomeWriteIsSandboxed(versionsDir(env, home), env);
@@ -120,7 +118,7 @@ export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home,
   mkdirSync(versionsDir(env, home), { recursive: true });
   for (const name of BINARY_NAMES) {
     const path = join(dir, name + (platform === 'win32' ? '.cmd' : ''));
-    const contents = platform === 'win32' ? windowsLauncher(env, home, name, rebrand) : posixLauncher(env, home, name, rebrand);
+    const contents = platform === 'win32' ? windowsLauncher(env, home, name) : posixLauncher(env, home, name);
     writeLauncher(path, contents, platform);
   }
   return dir;

@@ -45,7 +45,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost, home: deps.home });
   // Every registry reader below sees what createApp sees: single-project mode hides other projects.
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
-  const automationCoordinator = new AutomationCoordinator({ listProjects: () => visibleProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })) }); // projects arrive prepared
+  const automationCoordinator = new AutomationCoordinator({ listProjects: () => visibleProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home] })) }); // projects arrive prepared
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = () => automationCoordinator.store(bootProjectId, deps.repoRoot)!; // resolve after preparation
   const taskWebhooks = createTaskWebhooks(deps);
@@ -63,7 +63,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
   });
-  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = prepareBeforeTicks({ ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary }, {
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = prepareBeforeTicks({ ownership: deps.ownership, homes: [deps.home] }, {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
@@ -217,7 +217,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const project = (data as { project?: { id?: unknown; root?: unknown; status?: unknown } }).project;
       if (project && typeof project.id === 'string' && typeof project.root === 'string' && project.status !== 'missing') {
         const { id, root } = project as { id: string; root: string };
-        void prepareProject(root, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary }).then(() => rememberAutomationProject(id, root)).then(() => {
+        void prepareProject(root, { ownership: deps.ownership, homes: [deps.home] }).then(() => rememberAutomationProject(id, root)).then(() => {
           if (!automationsEnabled()) return;
           brakeIdleAutomations(id, automationCoordinator.store(id, root));
           return rescheduleAutomations();
@@ -238,7 +238,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     void visibleProjects().then(async (projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
-      await prepareProjects(all, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary, stopped: lifecycle.stopped }); // before any touch below
+      await prepareProjects(all, { ownership: deps.ownership, homes: [deps.home], stopped: lifecycle.stopped }); // before any touch below
       if (!lifecycle.stopped()) { archiveOnMerge.start(); completionActions.start(); }
       // #781: every registered project's preview leftovers, not only the boot project's.
       void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);

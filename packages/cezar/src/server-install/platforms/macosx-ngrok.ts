@@ -10,7 +10,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CANCEL, PreflightError, type InstallContext, type InstallStep, type PlatformMigrationReport, type PlatformStrategy, type StepArtifact, type StepCreated } from '../types.ts';
 import { brewInstallTool, brewRemoveHint, depCheckStep, HOSTNAME_RE, owned, shared, StepAborted, StepCancelled, verifyCommand } from '../steps.ts';
-import { REBRAND_SWITCH } from '../../home/switch.ts';
 import { launchdHealthDetails, migrateLaunchd, rollbackLaunchdMigration, startLaunchdServices, stopLaunchdServices, unloadLaunchd, type LaunchdService } from './macosx-migration.ts';
 import { applyMigrationReport } from '../migration-report.ts';
 import { guardLaunchdWrite, ownsLaunchdPlist, readLaunchdPlist } from './macosx-launchd-files.ts';
@@ -30,10 +29,10 @@ function launchAgentsDir(ctx: InstallContext): string {
 }
 
 /** Agents that `server-migrate` stops and starts: recorded in the ledger, or a launcher that proves it ours. */
-function launchdServices(ctx: InstallContext, rebrand: boolean): LaunchdService[] {
+function launchdServices(ctx: InstallContext): LaunchdService[] {
   const services: LaunchdService[] = [];
   for (const [step, role] of [['autostart', 'cockpit'], ['ngrok', 'ngrok']] as const) {
-    const agent = agentArtifact(ctx, step, rebrand);
+    const agent = agentArtifact(ctx, step);
     const recorded = ctx.state.steps[step]?.created?.artifacts.some((a) => a.kind === 'owned' && a.type === 'launchd');
     if (recorded || (existsSync(agent.path) && ownsLaunchdPlist(ctx, agent, readLaunchdPlist(agent.path)))) services.push({ ...agent, role });
   }
@@ -41,27 +40,28 @@ function launchdServices(ctx: InstallContext, rebrand: boolean): LaunchdService[
 }
 
 /** Move the agents; a dry run also names each health check under the label the agent has after its move. */
-async function migrateAgents(ctx: InstallContext, rebrand: boolean): Promise<PlatformMigrationReport> {
-  const report = await migrateLaunchd(ctx, launchAgentsDir(ctx), rebrand);
-  if (!rebrand || !ctx.dryRun || report.errors.length) return report;
+async function migrateAgents(ctx: InstallContext): Promise<PlatformMigrationReport> {
+  const report = await migrateLaunchd(ctx, launchAgentsDir(ctx));
+  if (!ctx.dryRun || report.errors.length) return report;
   try {
     const after = { ...ctx, state: applyMigrationReport(ctx.state, report) };
-    report.details = [...report.details ?? [], ...launchdHealthDetails(launchdServices(after, rebrand), ctx.state.primaryPort)];
+    report.details = [...report.details ?? [], ...launchdHealthDetails(launchdServices(after), ctx.state.primaryPort)];
   } catch (error) {
     report.errors.push({ artifact: { kind: 'owned', type: 'launchd', path: launchAgentsDir(ctx) }, message: error instanceof Error ? error.message : String(error) });
   }
   return report;
 }
 
-function labelFor(agent: 'ngrok' | 'cockpit', rebrand: boolean): string {
-  return `${rebrand ? 'tools.hearsay.squawk' : 'ai.cezar'}.${agent}`;
+/** The agent's launchd label; `legacy` names the label of an install made before the rename. */
+function labelFor(agent: 'ngrok' | 'cockpit', { legacy = false } = {}): string {
+  return `${legacy ? 'ai.cezar' : 'tools.hearsay.squawk'}.${agent}`;
 }
 
 type LaunchAgent = StepArtifact & { name: string; path: string };
 
-function agentCandidates(ctx: InstallContext, step: string, rebrand: boolean, created: StepCreated | undefined): LaunchAgent[] {
+function agentCandidates(ctx: InstallContext, step: string, created: StepCreated | undefined): LaunchAgent[] {
   const agent = step === 'ngrok' ? 'ngrok' : 'cockpit';
-  const selected = labelFor(agent, rebrand);
+  const selected = labelFor(agent);
   const artifact = (name: string): LaunchAgent => ({ kind: 'owned', type: 'launchd', name, path: join(launchAgentsDir(ctx), `${name}.plist`) });
   const recorded = created?.artifacts.find((a) => a.kind === 'owned' && a.type === 'launchd');
   // A ledger is authoritative: static fallback must not claim an unrelated old agent.
@@ -69,8 +69,7 @@ function agentCandidates(ctx: InstallContext, step: string, rebrand: boolean, cr
     const fallback = artifact(recorded.name ?? selected);
     return [{ ...recorded, ...fallback, path: recorded.path ?? fallback.path }];
   }
-  if (!rebrand) return [artifact(selected)];
-  const legacy = artifact(labelFor(agent, false));
+  const legacy = artifact(labelFor(agent, { legacy: true }));
   return legacyCandidateOwned(ctx, step, legacy) ? [artifact(selected), legacy] : [artifact(selected)];
 }
 
@@ -84,8 +83,8 @@ function legacyCandidateOwned(ctx: InstallContext, step: string, artifact: Launc
   }
 }
 
-function agentArtifact(ctx: InstallContext, step: string, rebrand: boolean, created = ctx.state.steps[step]?.created): LaunchAgent {
-  const candidates = agentCandidates(ctx, step, rebrand, created);
+function agentArtifact(ctx: InstallContext, step: string, created = ctx.state.steps[step]?.created): LaunchAgent {
+  const candidates = agentCandidates(ctx, step, created);
   return candidates.find((a) => existsSync(a.path)) ?? candidates[0]!;
 }
 
@@ -144,7 +143,7 @@ function escapeXml(s: string): string {
 }
 
 /** launchd agent that keeps an authenticated ngrok tunnel to the local cockpit up. */
-export function launchdPlist(port: number, basicAuth: string, domain?: string, ngrokBin = '/opt/homebrew/bin/ngrok', rebrand = REBRAND_SWITCH): string {
+export function launchdPlist(port: number, basicAuth: string, domain?: string, ngrokBin = '/opt/homebrew/bin/ngrok'): string {
   const args = ['http', String(port), '--basic-auth', basicAuth];
   if (domain) args.push('--domain', domain);
   // Escape every arg — a password/domain with `&`, `<`, `>` would otherwise
@@ -158,7 +157,7 @@ export function launchdPlist(port: number, basicAuth: string, domain?: string, n
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>${labelFor('ngrok', rebrand)}</string>
+    <string>${labelFor('ngrok')}</string>
     <key>ProgramArguments</key>
     <array>
 ${argXml}
@@ -172,12 +171,12 @@ ${argXml}
 `;
 }
 
-const ngrokStep = (rebrand: boolean): InstallStep => ({
+const ngrokStep = (): InstallStep => ({
   id: 'ngrok',
   title: 'ngrok tunnel (authtoken + domain + basic-auth)',
   async check(ctx) {
     if (ctx.dryRun) return false;
-    return verifyCommand(ctx, 'test', ['-f', agentArtifact(ctx, 'ngrok', rebrand).path]);
+    return verifyCommand(ctx, 'test', ['-f', agentArtifact(ctx, 'ngrok').path]);
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
     // 1) ngrok present?
@@ -235,8 +234,8 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
     const basicAuth = `${String(user)}:${String(password)}`;
 
     // 5) launchd agent (the plist embeds the basic-auth creds, like htpasswd on Linux)
-    const previous = agentArtifact(ctx, 'ngrok', rebrand);
-    const name = labelFor('ngrok', rebrand);
+    const previous = agentArtifact(ctx, 'ngrok');
+    const name = labelFor('ngrok');
     const path = join(launchAgentsDir(ctx), `${name}.plist`);
     if (ctx.dryRun) {
       ctx.ui.info(`DRY RUN — would write ${path} and launchctl bootstrap it.`);
@@ -245,7 +244,7 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
       // Silicon (/opt/homebrew/bin) and Intel (/usr/local/bin) Macs.
       const ngrokBin = (await ctx.runner.capture('bash', ['-lc', 'command -v ngrok'])).stdout.trim() || '/opt/homebrew/bin/ngrok';
 
-      await installAgent(ctx, previous, name, path, launchdPlist(ctx.state.primaryPort, basicAuth, domain, ngrokBin, rebrand), 'the ngrok tunnel agent');
+      await installAgent(ctx, previous, name, path, launchdPlist(ctx.state.primaryPort, basicAuth, domain, ngrokBin), 'the ngrok tunnel agent');
     }
 
     if (domain) {
@@ -269,7 +268,7 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
     if (ctx.dryRun) {
       ctx.ui.info('DRY RUN — would launchctl bootout and remove the ngrok agent.');
     } else {
-      await removeAgent(ctx, agentArtifact(ctx, 'ngrok', rebrand, created));
+      await removeAgent(ctx, agentArtifact(ctx, 'ngrok', created));
     }
     const cfg = (created?.artifacts ?? []).find((a) => a.type === 'ngrok-config');
     if (cfg) {
@@ -302,30 +301,30 @@ function readSquawkProgramArguments(path: string): string {
 }
 
 /** Resolve the argv array for the Squawk launchd agent, mirroring how the CLI was launched. */
-export async function resolveSquawkArgv(ctx: InstallContext, rebrand = REBRAND_SWITCH): Promise<string[]> {
+export async function resolveSquawkArgv(ctx: InstallContext): Promise<string[]> {
   const node = process.execPath;
+  const identity = productIdentity();
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-  const entry = join(pkgRoot, 'dist', rebrand ? `${productIdentity(rebrand).command}.js` : 'index.js');
-  const identity = productIdentity(rebrand);
+  const entry = join(pkgRoot, 'dist', `${identity.command}.js`);
   const npxPath = join(dirname(node), 'npx');
 
-  if (/[/\\]_npx[/\\]/.test(pkgRoot)) return [npxPath, ...npxLaunchArgs(rebrand)];
+  if (/[/\\]_npx[/\\]/.test(pkgRoot)) return [npxPath, ...npxLaunchArgs()];
   if (ctx.dryRun || existsSync(entry)) return [node, entry];
 
-  const out = (await ctx.runner.capture('bash', ['-lc', identity.rebrand ? `command -v ${identity.command}` : `command -v ${identity.npmAlias} || command -v cez`])).stdout.trim();
+  const out = (await ctx.runner.capture('bash', ['-lc', `command -v ${identity.command}`])).stdout.trim();
   const globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
   if (globalBin) return [node, globalBin];
 
   // No runnable Squawk → installing a KeepAlive agent would make launchd
   // respawn-throttle a permanently failing job across reboots. Fail the step.
   throw new StepAborted(
-    `could not locate a runnable ${productName('cezar', rebrand)} (${entry} missing, no global ${identity.npmAlias ?? identity.command}) — ` +
-      `install it (npm i -g ${identity.npmAlias ?? identity.npmPackage}) or build the checkout, then re-run with --reconfigure autostart`,
+    `could not locate a runnable ${productName('cezar')} (${entry} missing, no global ${identity.command}) — ` +
+      `install it (npm i -g ${identity.npmPackage}) or build the checkout, then re-run with --reconfigure autostart`,
   );
 }
 
 /** launchd agent that keeps the Squawk cockpit running on the given port. */
-export function squawkLaunchdPlist(repoRoot: string, port: number, argv: string[], rebrand = REBRAND_SWITCH): string {
+export function squawkLaunchdPlist(repoRoot: string, port: number, argv: string[]): string {
   // Give the agent the operator's PATH so Squawk can spawn claude/gh/codex.
   const pathDirs = [dirname(process.execPath), ...(process.env.PATH ?? '').split(':'), '/usr/local/bin', '/usr/bin', '/bin']
     .filter((d, i, a) => d && d !== '.' && a.indexOf(d) === i);
@@ -337,7 +336,7 @@ export function squawkLaunchdPlist(repoRoot: string, port: number, argv: string[
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>${labelFor('cockpit', rebrand)}</string>
+    <string>${labelFor('cockpit')}</string>
     <key>ProgramArguments</key>
     <array>
 ${argXml}
@@ -346,7 +345,7 @@ ${argXml}
     <string>${escapeXml(repoRoot)}</string>
     <key>EnvironmentVariables</key>
     <dict>
-${Object.entries(productEnvEntries('REMOTE', '1', true)).reverse().map(([key, value]) => `      <key>${key}</key>\n      <string>${value}</string>`).join('\n')}
+${Object.entries(productEnvEntries('REMOTE', '1')).reverse().map(([key, value]) => `      <key>${key}</key>\n      <string>${value}</string>`).join('\n')}
       <key>PATH</key>
       <string>${escapeXml(pathDirs.join(':'))}</string>
     </dict>
@@ -371,34 +370,34 @@ function repairAgentEnv(ctx: InstallContext, agent: LaunchAgent): boolean {
   return true;
 }
 
-const autostartStep = (rebrand: boolean): InstallStep => ({
+const autostartStep = (): InstallStep => ({
   id: 'autostart',
-  title: `Run ${productName('cezar', rebrand)} as a service (launchd — starts now + on boot)`,
+  title: `Run ${productName('cezar')} as a service (launchd — starts now + on boot)`,
   async check(ctx) {
     if (ctx.dryRun) return false;
-    const agent = agentArtifact(ctx, 'autostart', rebrand);
+    const agent = agentArtifact(ctx, 'autostart');
     if (!await verifyCommand(ctx, 'test', ['-f', agent.path])) return false;
     const current = readLaunchdPlist(agent.path);
     return launchdRemoteEnv(current) === current;
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    const argv = await resolveSquawkArgv(ctx, rebrand);
-    const previous = agentArtifact(ctx, 'autostart', rebrand);
-    const name = labelFor('cockpit', rebrand);
+    const argv = await resolveSquawkArgv(ctx);
+    const previous = agentArtifact(ctx, 'autostart');
+    const name = labelFor('cockpit');
     const path = join(launchAgentsDir(ctx), `${name}.plist`);
     if (ctx.dryRun) {
       ctx.ui.info(`DRY RUN — would write ${path} and launchctl bootstrap it.`);
     } else {
-      await installAgent(ctx, previous, name, path, squawkLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), `the ${productName('cezar', rebrand)} cockpit agent`);
+      await installAgent(ctx, previous, name, path, squawkLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv), `the ${productName('cezar')} cockpit agent`);
     }
     return { artifacts: [owned('launchd', { name, path })] };
   },
   async undo(ctx, created) {
     // Recorded identity, with the same null-ledger fallback as ngrok.
     if (ctx.dryRun) {
-      ctx.ui.info(`DRY RUN — would launchctl bootout and remove the ${productName('cezar', rebrand)} agent.`);
+      ctx.ui.info(`DRY RUN — would launchctl bootout and remove the ${productName('cezar')} agent.`);
     } else {
-      await removeAgent(ctx, agentArtifact(ctx, 'autostart', rebrand, created));
+      await removeAgent(ctx, agentArtifact(ctx, 'autostart', created));
     }
   },
 });
@@ -431,7 +430,7 @@ const identityStep: InstallStep = {
 };
 
 /** Explicit selection lets tests cover the release without mocking its switch. */
-export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformStrategy {
+export function createMacosxNgrok(): PlatformStrategy {
   return {
     id: 'macosx-ngrok',
     label: 'macOS + ngrok',
@@ -447,8 +446,8 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
     steps(): InstallStep[] {
       return [
         depCheckStep({ installTool: brewInstallTool, removeHint: brewRemoveHint }),
-        autostartStep(rebrand),
-        ngrokStep(rebrand),
+        autostartStep(),
+        ngrokStep(),
         identityStep,
       ];
     },
@@ -457,16 +456,16 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       // deploy that doesn't invalidate the npx cache never actually updates.
       // Clear the cezarion cache first (read the live ProgramArguments to know the
       // launch form); a checkout / global agent is left alone.
-      refreshNpxCacheForRedeploy(ctx, readSquawkProgramArguments(agentArtifact(ctx, 'autostart', rebrand).path), {
-        reconfigureHint: commandText(`  cez server-install --platform macosx-ngrok --reconfigure autostart`, undefined, rebrand),
+      refreshNpxCacheForRedeploy(ctx, readSquawkProgramArguments(agentArtifact(ctx, 'autostart').path), {
+        reconfigureHint: commandText(`  cez server-install --platform macosx-ngrok --reconfigure autostart`),
       });
       // Restart both the Squawk cockpit and the ngrok tunnel, then re-verify.
       if (ctx.dryRun) {
-        ctx.ui.info(`DRY RUN — would restart the ${productName('cezar', rebrand)} and ngrok launchd agents and re-verify.`);
+        ctx.ui.info(`DRY RUN — would restart the ${productName('cezar')} and ngrok launchd agents and re-verify.`);
         return;
       }
-      const cockpit = agentArtifact(ctx, 'autostart', rebrand);
-      const ngrok = agentArtifact(ctx, 'ngrok', rebrand);
+      const cockpit = agentArtifact(ctx, 'autostart');
+      const ngrok = agentArtifact(ctx, 'ngrok');
       const uid = process.getuid ? process.getuid() : 0;
       const repaired = repairAgentEnv(ctx, cockpit);
       if (repaired) {
@@ -474,9 +473,9 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       }
       // A previous deploy can have repaired the file before bootstrap failed.
       if (repaired || (existsSync(cockpit.path) && (await ctx.runner.capture('launchctl', ['print', `gui/${uid}/${cockpit.name}`])).code !== 0)) {
-        await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, `the ${productName('cezar', rebrand)} cockpit agent`);
+        await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, `the ${productName('cezar')} cockpit agent`);
       }
-      ctx.ui.info(`Redeploying — restarting the ${productName('cezar', rebrand)} cockpit.`);
+      ctx.ui.info(`Redeploying — restarting the ${productName('cezar')} cockpit.`);
       const squawkCode = await ctx.runner.interactive('launchctl', ['kickstart', '-k', `gui/${uid}/${cockpit.name}`]);
       if (squawkCode !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${cockpit.name}\`.`);
       ctx.ui.info('Redeploying — restarting the ngrok tunnel.');
@@ -484,10 +483,10 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       if (code !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${ngrok.name}\`.`);
       await identityStep.run(ctx);
     },
-    migrate: (ctx) => migrateAgents(ctx, rebrand),
-    rollbackMigration: (ctx, report) => rollbackLaunchdMigration(ctx, report, rebrand),
-    stopService: (ctx) => stopLaunchdServices(ctx, launchdServices(ctx, rebrand)),
-    startService: (ctx) => startLaunchdServices(ctx, launchdServices(ctx, rebrand), ctx.state.primaryPort),
+    migrate: (ctx) => migrateAgents(ctx),
+    rollbackMigration: (ctx, report) => rollbackLaunchdMigration(ctx, report),
+    stopService: (ctx) => stopLaunchdServices(ctx, launchdServices(ctx)),
+    startService: (ctx) => startLaunchdServices(ctx, launchdServices(ctx), ctx.state.primaryPort),
   };
 }
 

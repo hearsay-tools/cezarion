@@ -28,8 +28,8 @@ stay listed and restorable. Private snapshots keep the last 20 plus
 one per day for 30 days. Backup failures warn once per file and never block the
 primary write. HomeStore checks the backup directory chain before the write lock;
 unavailable, dangling or escaping paths disable both backup creation and pruning.
-`hsq backup list [<file>]` reads legacy backups without migration when the switch
-is on and the split home has no install marker. Once the split home has a marker,
+`hsq backup list [<file>]` reads legacy backups without migration when the split
+home has no install marker. Once the split home has a marker,
 it reads that home. Listing never prepares either home. The legacy fallback reads
 only paths inside the legacy home: a link that leaves it is not listed. It discovers every
 supported file, including backups whose
@@ -123,8 +123,8 @@ write ordering and the remaining version-retention and staging-file limits.
 
 ADR 0059 defines `Home.config`, `state`, `data`, `cache` and `runtime`.
 `root` remains the config root. `resolveHome({ purpose, env?, layout?, platform? })`
-selects split when `REBRAND_SWITCH` is enabled and legacy when it is disabled.
-Tests can select either layout explicitly; do not mock the switch. `Home.sandbox(dir, { layout: 'split' })`
+selects split by default; migration code asks for `layout: 'legacy'` to read the old home.
+Tests can select either layout explicitly. `Home.sandbox(dir, { layout: 'split' })`
 creates a test marker under `<dir>/config` and keeps every kind under dir.
 
 In split layout, registry, accounts and remote settings use config. UI state,
@@ -150,16 +150,15 @@ explicit `HSQ_HOME` still selects its own one-root layout. Both names belong to
 `HOME_LOCATING_ENV` and are always removed from child environments. The separate
 `HOME_LAYOUT_ENV` list contains platform layout values, which still reach agents.
 The resolver has no filesystem access. New roots and the Windows current-user
-private ACL apply with the release switch enabled.
+private ACL apply to the split layout.
 
 ## Legacy migration
 
 `home/migrate.ts` exports synchronous `migrateLegacyHome(legacy, target,
-{ commit = true, env?, onStep? })`. Entry points call it only while
-`REBRAND_SWITCH` is enabled; tests inject a split Home. It returns
+{ commit = true, env?, onStep? })`. Entry points call it; tests inject a split Home. It returns
 `{ status: 'fresh' | 'migrated' | 'unchanged' | 'pending', record? }`.
 `home/migration-plan.ts` exports the shared read-only `planLegacyMigration`
-used by `hsq migrate --dry-run`. The command is absent with the switch off.
+used by `hsq migrate --dry-run`.
 
 The legacy `.migrating` claim contains `{ pid, startToken? }`, uses exclusive
 creation, and reclaims proven-dead holders under the legacy write lock.
@@ -204,7 +203,7 @@ permits reads and cockpit leases. Boot detects `install.json.state ===
 'pending'` with a staged record and skips migration and seeding so P2c can
 check the group read-only.
 `prepareHomeLifecycle(home, instance?)` passes the instance into its lease.
-With the switch on and no instance given, the lease names the server record
+With no instance given, the lease names the server record
 whose `primaryPort` the cockpit listens on (`serverInstanceForPort`), else
 `default`.
 
@@ -217,7 +216,7 @@ with a warning. `rollbackLegacyMigration(target)` renames a
 pending marker to `install.json.failed`; the next explicit migration overwrites
 the recorded pending destinations. Rollback never rewrites legacy registry data.
 
-With the switch on, boot defers a server home that supports group migration: only `hsq server-migrate`
+Boot defers a server home that supports group migration: only `hsq server-migrate`
 stops the group, stages the home and rolls every instance back on failure. The
 signal is an `installed` record without `dryRun` in the legacy `server.json` or
 `server-instances/` and no committed target marker. Then every CLI entry and the
@@ -242,7 +241,6 @@ Home returned by `prepareOperatorHome`, as CLI boot does.
 | Desktop, incomplete install or dry-run server, with or without a failed marker | Existing boot migration to the target |
 | Boot migration fails with `EROFS`, `EACCES` or `EPERM` before the commit | Legacy home; one warning; the next boot retries |
 | A step after the commit fails with `EROFS`, `EACCES` or `EPERM` | Target; one warning |
-| Switch off | Existing legacy behavior |
 
 The shared capability check requires migrate, rollback, stop and start methods. Both
 `ubuntu-vps` and `macosx-ngrok` (hearsay-tools/cezarion#3234) pass it, so a home that records
@@ -254,8 +252,7 @@ legacy data and commits the target, which clears the boot skip. The failed marke
 stays as diagnostic evidence. `migrate --dry-run` and legacy recovery actions do
 not commit a target or clear the skip. No new state marker or setting is used.
 
-`hsq server-migrate` (`server-install/group-migrate.ts`, registered only with
-the switch on) is that caller. It holds every instance's install lock in the
+`hsq server-migrate` (`server-install/group-migrate.ts`) is that caller. It holds every instance's install lock in the
 records home, sorted, for the whole run. `--dry-run` only reads: it takes no
 install lock, does not prepare the legacy home and writes no file. Server records
 are read as plain bytes, so a missing version log is not seeded by planning. Its plan
@@ -341,7 +338,7 @@ while retaining legacy journal history and backups in the archive.
 ## Legacy home canary
 
 The canary shares the recovery snapshot, journal and demand-owned watchers. It runs
-only with `REBRAND_SWITCH` enabled and a committed marker with `migratedFrom`.
+only with a committed marker with `migratedFrom`.
 `migration.json` supplies the hash baseline; FRESH decisions also discover later
 registry files. Each changed HomeFile with a non-null target gets one legacy row,
 after any live-file recovery incident for that file. Opaque trees and observed-only
@@ -371,5 +368,4 @@ Remote sessions see the global banner read-only, with the existing host instruct
 Legacy grant rows remain read-only in every cockpit. The host operator resolves
 them with `hsq backup import remote-settings/<id>.json` or `hsq backup ignore
 remote-settings/<id>.json`. The banner shows Import only for an importable source
-and always names Ignore. These CLI actions use the same recovery writer. A build
-with the release switch off refuses them.
+and always names Ignore. These CLI actions use the same recovery writer.

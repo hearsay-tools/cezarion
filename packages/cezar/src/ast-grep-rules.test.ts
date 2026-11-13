@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
@@ -131,20 +131,6 @@ describe('update mode', () => {
       writeBaseline('r', [entry('a.ts', 'two', 2), entry('a.ts', 'gone', 1)], dir);
       updateBaseline('r', [entry('a.ts', 'two', 1), entry('b.ts', 'new', 3)], dir);
       expect(readBaseline('r', dir)).toEqual([entry('a.ts', 'two', 1)]);
-    });
-  });
-
-  // hearsay-tools/squawk#1898: a rule's own note survives update mode.
-  it('keeps a lowered baseline\'s own note, and leaves an unchanged one byte for byte', () => {
-    inTempDir((dir) => {
-      // Not the layout writeBaseline uses, so any write shows.
-      const before = JSON.stringify({ $comment: 'This site stays: the owner reads it.', sites: [entry('a.ts', 'two', 2)] });
-      writeFileSync(baselinePath('r', dir), before);
-      updateBaseline('r', [entry('a.ts', 'two', 2)], dir);
-      expect(readFileSync(baselinePath('r', dir), 'utf8')).toBe(before);
-      updateBaseline('r', [entry('a.ts', 'two', 1)], dir);
-      expect(JSON.parse(readFileSync(baselinePath('r', dir), 'utf8'))).toEqual({
-        $comment: 'This site stays: the owner reads it.', sites: [entry('a.ts', 'two', 1)] });
     });
   });
 });

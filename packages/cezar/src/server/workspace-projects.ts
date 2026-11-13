@@ -12,7 +12,7 @@ import { ProjectMigrationRecoveryError } from '../project-migration/recovery.ts'
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
-type ContextServices = Pick<ServerDeps, 'contexts' | 'createManager' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home' | 'legacyCanary'> & {
+type ContextServices = Pick<ServerDeps, 'contexts' | 'createManager' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home'> & {
   /** Every project's manager builds runners the way the boot manager does. */
   manager: Pick<ServerDeps['manager'], 'createRunner'>;
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
@@ -38,7 +38,6 @@ export function createWorkspaceProjectContexts(
     semaphore: deps.semaphore,
     preview: deps.previewHost,
     toolActivity: deps.toolActivity,
-    rebrand: deps.legacyCanary,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       options.addressManager?.(project);

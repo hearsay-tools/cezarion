@@ -11,7 +11,6 @@ import { createRunner } from '../core/runner-factory.ts';
 import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { Home } from '../home/home.ts';
 import { holdCockpitLease } from '../home/leases.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
@@ -38,8 +37,7 @@ import { fallbackProjectWriteError } from '../project-paths.ts';
 import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /**
- * The cockpit's automatic project move (hearsay-tools/cezarion#3089), through the release switch's
- * test seam: at cockpit start and at a project's first open, a legacy project moves before anything
+ * The cockpit's automatic project move (hearsay-tools/cezarion#3089): at cockpit start and at a project's first open, a legacy project moves before anything
  * serves it. A task live from before the restart keeps its own items in place until a later start;
  * another live writer keeps the whole project where it is, with a notice, until the next start.
  */
@@ -82,10 +80,10 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
   });
 
   /** A cockpit run: its ownership (released as its exit would) and its lazy contexts. */
-  function cockpit(rebrand: boolean | undefined) {
+  function cockpit() {
     const ownership = new CockpitOwnership();
     owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, ...(rebrand === undefined ? {} : { rebrand }),
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
       listProjects: async () => [{ id: 'p', root: project.root, status: 'ok' as const }] });
     disposers.push(() => contexts.disposeAll());
     return { ownership, contexts, stop: () => { contexts.disposeAll(); ownership.releaseAll(); } };
@@ -106,14 +104,14 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
         moveProjectWhenIdle: (root: string, options: Parameters<typeof moveProjectWhenIdle>[1]) => {
           // The move ran before the listener: nothing served the project yet.
           expect(listener).not.toHaveBeenCalled();
-          return moveProjectWhenIdle(root, { ...options, rebrand: true });
+          return moveProjectWhenIdle(root, options);
         } } as unknown as ServeDeps).finally(() => process.emit('exit'));
       await expect(boot).rejects.toThrow('listener reached');
       expect(log.mock.calls.flat().join('\n')).toContain(`[hsq] Moved the state of ${project.root} from .ai/cezar/ to .ai/squawk/. Tracked files stay; run these and commit:`);
       expect(log.mock.calls.flat().join('\n')).toContain("git mv -- '.ai/cezar/workflows/flow.yaml' '.ai/squawk/workflows/flow.yaml'");
     } finally { log.mockRestore(); }
     expect(movedState()).toBe(true);
-    const store = RunStore.open(REBRAND_SWITCH ? project.newDir : project.dataDir, { keepLive: true });
+    const store = RunStore.open(project.newDir, { keepLive: true });
     try { expect(store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath)); } finally { store.close(); }
   });
 
@@ -122,7 +120,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     await registerProject(project.root, undefined, testHome());
     const release = holdCockpitLease(testHome(), 4321, 'this');
     try {
-      const run = cockpit(true);
+      const run = cockpit();
       // ... and its own cockpit.lock claim, as a cockpit that served the project before holds it.
       await run.ownership.acquire(project.dataDir);
       const context = await run.contexts.context('p');
@@ -137,7 +135,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const handoff = join(project.dataDir, 'runs', `${TASK}.handoff.md`);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      const first = cockpit(true);
+      const first = cockpit();
       const context = await first.contexts.context('p');
       // The store moved; the live task's worktree, handoff and artifacts stay where its agent knows them.
       expect(movedState()).toBe(true);
@@ -166,7 +164,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       setRunStatus(context.store, TASK, 'review');
       context.store.flush();
       first.stop();
-      const second = cockpit(true);
+      const second = cockpit();
       const kept = await second.contexts.context('p');
       expect(kept.store.getRun(TASK)?.worktreePath).toBe(project.taskPath);
       expect(existsSync(join(project.taskPath, 'report.html'))).toBe(true);
@@ -179,7 +177,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(existsSync(project.taskPath)).toBe(true);
       second.stop();
       // The next start moves them, rewrites their stored paths and removes what the move emptied.
-      const next = cockpit(true);
+      const next = cockpit();
       const reopened = await next.contexts.context('p');
       expect(reopened.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
       expect(existsSync(join(moved(project, project.taskPath), 'report.html'))).toBe(true);
@@ -192,17 +190,17 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
   });
 
   it('closes the project through recovery when the move fails after its journal exists', async () => {
-    const run = cockpit(true);
-    const failed = moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], rebrand: true, fault: crashAt('move:before') });
+    const run = cockpit();
+    const failed = moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], fault: crashAt('move:before') });
     await expect(failed).rejects.toBeInstanceOf(ProjectMigrationRecoveryError);
     await expect(failed).rejects.toThrow('move:before');
     expect(projectAdmissionRefusal(project.dataDir)?.reason).toBe('journal');
   });
 
   it('waits, with a notice, on any failure before the journal exists, and serves the project as before', async () => {
-    const run = cockpit(true);
+    const run = cockpit();
     const lines: string[] = [];
-    const result = await moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], rebrand: true, fault: crashAt('journal:before'),
+    const result = await moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], fault: crashAt('journal:before'),
       log: line => lines.push(line) });
     expect(result).toEqual({ status: 'blocked', reason: 'journal:before' });
     expect(lines).toEqual([`[hsq] Project ${project.root} keeps its state in .ai/cezar/ for now: journal:before. It is served from both folders; the move runs again at the next start.`]);
@@ -219,7 +217,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       const startToken = processStartToken(other.pid!);
       writeFileSync(migrationFencePaths(project.dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
       const lines: string[] = [];
-      const result = await moveProjectWhenIdle(project.root, { ownership: cockpit(true).ownership, homes: [], rebrand: true, log: line => lines.push(line) });
+      const result = await moveProjectWhenIdle(project.root, { ownership: cockpit().ownership, homes: [], log: line => lines.push(line) });
       expect(result).toEqual({ status: 'blocked', reason: `A project migration (pid ${other.pid}) holds ${project.root}; retry when it finishes` });
       expect(lines).toEqual([`[hsq] Project ${project.root} keeps its state in .ai/cezar/ for now: ${result.status === 'blocked' ? result.reason : ''}. `
         + 'It is served from both folders; the move runs again at the next start.']);
@@ -233,7 +231,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
   });
 
   it('makes a request that comes while the project is being prepared wait for the move, never read first', async () => {
-    const run = cockpit(true);
+    const run = cockpit();
     const lines: string[] = [];
     const log = vi.spyOn(console, 'warn').mockImplementation((line: string) => { lines.push(line); });
     try {
@@ -241,11 +239,11 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       const movedAtOpen: boolean[] = [];
       const open = RunStore.open;
       vi.spyOn(RunStore, 'open').mockImplementation((dataDir, options) => {
-        if (dataDir === (REBRAND_SWITCH ? project.newDir : project.dataDir)) movedAtOpen.push(movedState());
+        if (dataDir === (project.newDir)) movedAtOpen.push(movedState());
         return open.call(RunStore, dataDir, options);
       });
       // The post-listen preparation's move and a first request for the project, at once.
-      const preparing = moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], rebrand: true });
+      const preparing = moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [] });
       const opening = run.contexts.context('p');
       const [, context] = await Promise.all([preparing, opening]);
       expect(movedAtOpen).toEqual([true]);
@@ -272,11 +270,11 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     });
     const ownership = new CockpitOwnership();
     owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, rebrand: true,
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
       listProjects: () => listProjects(undefined, testHome()) });
     const bootStore = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const server = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership, legacyCanary: true,
+    const server = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership,
       manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts }, 0);
     try {
       // bound: hang guard; discovery opens the project's automation store once it is prepared.
@@ -292,7 +290,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     }
   });
 
-  /** A cockpit server over a boot repo, with warm-up off and the release switch seam on. */
+  /** A cockpit server over a boot repo, with warm-up off. */
   async function server(options: { workspaceEvents?: WorkspaceEventBus } = {}) {
     vi.stubEnv('CEZ_PROJECT_WARMUP', '0');
     const boot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-auto-move-boot-'));
@@ -301,13 +299,13 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const bootId = (await registerProject(boot, undefined, testHome())).id!;
     const ownership = new CockpitOwnership();
     owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, rebrand: true, listProjects: () => listProjects(undefined, testHome()) });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, listProjects: () => listProjects(undefined, testHome()) });
     // The boot project's store lives outside it, so the boot project holds no legacy state to move:
     // the legacy project is the preparation's last real work.
     const bootData = mkdtempSync(join(realpathSync(tmpdir()), 'cez-auto-move-boot-data-'));
     temporary.push(bootData);
     const bootStore = RunStore.open(bootData, { keepLive: true });
-    const started = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership, legacyCanary: true,
+    const started = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership,
       manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts, ...options }, 0);
     disposers.push(() => { started.close(); contexts.disposeAll(); bootStore.close(); vi.unstubAllEnvs(); });
     return started;
@@ -364,18 +362,9 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const lease = AutomationStore.open(project.dataDir).acquireLease();
     expect(lease).toBeDefined();
     try {
-      const result = await moveProjectWhenIdle(project.root, { ownership: cockpit(true).ownership, homes: [], rebrand: true, log: () => undefined });
+      const result = await moveProjectWhenIdle(project.root, { ownership: cockpit().ownership, homes: [], log: () => undefined });
       expect(result).toEqual({ status: 'blocked', reason: 'an automation of this cockpit holds its lease' });
       expect(movedState()).toBe(false);
     } finally { lease?.release(); }
-  });
-
-  it('moves nothing with the release switch off, as shipped', async () => {
-    const run = cockpit(false);
-    const context = await run.contexts.context('p');
-    expect(movedState()).toBe(false);
-    expect(existsSync(project.newDir)).toBe(false);
-    expect(context.store.getRun(TASK)?.worktreePath).toBe(project.taskPath);
-    await reportsIndex(context.store).idle();
   });
 });
