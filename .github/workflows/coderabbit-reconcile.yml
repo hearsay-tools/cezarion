@@ -72,12 +72,18 @@ jobs:
         with:
           retries: 0
           script: |
-            const { discover } = require('./.github/scripts/coderabbit-reconcile.cjs');
+            const { discover, countTokens } = require('./.github/scripts/coderabbit-reconcile.cjs');
             core.info(process.env.READ_TOKEN ? 'Reads use the release App token.' : 'Reads use GITHUB_TOKEN.');
             const reads = process.env.READ_TOKEN ? getOctokit(process.env.READ_TOKEN) : github;
-            const result = await discover({ github: reads, ...context.repo, eventName: context.eventName,
-              payload: context.payload, log: message => core.info(message) });
-            core.setOutput('numbers', JSON.stringify(result.numbers));
+            // One line per token at the end, also when the job fails.
+            const summaries = countTokens([['GITHUB_TOKEN', github], ['Release App token (reads)', reads]]);
+            try {
+              const result = await discover({ github: reads, ...context.repo, eventName: context.eventName,
+                payload: context.payload, log: message => core.info(message) });
+              core.setOutput('numbers', JSON.stringify(result.numbers));
+            } finally {
+              for (const line of summaries()) core.info(line);
+            }
   reconcile:
     needs: discover
     if: needs.discover.outputs.numbers != '[]'
@@ -149,11 +155,19 @@ jobs:
         with:
           retries: 0
           script: |
-            const { reconcile } = require('./.github/scripts/coderabbit-reconcile.cjs');
+            const { reconcile, countTokens } = require('./.github/scripts/coderabbit-reconcile.cjs');
             core.info(process.env.READ_TOKEN ? 'Reads use the release App token.' : 'Reads use GITHUB_TOKEN.');
             const readGithub = process.env.READ_TOKEN ? getOctokit(process.env.READ_TOKEN) : github;
             const projectGithub = process.env.BOARD_TOKEN ? getOctokit(process.env.BOARD_TOKEN) : null;
-            const result = await reconcile({ github, readGithub, projectGithub, ...context.repo,
-              pullNumber: Number(process.env.RECONCILE_PR),
-              releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN, log: message => core.info(message) });
-            core.info(JSON.stringify(result));
+            // One line per token at the end, also when the job fails. Under the
+            // read token's core floor only the board sync skips.
+            const summaries = countTokens([['GITHUB_TOKEN', github], ['Release App token (reads)', readGithub],
+              ['Release App token (board)', projectGithub]]);
+            try {
+              const result = await reconcile({ github, readGithub, projectGithub, ...context.repo,
+                pullNumber: Number(process.env.RECONCILE_PR),
+                releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN, log: message => core.info(message) });
+              core.info(JSON.stringify(result));
+            } finally {
+              for (const line of summaries()) core.info(line);
+            }

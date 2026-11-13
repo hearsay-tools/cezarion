@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
 import { runTaskCommand, taskHelp, type TaskIo } from './cli.ts';
+import { discoverCockpit } from './discovery.ts';
 import { TaskCliError } from './http.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { taskCliFixture } from './cli.testkit.ts';
@@ -250,14 +251,20 @@ describe('cez task', () => {
       expect(String(last().error)).toContain('no task webhook');
     });
 
-    it('opts in by default when discovery saw a webhook, and --no-notify opts out', async () => {
+    it('does not opt in by default on a project with a webhook; only --notify opts in', async () => {
       await withWebhook();
-      const hooked: TaskIo = { ...io(), discover: async () => ({ ...ctx.cockpit, hasWebhook: true }) };
-      expect(await runTaskCommand(['start', 'do it'], {}, hooked)).toBe(0);
+      // Real discovery reads the registry, which lists this project's webhook.
+      const discovered: TaskIo = { ...io(), discover: () => discoverCockpit({ url: ctx.cockpit.origin, repoDir: ctx.harness.repoRoot }) };
+      const startWith = (flags: string[]) => runTaskCommand(['start', 'do it', ...flags], {}, discovered);
+      expect(await startWith([])).toBe(0);
+      expect(last().notify).toBe(false);
+      expect(ctx.store.getRun(last().id as string)?.notify).toBeUndefined();
+      expect(await startWith(['--notify'])).toBe(0);
       expect(last().notify).toBe(true);
       expect(ctx.store.getRun(last().id as string)?.notify).toBe(true);
-      expect(await runTaskCommand(['start', 'do it', '--no-notify'], {}, hooked)).toBe(0);
+      expect(await startWith(['--no-notify'])).toBe(0);
       expect(last().notify).toBe(false);
+      expect(ctx.store.getRun(last().id as string)?.notify).toBeUndefined();
     });
 
     it('rejects --notify with --no-notify before discovering a cockpit', async () => {

@@ -2,6 +2,7 @@ const {createSweepApi}=require('./ci-sweep-api.cjs');
 const {collectSweep}=require('./ci-sweep-collect.cjs');
 const {classifyPatterns}=require('./ci-sweep-patterns.cjs');
 const {reportPatterns}=require('./ci-sweep-report.cjs');
+const {isQuotaCause}=require('./failure-diagnostics.cjs');
 const DAY=24*60*60*1000;
 const iso=ms=>new Date(ms).toISOString().replace('.000Z','Z');
 function parseUtc(value) {
@@ -22,7 +23,16 @@ async function sweepCiFailures({github,owner,repo,start='',end='',now=Date.now,l
   manifest.start=iso(first);manifest.end=iso(last);
   try {
     const collected=await collectSweep({api,owner,repo,start:manifest.start,end:manifest.end});
-    const patterns=classifyPatterns({...collected,owner,repo});
+    // GitHub quota errors are never filed. Count every one here, before the
+    // recurrence threshold and before any issue read, so the summary shows them.
+    const quota=collected.occurrences.filter(occurrence=>isQuotaCause(occurrence.cause));
+    manifest.suppressed={occurrences:quota.length,runs:[...new Set(quota.map(occurrence=>occurrence.run.id))].sort((a,b)=>a-b)};
+    // A quota step with another error is classified by that error, as the
+    // writer reports it for an unrecorded step; `sourceCause` lets the writer
+    // make that choice from the step's records. Quota-only steps drop out.
+    const classifiable=collected.occurrences.flatMap(occurrence=>!isQuotaCause(occurrence.cause) ? [occurrence]
+      : occurrence.cause.independentCause ? [{...occurrence,cause:occurrence.cause.independentCause,sourceCause:occurrence.cause}] : []);
+    const patterns=classifyPatterns({...collected,occurrences:classifiable,owner,repo});
     manifest.patterns=patterns.length;
     await reportPatterns({api,owner,repo,patterns,start:manifest.start,end:manifest.end});
   } catch {api.problem('sweep-incomplete');}

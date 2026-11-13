@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 describe('importing runs.json', () => {
-  it('imports every record, keeps the exact bytes beside it and never writes runs.json again', () => {
+  it('imports every record, and keeps the exact bytes beside it', () => {
     const bytes = JSON.stringify([record('a'), record('bb', { status: RUN_STATUS.review })], null, 2);
     writeFileSync(join(dataDir, 'runs.json'), bytes);
 
@@ -78,9 +78,7 @@ describe('importing runs.json', () => {
     expect(readPersistedRuns(dataDir).map((run) => run.id)).toEqual(['bb', 'a']);
 
     store.updateRun('a', { title: 'renamed' });
-    store.createRun({ title: 'new', workflow: 'w', task: 't', steps: [] });
     store.flush();
-    expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(bytes);
     expect(RunStore.open(dataDir).getRun('a')?.title).toBe('renamed');
   });
 

@@ -7,5 +7,5 @@ import { describeSkillResumeParity } from './skill-resume-parity.testkit.ts';
 
 it('registers every skill-resume case exactly once across its files', () => {
   checkParityRegistration('skill-resume-parity', describeSkillResumeParity,
-    RUNNER_IDS.flatMap(backend => SKILL_RESUME_CRITERIA.filter(row => runsOn('skill-resume', row.id, backend)).map(row => `${backend} ${row.id}`)), 44);
+    RUNNER_IDS.flatMap(backend => SKILL_RESUME_CRITERIA.filter(row => runsOn('skill-resume', row.id, backend)).map(row => `${backend} ${row.id}`)), 41);
 });

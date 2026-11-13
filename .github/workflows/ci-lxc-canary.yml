@@ -86,6 +86,22 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The admitted PR head can predate the node-dist action, so install Node with the action and
+      # .node-version from this workflow's commit. The checkout below replaces the workspace.
+      - name: Check out the Node install action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: node-dist-tooling
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/node-dist
+            .node-version
+          sparse-checkout-cone-mode: false
+      - name: Install Node.js from nodejs.org
+        id: node
+        uses: ./node-dist-tooling/.github/actions/node-dist
+        with:
+          node-version-file: node-dist-tooling/.node-version
       - name: Check out the admitted PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,8 +118,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
-          check-latest: true
+          node-version: ${{ steps.node.outputs.node-version }}
+          token: ''
       - name: Locate the pnpm store
         id: store
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"

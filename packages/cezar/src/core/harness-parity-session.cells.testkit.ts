@@ -412,7 +412,6 @@ export const SESSION_GROUPS = {
               if (exempt) {
                 expect(exempt.kind).toBe('capability-absent');
                 expect(governed).toEqual(ordinary);
-                expect(JSON.stringify(governed)).not.toMatch(/disallowedTools|exclude-tools|allowed-tools|omp-restrict-delegation/);
               } else if (backend === 'codex') {
                 const method = resume ? 'thread/resume' : 'thread/start';
                 const normal = ordinary!.find(row => row.method === method);

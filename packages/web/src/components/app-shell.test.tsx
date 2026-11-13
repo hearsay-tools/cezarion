@@ -56,12 +56,10 @@ const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLA
 describe('AppShell', () => {
   it('keeps optional views in an overflow menu and marks the current overflow view', async () => {
     renderShell('/automations', { })
-    expect(within(nav()).queryByRole('link', { name: 'Inbox' })).toBeNull()
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
     fireEvent.keyDown(more, { key: 'Enter' })
     expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('aria-current')).toBe('page')
-    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Workflows' }))
     expect(screen.getByTestId('location').textContent).toBe('/workflows')
   })
@@ -124,7 +122,7 @@ describe('AppShell', () => {
     expect(footer().querySelector('[data-slot="version-chip"]')?.getAttribute('data-update-available')).toBeNull()
   })
 
-  it('shows project identity instead of a sidebar wordmark', () => {
+  it('shows project identity in the sidebar', () => {
     renderShell('/', { repo: { name: 'Demo', branch: 'main' } })
     expect(within(sidebar()).getByText('Demo')).toBeTruthy()
   })

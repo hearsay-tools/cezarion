@@ -52,14 +52,27 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/release-smoke.mjs
+          sparse-checkout: |
+            scripts/release-smoke.mjs
+            .github/actions/node-dist
           sparse-checkout-cone-mode: false
+
+      # The floor leg installs its exact version from nodejs.org, so setup-node finds it in the
+      # tool cache and calls no GitHub API. The lts/* leg is the one CI job that follows the
+      # newest Node LTS (nightly and release candidates only): resolving lts/* needs the
+      # actions/node-versions manifest, which setup-node reads through the GitHub API.
+      - name: Install Node.js from nodejs.org
+        if: matrix.node != 'lts/*'
+        uses: ./.github/actions/node-dist
+        with:
+          node-version: ${{ matrix.node }}
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
-          check-latest: true
+          check-latest: ${{ matrix.node == 'lts/*' }}
+          token: ${{ matrix.node == 'lts/*' && github.token || '' }}
 
       # Every published install path: the package, and the alias when one exists.
       - name: Clean install, boot and cockpit
@@ -96,6 +109,23 @@ jobs:
       SHUFFLE_SEED: ${{ github.run_id }}
       SHARD: ${{ matrix.shard }}
     steps:
+      # A rollback candidate can predate the node-dist action, so install Node with the action and
+      # .node-version from the calling workflow's commit. The checkout below replaces the workspace.
+      - name: Check out the Node install action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: node-dist-tooling
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/node-dist
+            .node-version
+          sparse-checkout-cone-mode: false
+      - name: Install Node.js from nodejs.org
+        id: node
+        uses: ./node-dist-tooling/.github/actions/node-dist
+        with:
+          node-version-file: node-dist-tooling/.node-version
+
       - name: Check out the candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,8 +140,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
-          check-latest: true
+          node-version: ${{ steps.node.outputs.node-version }}
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

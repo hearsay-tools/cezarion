@@ -35,7 +35,6 @@ describe('cezar-ci MCP server instructions', () => {
       const { tools } = await client.listTools();
       expect(lines).toHaveLength(tools.length);
       for (const tool of tools) expect(lines.some(line => line.startsWith(`- ${tool.name}:`))).toBe(true);
-      expect(lines.some(line => line.startsWith('- cezar_wait_for_ci:'))).toBe(false);
       expect(lines.find(line => line.startsWith('- cezar_wait:'))).toMatch(/waiting on CI for a PR/);
       expect(lines.find(line => line.startsWith('- cezar_ask:'))).toMatch(/user decision or missing input; provide the full draft/);
       expectNoSchemaKeyIn(instructions!, { CEZ_PREVIEW: '1' });

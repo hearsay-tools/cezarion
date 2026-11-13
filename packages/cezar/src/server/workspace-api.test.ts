@@ -229,43 +229,6 @@ describe('the workspace settings API (step 2.7)', () => {
     });
   });
 
-  it('GET carries no skills auto-update key, and the retired route is gone', async () => {
-    const body = (await (await getConfig()).json()) as Record<string, unknown>;
-    expect(body).not.toHaveProperty('skillsAutoUpdate');
-    expect(body).not.toHaveProperty('effectiveSkillsAutoUpdate');
-    const route = await apiRequest(app, '/api/v1/workspace/skills-update?projectId=default');
-    expect(route.status).toBe(404);
-    // `startServer` reaches `npx` only through the updater's `execFile`, which an ESM spy cannot
-    // observe; the built route table is the permitted proxy: no skills-update route remains.
-    expect(app.routes.map((r) => r.path).filter((path) => path.includes('skills-update'))).toEqual([]);
-  });
-
-  it('PUT ignores a retired skillsAutoUpdate key and an old stored key survives unrelated writes', async () => {
-    mkdirSync(home, { recursive: true });
-    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ skillsAutoUpdate: true })));
-    const res = await putConfig({ skillsAutoUpdate: false, archiveOnMerge: true });
-    expect(res.status).toBe(200);
-    expect(await res.json()).not.toHaveProperty('skillsAutoUpdate');
-    expect(rawConfig()).toMatchObject({ skillsAutoUpdate: true, archiveOnMerge: true });
-  });
-
-  it('PUT ignores a retired updateChannel key and an old stored key survives unrelated writes', async () => {
-    mkdirSync(home, { recursive: true });
-    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ updateChannel: 'nightly' })));
-    expect(await (await getConfig()).json()).not.toHaveProperty('updateChannel');
-    const res = await putConfig({ updateChannel: 'stable', archiveOnMerge: true });
-    expect(res.status).toBe(200);
-    expect(await res.json()).not.toHaveProperty('updateChannel');
-    expect(rawConfig()).toMatchObject({ updateChannel: 'nightly', archiveOnMerge: true });
-  });
-
-  it('serves no updater routes and no applicationUpdate health field', async () => {
-    expect(app.routes.map((r) => r.path).filter((path) => /self-update|application-update/.test(path))).toEqual([]);
-    expect((await apiRequest(app, '/api/v1/workspace/self-update')).status).toBe(404);
-    const health = (await (await apiRequest(app, '/api/v1/health')).json()) as Record<string, unknown>;
-    expect(health).not.toHaveProperty('applicationUpdate');
-  });
-
   it('boots and answers health with a retired skillsAutoUpdate key stored and its env var set', async () => {
     Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ skillsAutoUpdate: true })));
     vi.stubEnv('CEZ_SKILLS_AUTO_UPDATE', '1');

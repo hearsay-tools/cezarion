@@ -117,3 +117,8 @@ to stdout, with exit 0 and no home access. Old-name notices remain on stderr
 only with the release switch on. Switch-on help uses the resolved versions
 path, and missing-cockpit hints and dry-run banners use the new preferred names.
 Switch-off paths and display names keep their shipped spelling.
+
+`hsq task start` no longer subscribes a task to the project webhook by default. A
+script that relied on the old default passes `--notify`, or runs `hsq task notify <id>`
+after start. `--no-notify` stays accepted and sends an explicit off. The run API, the
+cockpit form and the notify flag on existing runs keep their behavior.

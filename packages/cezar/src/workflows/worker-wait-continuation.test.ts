@@ -30,8 +30,7 @@ describe('worker wait after an approved continuation (#475)', { timeout: 30_000 
     } finally { writeFileSync(release, 'go'); }
   });
 
-  // hearsay-tools/cezarion#1235: a pending human question no longer refuses a worker wait; the
-  // wait opens beside it and the question stays pending.
+  // hearsay-tools/cezarion#1235: a worker wait opens beside a pending human question, which stays pending.
   it('registers beside a genuinely unanswered question, which stays pending', async () => {
     const p = await parent('mock:cezar-ask'); const w = await worker(p.id);
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));

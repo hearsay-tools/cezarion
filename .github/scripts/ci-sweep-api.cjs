@@ -16,7 +16,7 @@ class SweepError extends Error {
 // This manifest is safe to publish. Never copy arbitrary metadata/API errors here.
 function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
   const caps={...DEFAULT_LIMITS,...limits}, started=now();
-  const manifest={version:1,complete:true,requests:0,logs:0,downloadedBytes:0,intervals:[],processed:{runs:[],attempts:[],jobs:[]},problems:[],reports:{issues:0,occurrences:0},reporterFailures:0};
+  const manifest={version:1,complete:true,requests:0,logs:0,downloadedBytes:0,intervals:[],processed:{runs:[],attempts:[],jobs:[]},problems:[],reports:{issues:0,occurrences:0},suppressed:{occurrences:0,runs:[]},reporterFailures:0};
   let stopped;
   function problem(code,ids={}) {
     if(!GAPS.has(code))manifest.complete=false;

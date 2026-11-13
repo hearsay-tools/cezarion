@@ -19,6 +19,7 @@ on:
       - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
+      - '.github/actions/node-dist/**'
       - '.github/workflows/desktop-release.yml'
   push:
     branches:
@@ -30,6 +31,7 @@ on:
       - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
+      - '.github/actions/node-dist/**'
   workflow_dispatch:
 
 permissions:
@@ -68,11 +70,17 @@ jobs:
         with:
           version: '12.11.2'
 
+      - name: Install Node.js from nodejs.org
+        uses: ./.github/actions/node-dist
+        with:
+          node-version: '24.21.0'
+
       # The managed cockpit's floor (packages/cezar engines), which the shell also enforces.
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
+          token: ''
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

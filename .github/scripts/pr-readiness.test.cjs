@@ -630,6 +630,8 @@ for (const condition of ['failed native aggregate', 'skipped native review', 'mi
 
 // Per-PR reads with a board token: 4 head reads, then native proof (6) and
 // admission (5) only when they can change the decision, then one final PR read.
+// The board's quota check (GET /rate_limit) is free and not counted.
+const FREE = 'GET /rate_limit';
 for (const [label, checkRuns, reads, cardState] of [
   ['a running native review', [checkRun(1, VERIFY, null, 'in_progress'), checkRun(2, REVIEW_CHECK, null, 'in_progress')], 5, IN_PROGRESS],
   ['a green head', undefined, 16, IN_REVIEW],
@@ -637,8 +639,53 @@ for (const [label, checkRuns, reads, cardState] of [
   const github = fakeGithub(checkRuns ? { checkRuns } : {});
   const board = fakeBoard({ current: 'Todo' });
   await reconcile({ ...eventArgs({ github, projectGithub: board }), pullNumber: 7 });
-  assert.equal(github.calls.length, reads);
+  assert.equal(github.calls.filter(([, route]) => route !== FREE).length, reads);
+  assert.equal(github.calls.filter(([, route]) => route === FREE).length, 1);
   assert.deepEqual(cards(board), cardState);
+});
+
+// Under the read token's core floor only the board sheds: no board-only read,
+// no project call, and the rerun decision still runs.
+for (const [label, mutate, result] of [
+  ['a green head', () => {}, 'unchanged'],
+  ['lost admission', s => { s.checks[0].conclusion = 'failure'; }, 'rerun-requested'],
+]) test(`under the core floor, ${label} skips only the board sync`, async () => {
+  const github = fakeGithub({ coreRemaining: 799 });
+  mutate(github.state);
+  if (result === 'rerun-requested') {
+    const request = github.request;
+    github.request = async (route, params) => {
+      if (github.state.writes.length && route.endsWith('/runs/{run_id}')) github.state.run.run_attempt = 2;
+      return request(route, params);
+    };
+  }
+  const board = fakeBoard({ current: 'In review' }), logs = [];
+  assert.equal(await reconcile({ ...eventArgs({ github, projectGithub: board, log: m => logs.push(m) }), pullNumber: 7 }), result);
+  assert.deepEqual(board.moves, []);
+  assert.deepEqual(board.numbers, [], 'no project read');
+  assert.deepEqual(github.state.writes, result === 'rerun-requested' ? [30] : []);
+  assert.match(logs.join('\n'), /PR 7: board sync skipped: core remaining 799 on the read token is under the floor of 800; a later event catches up\./);
+  // Branch rules, combined statuses and the final PR read serve only the board.
+  const boardOnly = ['GET /repos/{owner}/{repo}/rules/branches/{branch}', 'GET /repos/{owner}/{repo}/commits/{ref}/status'];
+  assert.equal(github.calls.some(([, route]) => boardOnly.includes(route)), false, 'no board-only head read');
+  // A green head keeps the rerun decision's 13 reads: the 16 of a full sync minus those three.
+  if (result === 'unchanged') assert.equal(github.calls.filter(([, route]) => route !== FREE).length, 13);
+});
+for (const [label, state] of [['at the floor', { coreRemaining: 800 }], ['an unreadable quota', { coreRemaining: NaN }]]) {
+  test(`board sync proceeds with ${label}`, async () => {
+    const github = fakeGithub(state);
+    const board = fakeBoard({ current: 'Todo' });
+    await reconcile({ ...eventArgs({ github, projectGithub: board }), pullNumber: 7 });
+    assert.deepEqual(cards(board), IN_REVIEW);
+  });
+}
+test('the floor check reads the token that serves the reads, not GITHUB_TOKEN', async () => {
+  const github = fakeGithub({ coreRemaining: 5000 }), readGithub = fakeGithub({ coreRemaining: 10 });
+  const board = fakeBoard({ current: 'Todo' });
+  await reconcile({ ...eventArgs({ github, readGithub, projectGithub: board }), pullNumber: 7 });
+  assert.deepEqual(board.moves, []);
+  assert.equal(github.calls.some(([, route]) => route === FREE), false);
+  assert.equal(readGithub.calls.filter(([, route]) => route === FREE).length, 1);
 });
 
 // The board follows before the rerun attempt: a POST that fails or stays

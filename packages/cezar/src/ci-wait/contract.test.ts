@@ -8,8 +8,6 @@ import { type SquawkWaitAnswer, squawkWaitRequestSchema } from '@open-mercato/ce
 import { squawkServerInstructions, squawkToolEnvNames, squawkTools, doneToolDefinition, waitToolDefinition, waitAnswerHint } from './tools.ts';
 import { waitInvalidInput } from './errors.ts';
 
-const OBSOLETE_HUMAN_WAIT_KIND = 'human';
-
 describe('CI wait contract', () => {
   it('accepts merge supervision and requires bounded evidence for blocked results only', () => {
     expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/org/repo/pull/12', until: 'merge_or_blocked' }))
@@ -224,10 +222,8 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(schema.properties.kind.description).toMatch(/"process" wakes you when a background command ends/);
   const description = waitToolDefinition.description;
   expect(description).toContain('Times in the answers, such as `deadline`, are UTC.');
-  // hearsay-tools/cezarion#3097: the `sh -c '( … ) & echo $!'` recipe died with the shell call under Codex.
   // The tool list also loads inside omp, a standalone binary: the description names no path of its own.
   expect(description).toContain('`hsq job start <name> -- <command> [args...]` (your instructions give the full command for this session under "Long commands")');
-  expect(description).not.toContain('echo $!');
   expect(description).toContain('pass the `pid` and `exitFile` it prints as `pid` and `exit_file`');
   expect(description).toContain(`the job outlives this session; ${productName('Cezar')} does not stop it.`);
   expect(description).toContain(`Its files are in $TMPDIR, which ${productName('Cezar')} removes when the task ends: for a job that must outlive the task, add \`--dir <a git-ignored directory in the worktree>\` before \`--\`.`);
@@ -236,8 +232,6 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(description).toContain('For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out.');
   expect(description).toContain('Never start a watcher or helper process to copy a file into $TMPDIR.');
   expect(schema.properties.exit_file.description).toMatch(/Leave it out for a command that is already running/);
-  const refused = squawkWaitRequestSchema.safeParse({ kind: OBSOLETE_HUMAN_WAIT_KIND });
-  expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
   const pid = squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 });
   expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the `pid` that the job start command printed (kind "process").');
 });

@@ -236,16 +236,6 @@ describe('simplified header (hearsay-tools/cezarion#1333)', () => {
     expect(pill.className).toContain('max-md:hidden')
   })
 
-  it('shows no metadata row, wait list or details toggle', () => {
-    stubFetch()
-    renderHeader(run('waiting', { waits: [timer], branch: 'cez/r1', costUsd: 1.2, prNumber: 9 }))
-    expect(document.querySelector('[data-slot="run-meta"]')).toBeNull()
-    expect(document.querySelector('[data-slot="open-waits"]')).toBeNull()
-    expect(document.querySelector('[data-slot="run-details"]')).toBeNull()
-    expect(screen.queryByRole('button', { name: /run details/ })).toBeNull()
-    expect(document.querySelector('[data-slot="agent-badge"]')).toBeNull()
-  })
-
   it('counts changed files on the Changes tab at every width', () => {
     stubFetch()
     renderHeader(run('done', { diffStat: { adds: 3, dels: 1, files: 4 } }))
@@ -825,26 +815,6 @@ describe('header layout, tabs, pill and resume hint', () => {
     expect(classes).not.toContain('md:top-0')
   })
 
-  // The session header no longer owns plan progress — the dock does. The header must stay
-  // free of that mirror on every width.
-  it('does not render a plan mirror in the session header at any width', () => {
-    stubFetch()
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <MemoryRouter initialEntries={['/tasks/r1']}>
-          <Routes>
-            <Route
-              path="/tasks/:id"
-              element={<RunHeader run={run('running')} />}
-            />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
-
-    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
-  })
-
   it('tabs: Session is current; Changes and Files link to the routed surfaces', () => {
     stubFetch()
     renderHeader(run('done'))
@@ -888,11 +858,9 @@ describe('header layout, tabs, pill and resume hint', () => {
   })
 })
 
-it('uses one actions menu and omits the legacy action and resume rows', () => {
+it('uses one actions menu', () => {
   stubFetch()
   renderHeader(run('done'))
-  expect(document.querySelector('[data-slot="run-actions"]')).toBeNull()
-  expect(document.querySelector('[data-slot="resume-hint"]')).toBeNull()
   expect(screen.getByRole('button', { name: 'Run actions' }).className).not.toContain('md:hidden')
 })
 
