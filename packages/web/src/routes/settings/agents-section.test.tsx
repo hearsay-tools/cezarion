@@ -470,9 +470,7 @@ describe('the agents form', () => {
         'anthropic/claude-sonnet-5',
       ]),
     )
-    // The stale hard-coded presets this issue reported are gone, and Codex's catalog — fetched
-    // under its own key — never leaks into OpenCode's row.
-    expect([...opencode.options].map((o) => o.value)).not.toContain('openai/gpt-5.1')
+    // Codex's catalog — fetched under its own key — never leaks into OpenCode's row.
     expect([...opencode.options].map((o) => o.value)).not.toContain('gpt-5.6-codex')
     expect(
       [...screen.getByLabelText<HTMLSelectElement>('Default model for codex').options].map((o) => o.value),

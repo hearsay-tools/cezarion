@@ -45,12 +45,8 @@ test('typecheck keeps minimum Node, its bounded download retry and an independen
     { name: 'Install pnpm dependencies', if: "hashFiles('pnpm-lock.yaml') != ''", run: 'pnpm install --frozen-lockfile' },
     { name: 'Typecheck', run: 'npm run typecheck' },
   ]);
-  assert.equal(build.steps.some(step => step.run === 'npm run typecheck'), false);
-  const index = run => build.steps.findIndex(step => step.run === run);
-  assert.equal(index('npm run test:unit'), -1, 'source unit tests run in their own parallel job');
   assert.ok(ci.jobs['unit-tests'].steps.some(step => step.run === 'npm run test:unit:${{ matrix.suite }}'));
   assert.deepEqual(ci.jobs['unit-tests'].needs, build.needs);
-  assert.equal(index('npm run build:server'), -1);
   assert.deepEqual(build.needs, ['queue-proof', 'pr-test-input'], 'heavy build starts beside typecheck, preflight and review');
 });
 

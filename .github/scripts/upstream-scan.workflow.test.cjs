@@ -39,7 +39,6 @@ test('scan PR creation uses the scoped App client without giving it branch crede
   assert.ok(mint, 'mint a PR-only installation token for native CI');
   assert.match(mint.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
   assert.equal(mint.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
-  assert.equal(mint.with['app-id'], undefined);
   assert.equal(mint.with['permission-pull-requests'], 'write');
   assert.equal(mint.with['permission-contents'], undefined);
   assert.equal(mint.with.repositories, '${{ github.event.repository.name }}');

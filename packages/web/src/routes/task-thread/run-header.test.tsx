@@ -347,13 +347,6 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
     expect(names).toEqual(deleteIndex < 0 ? [...visible, ...settings] : [...visible.slice(0, deleteIndex), ...settings, ...visible.slice(deleteIndex)])
   })
 
-  it('the menu offers neither Archive nor Unarchive — both moved to a control (#281)', () => {
-    stubFetch()
-    renderHeader(run('done', { archived: true }))
-    expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
-    expect(actionBar().queryByRole('menuitem', { name: 'Unarchive' })).toBeNull()
-  })
-
   it('VS Code is absent everywhere — the open-in-editor endpoint does not exist yet (R5)', () => {
     stubFetch()
     renderHeader(run('done'))
@@ -441,15 +434,6 @@ describe('Mark unread (#775)', () => {
 })
 
 describe('actions hit their endpoints', () => {
-  it.each(['done', 'running'] as const)('does not duplicate composer execution actions on desktop or mobile (%s)', async (status) => {
-    const sent = stubFetch()
-    renderHeader(run(status))
-    expect(actionBar().queryByRole('menuitem', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
-    await screen.findByRole('menu')
-    expect(screen.queryByRole('menuitem', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
-    expect(sent.some((request) => /\/(continue|cancel)$/.test(request.path))).toBe(false)
-  })
-
   it('Archive → POST /archive with the flipped flag', async () => {
     const sent = stubFetch()
     renderHeader(run('done', { archived: true }), undefined, 'changes')

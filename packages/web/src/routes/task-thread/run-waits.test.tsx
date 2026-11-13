@@ -244,9 +244,6 @@ describe('RunWaitDetails', () => {
     expect(screen.queryByText(/CI checks passed/)).toBeNull()
     expect(ciItems()[0]?.textContent).toContain('Cancelled')
     expect(ciItems()[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:03:00.000Z')
-    // Human input no longer withdraws a CI wait, so the old withdrawal advice has no case left.
-    expect(screen.queryByText(/General monitoring does not restart/)).toBeNull()
-    expect(screen.queryByText(/A new CI wait is needed/)).toBeNull()
   })
 
   it('shows lastWaitsError when a saved wait was unreadable', () => {

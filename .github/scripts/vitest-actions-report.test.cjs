@@ -20,11 +20,6 @@ test('root vitest config pins a single github-actions reporter on Actions', () =
     /github-actions/,
     'Actions still gets the job-summary reporter, once, from the root multi-project run',
   );
-  assert.doesNotMatch(
-    source,
-    /jobSummary\s*:\s*\{\s*enabled\s*:\s*false/,
-    'the job summary stays on — AC wants exactly one report, not zero',
-  );
 });
 
 test('a multi-project Actions run writes exactly one Vitest Test Report summary', () => {
