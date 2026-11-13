@@ -1567,6 +1567,13 @@ export function createApp(deps: ServerDeps) {
     }
   };
 
+  /** The per-account routes' gate: refuse hosted mode before resolving the id, then 404 an unknown id. */
+  const localAccount = async (c: Context<ProjectApiEnv, '/workspace/agent-profiles/:id'>) => {
+    if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
+    const id = c.req.param('id');
+    return (await accountById(id)) ?? c.json({ error: `unknown account: ${id}` }, 404);
+  };
+
   /** Validate a client-supplied config dir. Returns the error text, or null when it is usable. */
   const checkProfileDir = async (configDir: string, provider?: ProviderId): Promise<string | null> => {
     if (CONTROL_CHARS_RE.test(configDir)) return 'folder must not contain control characters';
@@ -1764,11 +1771,8 @@ export function createApp(deps: ServerDeps) {
       paramZodValidator(agentProfileRouteParamsSchema),
       queryZodValidator(strictRefreshQuerySchema, { message: 'refresh must be 1 when provided' }),
       async (c) => {
-        // jscpd:ignore-start -- hearsay-tools/cezarion#1888: unchanged gate; only the validator arguments around it moved.
-        if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
-        const account = await accountById(c.req.param('id'));
-        if (!account) return c.json({ error: `unknown account: ${c.req.param('id')}` }, 404);
-        // jscpd:ignore-end
+        const account = await localAccount(c);
+        if (account instanceof Response) return account;
         const refresh = c.req.valid('query').refresh === '1';
         if (refresh) invalidateHostModels(account.provider);
         // The discovered account's row is the one `GET /api/v1/providers/status` owns, so it comes
@@ -1804,11 +1808,8 @@ export function createApp(deps: ServerDeps) {
       '/workspace/agent-profiles/:id/details',
       paramZodValidator(agentProfileRouteParamsSchema),
       async (c) => {
-        // jscpd:ignore-start -- hearsay-tools/cezarion#1888: unchanged gate; only the validator arguments around it moved.
-        if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
-        const account = await accountById(c.req.param('id'));
-        if (!account) return c.json({ error: `unknown account: ${c.req.param('id')}` }, 404);
-        // jscpd:ignore-end
+        const account = await localAccount(c);
+        if (account instanceof Response) return account;
         return c.json(await readAccountIdentity(account.provider, account.path));
       },
     )
@@ -1826,11 +1827,8 @@ export function createApp(deps: ServerDeps) {
       paramZodValidator(agentProfileRouteParamsSchema),
       jsonZodValidator(() => openAgentAccountFileSchema),
       async (c) => {
-        // jscpd:ignore-start -- hearsay-tools/cezarion#1888: unchanged gate; only the validator arguments around it moved.
-        if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
-        const account = await accountById(c.req.param('id'));
-        if (!account) return c.json({ error: `unknown account: ${c.req.param('id')}` }, 404);
-        // jscpd:ignore-end
+        const account = await localAccount(c);
+        if (account instanceof Response) return account;
         const { file, target } = c.req.valid('json');
 
         let path: string;

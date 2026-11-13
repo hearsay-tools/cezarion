@@ -12,14 +12,20 @@ test('existing clones pass; an added clone fails and prints both source location
   const write = (name, content) => { fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true }); fs.writeFileSync(path.join(repo, name), content); };
   const scan = (base) => spawnSync(process.execPath, [script, '--base', base], { cwd: repo, encoding: 'utf8' });
   const code = Array.from({ length: 12 }, (_, i) => `  total += values[${i}] * ${i + 37};`).join('\n');
+  const source = (comment) => `export function calculate(values: number[]) {\n let total = 0;\n // ${comment}\n${code}\n return total;\n}\n`;
   try {
     git('init', '--quiet');
-    write('packages/demo/src/first.ts', `export function calculate(values: number[]) {\n let total = 0;\n${code}\n return total;\n}\n`);
-    write('packages/demo/src/second.ts', fs.readFileSync(path.join(repo, 'packages/demo/src/first.ts')));
+    write('packages/demo/src/first.ts', source('weights rows by position'));
+    write('packages/demo/src/second.ts', source('weights rows by position'));
     git('add', '.'); git('commit', '-qm', 'baseline');
     const base = git('rev-parse', 'HEAD');
     assert.equal(scan(base).status, 0);
     t.diagnostic("existing baseline clones: exit 0");
+    // hearsay-tools/squawk#1888: jscpd counts no comment tokens, so a comment edit inside a clone keeps its pair total.
+    write('packages/demo/src/second.ts', source('weights each row by its position in the list'));
+    git('add', '.'); git('commit', '-qm', 'comment edit');
+    const commentEdit = scan(base);
+    assert.equal(commentEdit.status, 0, commentEdit.stdout + commentEdit.stderr);
     write('packages/demo/src/third.ts', fs.readFileSync(path.join(repo, 'packages/demo/src/first.ts')));
     git('add', '.'); git('commit', '-qm', 'clone');
     const failure = scan(base);

@@ -727,9 +727,16 @@ describe('agent profiles API', () => {
       expect(bare.status).toBe(404);
     });
 
-    it('404s an unknown account', async () => {
-      const res = await apiRequest(makeApp(), '/api/v1/workspace/agent-profiles/nope/details');
-      expect(res.status).toBe(404);
+    it('404s an unknown account on every per-account route', async () => {
+      for (const [method, path, payload] of [
+        ['GET', '/api/v1/workspace/agent-profiles/nope/status', undefined],
+        ['GET', '/api/v1/workspace/agent-profiles/nope/details', undefined],
+        ['POST', '/api/v1/workspace/agent-profiles/nope/open', { file: 'folder' }],
+      ] as const) {
+        const { status, body } = await send(method, path, payload);
+        expect(status, `${method} ${path}`).toBe(404);
+        expect(body.error).toBe('unknown account: nope');
+      }
     });
 
     it('opens a file named by its catalog id, never by a path', async () => {
@@ -834,9 +841,12 @@ describe('agent profiles API', () => {
       expect(body).toMatchObject({ editable: false, profiles: [] });
     });
 
-    it('refuses the identity read — an email is host state a hosted client is not trusted with', async () => {
-      const res = await apiRequest(makeApp(), '/api/v1/workspace/agent-profiles/default:claude/details');
-      expect(res.status).toBe(409);
+    it('refuses the per-account reads — an email or a probe is host state a hosted client is not trusted with', async () => {
+      for (const read of ['status', 'details']) {
+        const { status, body } = await send('GET', `/api/v1/workspace/agent-profiles/default:claude/${read}`);
+        expect(status, read).toBe(409);
+        expect(body.error).toContain('hosted mode');
+      }
     });
 
     it('409s every mutator and persists nothing', async () => {

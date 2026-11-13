@@ -161,6 +161,8 @@ offset it. Removed pairs pass. Renamed files form new pairs. Reported line
 counts are diagnostic only: splitting a clone can count a boundary line twice.
 This uses jscpd's detected pairs, not an exhaustive comparison of all file pairs.
 Moving duplication within one pair can pass within its token ceiling.
+jscpd counts no comment tokens, so a comment edit inside a clone keeps the
+pair's total and passes.
 
 Cross-package clones always fail, including inherited copies, except for the
 named file pair in the checker's exception list. Within one file, the sum of
