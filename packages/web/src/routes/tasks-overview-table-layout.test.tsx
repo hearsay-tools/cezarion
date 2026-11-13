@@ -786,9 +786,13 @@ describe('TasksOverview — header', () => {
 
   it('marks an unread failed row, on the table and on the mobile card (#617)', () => {
     renderOverview({ runs: [run({ id: 'boom', status: RUN_STATUS.failed, finishedAt: ago(60_000) })] })
-    expect(tableRow('boom')?.querySelector('[aria-label="unread"]')).not.toBeNull()
+    const row = tableRow('boom')
+    expect(row).not.toBeNull()
+    expect(row!.querySelector('[aria-label="unread"]')).not.toBeNull()
     setOverviewDesktop(false)
-    expect(card('boom')?.querySelector('[aria-label="unread"]')).not.toBeNull()
+    const mobileCard = card('boom')
+    expect(mobileCard).not.toBeNull()
+    expect(mobileCard!.querySelector('[aria-label="unread"]')).not.toBeNull()
   })
 
   it('offers Mark all read only while something is unread, and calls back on click', () => {
