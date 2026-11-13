@@ -35,12 +35,14 @@ test('different tests in one step remain distinct and repeated identical FAIL li
   assert.notEqual(causes[0].signature, causes[1].signature);
 });
 // Each run of one unrecognized failure once filed its own issue (hearsay-tools/squawk#1447).
-test('an unrecognized failure keeps one signature per stage and step across runs and jobs', () => {
-  const a = release(); a.log = '';
+test('an unrecognized failure keeps one signature per workflow, job and step across runs and shards', () => {
+  const a = release(); a.log = ''; a.job = {...a.job, name: 'Vitest shard 4/8'};
   const one = causesForStep(a)[0];
   assert.match(one.excerpt, /unavailable|recognizable/i);
   assert.equal(one.signature, causesForStep({...a,run:{...a.run,id:999,run_attempt:2},job:{...a.job,id:7,name:'Vitest shard 2/8'},log:'exit 1'})[0].signature);
-  assert.notEqual(one.signature, causesForStep({...a,step:{...a.step,name:'Run unit tests'}})[0].signature);
+  for (const other of [{step:{...a.step,name:'Run unit tests'}}, {job:{...a.job,name:'Dependency audit'}}, {run:{...a.run,name:'Nightly'}}]) {
+    assert.notEqual(one.signature, causesForStep({...a,...other})[0].signature);
+  }
 });
 // hearsay-tools/squawk#3335 filed the 24-hour limit of release-plan.cjs as a setup failure.
 test('a refusal in the Release workflow is no cause; the same line elsewhere still is', () => {

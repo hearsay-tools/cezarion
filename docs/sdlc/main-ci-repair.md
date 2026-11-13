@@ -53,7 +53,8 @@ branch (and on dispatch). It lists open issues with `main-ci-failure`.
 
 It first reads the newest passing CI push run on `main`. A summary whose run attempt
 that run follows (a later run, or a later attempt of the same run) gets a comment that
-links the passing run, and closes as completed. Its member reports stay open: they
+links the passing run, and closes as completed. The comment carries the marker
+`<!-- cez-main-ci-green:v1 -->`, so a retry after a failed close posts no second comment. Its member reports stay open: they
 record causes, and a passing run does not resolve a cause. A legacy report without the
 summary marker is never closed this way.
 

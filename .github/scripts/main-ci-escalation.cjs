@@ -6,6 +6,7 @@
 // The marker comment is the durable record: a later run finds it and writes nothing.
 const MARKER = '<!-- cez-main-ci-escalation:v1 -->';
 const AFTER_MS = 60 * 60 * 1000;
+const GREEN_MARKER = '<!-- cez-main-ci-green:v1 -->';
 
 async function repositoryAdmins({ github, owner, repo }) {
   const collaborators = await github.paginate('GET /repos/{owner}/{repo}/collaborators', { owner, repo, permission: 'admin', per_page: 100 });
@@ -33,8 +34,12 @@ async function closeGreenSummaries({ github, owner, repo, issues, log }) {
   for (const issue of summaries) {
     const { id, attempt } = summaryAttempt(issue);
     if (green.id < id || (green.id === id && green.run_attempt <= attempt)) continue;
-    const body = `Main CI passed after this attempt: [run ${green.id} attempt ${green.run_attempt}](${green.html_url}) at commit ${green.head_sha}. This summary closes. Its linked reports stay open for their causes.`;
-    await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', { owner, repo, issue_number: issue.number, body });
+    // A close that failed after its comment retries without a second comment.
+    const comments = await github.paginate('GET /repos/{owner}/{repo}/issues/{issue_number}/comments', { owner, repo, issue_number: issue.number, per_page: 100 });
+    if (!comments.some((c) => String(c.body).includes(GREEN_MARKER))) {
+      const body = `Main CI passed after this attempt: [run ${green.id} attempt ${green.run_attempt}](${green.html_url}) at commit ${green.head_sha}. This summary closes. Its linked reports stay open for their causes.\n\n${GREEN_MARKER}`;
+      await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', { owner, repo, issue_number: issue.number, body });
+    }
     await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed' });
     closed.push(issue.number);
     log(`Closed #${issue.number}: main CI passed in run ${green.id}.`);

@@ -17,7 +17,7 @@ const minutesAgo = (m) => new Date(NOW - m * 60000).toISOString();
 
 // A fake GitHub: open issues carry their comments; closed ones never come back from the list.
 // `green` is the newest passing CI push run on main.
-function fake({ issues, green, admins = [{ login: 'wjarka', type: 'User', permissions: { admin: true } }] }) {
+function fake({ issues, green, failPatch = false, admins = [{ login: 'wjarka', type: 'User', permissions: { admin: true } }] }) {
   const posted = [];
   const runReads = [];
   const github = {
@@ -34,6 +34,7 @@ function fake({ issues, green, admins = [{ login: 'wjarka', type: 'User', permis
         return { data: { workflow_runs: green ? [green] : [] } };
       }
       if (route.startsWith('PATCH ')) {
+        if (failPatch) { failPatch = false; throw new Error('close failed'); }
         Object.assign(issues.find((i) => i.number === args.issue_number), { state: args.state, state_reason: args.state_reason });
         return;
       }
@@ -69,6 +70,15 @@ test('a summary closes once a later main CI run or attempt passed; its members a
   assert.match(f.posted[0].body, /^Main CI passed after this attempt: \[run 20 attempt 2\]/);
   assert.deepEqual(f.runReads.map((a) => [a.workflow_id, a.branch, a.event, a.status]), [['ci.yml', 'main', 'push', 'success']]);
   assert.deepEqual(result.mentioned, [3, 4, 5]);
+});
+
+test('a close that failed after its comment retries without a second comment', async () => {
+  const issues = [summary(1, 10)];
+  const f = fake({ issues, green: { id: 20, run_attempt: 1, head_sha: 'a'.repeat(40), html_url: 'u' }, failPatch: true });
+  await assert.rejects(run(f), /close failed/);
+  assert.deepEqual((await run(f)).closed, [1]);
+  assert.equal(issues[0].state, 'closed');
+  assert.equal(f.posted.length, 1);
 });
 
 test('without an open summary the run list is not read', async () => {
