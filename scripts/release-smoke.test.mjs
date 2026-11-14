@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { INSTALL_WAIT_MS, PUBLISH_WAIT_MS, bootEnv, cockpitAsset, failureLine, parseArgs, registryInstall, run } from './release-smoke.mjs';
+import { INSTALL_WAIT_MS, PUBLISH_WAIT_MS, bootEnv, cockpitAsset, failureLine, parseArgs, registryInstall, run, upgradeHoldsProjects } from './release-smoke.mjs';
 
 const { causesForStep, sanitize } = createRequire(import.meta.url)('../.github/scripts/failure-diagnostics.cjs');
 
@@ -267,6 +267,20 @@ test('an upgrade boots the old version, saves a project, and the new version kee
 test('an upgrade that loses the saved project fails', async () => {
   await assert.rejects(run({ name: 'fake', version: '1.2.1', upgradeFrom: '1.2.0' }, { install: fakeInstall({ forget: ['1.2.1'] }) }),
     /The upgrade lost projects: saved/);
+});
+
+test('on Windows an upgrade from a version whose registry refused Windows paths checks only the new version', async () => {
+  await run({ name: 'fake', version: '0.18.1', upgradeFrom: '0.18.0' }, { install: fakeInstall({ forget: ['0.18.1'] }), platform: 'win32' });
+});
+
+test('only Windows upgrades from 0.18.0 or older skip the upgrade check', () => {
+  assert.equal(upgradeHoldsProjects('0.18.0', 'win32'), false);
+  assert.equal(upgradeHoldsProjects('0.17.9', 'win32'), false);
+  assert.equal(upgradeHoldsProjects('0.18.0-rc.2', 'win32'), false);
+  assert.equal(upgradeHoldsProjects('0.18.1', 'win32'), true);
+  assert.equal(upgradeHoldsProjects('0.19.0', 'win32'), true);
+  assert.equal(upgradeHoldsProjects('1.0.0', 'win32'), true);
+  assert.equal(upgradeHoldsProjects('0.18.0', 'linux'), true);
 });
 
 test('a booted version other than the one installed fails', async () => {
