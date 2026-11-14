@@ -68,7 +68,7 @@ const CEZAR = SQUAWK_TOOLS.join(',');
 
 /** The flags that carry tool access on each wire that has them; `--extension` keeps its basename. */
 const TOOL_FLAGS: Partial<Record<RunnerId, { readonly values: readonly string[]; readonly switches: readonly string[] }>> = {
-  claude: { values: ['--allowedTools', '--disallowedTools'], switches: [] },
+  claude: { values: ['--tools', '--allowedTools', '--disallowedTools'], switches: [] },
   pi: { values: ['--extension', '--tools', '--cezar-builtin-tools', '--exclude-tools'], switches: ['--no-tools', '--no-builtin-tools'] },
   omp: { values: ['--extension', '--tools'], switches: ['--no-tools'] },
 };
@@ -95,8 +95,8 @@ const EXPECTED: Readonly<Record<RunnerId, Readonly<Record<ToolGrantCaseId, Expec
     'extra-built-in': ['--allowedTools', `${CLAUDE_DEFAULT},WebFetch,${CLAUDE_SQUAWK}`],
     'extra-mcp': ['--allowedTools', `${CLAUDE_DEFAULT},mcp__docs__search,${CLAUDE_SQUAWK}`],
     'narrowed': ['--allowedTools', `Read,Grep,${CLAUDE_SQUAWK}`],
-    // An empty list sends no allowlist, so it grants what an unset one does (hearsay-tools/cezarion#1849).
-    'empty': [],
+    // An empty list removes every built-in tool and keeps the Squawk tools (hearsay-tools/squawk#1849).
+    'empty': ['--tools', '', '--allowedTools', CLAUDE_SQUAWK],
     'bash-allowlist': ['--allowedTools', `Read,Edit,Write,Grep,Glob,Bash(git status:*),${CLAUDE_SQUAWK}`],
     'unset-bash-allowlist': [],
   },
@@ -125,7 +125,7 @@ const EXPECTED: Readonly<Record<RunnerId, Readonly<Record<ToolGrantCaseId, Expec
     'narrowed': [...OMP_EXTENSIONS, '--tools', `read,grep,${CEZAR}`],
     'empty': [...OMP_EXTENSIONS, '--no-tools'],
     'bash-allowlist': [...OMP_EXTENSIONS, '--tools', `read,edit,write,grep,glob,todo,lsp,ast_edit,task,wait,${CEZAR}`],
-    'unset-bash-allowlist': [...OMP_EXTENSIONS, '--tools', `read,edit,eval,glob,grep,task,wait,todo,web_search,write,${CEZAR}`],
+    'unset-bash-allowlist': [...OMP_EXTENSIONS, '--tools', `read,edit,eval,glob,grep,find,task,wait,todo,web_search,write,${CEZAR}`],
   },
   codex: IGNORED,
   opencode: IGNORED,
