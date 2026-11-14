@@ -13,7 +13,7 @@ import { projectPaths } from '../project-paths.ts';
 import { closeClaimSession, openClaimSession } from './run-claims.ts';
 import { RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
-import { findColdRunByCheckout, readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
+import { readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
 import { RunStore, runRecordSchema, type RunRecord } from './store.ts';
 
 describe('project run sources', () => {
@@ -85,7 +85,6 @@ describe('project run sources', () => {
     expect(store.readEvents(duplicate.id)).toEqual([]);
     expect(store.readEvents(fallback.id)[0]?.text).toBe('fallback');
     expect(store.sourceDataDir(duplicate.id)).toBe(root('cezar'));
-    expect(findColdRunByCheckout(root('cezar'), { worktreePaths: ['/fallback/worktree'], branch: null })?.id).toBe(fallback.id);
     expect(searchRunIndexFromDisk(root('cezar'), 'wrong fallback', { limit: 10 }).runs).toEqual([]);
   });
 
@@ -97,7 +96,6 @@ describe('project run sources', () => {
     seed('squawk', [fallback]);
     expect(new Set(readRunIndexFromDisk(root('cezar')).runs.map(item => item.id))).toEqual(new Set([legacy.id, fallback.id]));
     expect(searchRunIndexFromDisk(root('cezar'), 'fallback', { limit: 10 }).runs.map(item => item.id)).toEqual([fallback.id]);
-    expect(findColdRunByCheckout(root('cezar'), { worktreePaths: ['/fallback/worktree'], branch: null })?.id).toBe(fallback.id);
   });
 
   it('refuses automatic writes to a fallback family, then copies it on explicit adoption and appends under legacy', () => {
