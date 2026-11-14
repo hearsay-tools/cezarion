@@ -19,9 +19,9 @@ if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FIL
 process.on('SIGTERM', () => process.exit(143));
 
 const BUILTIN_TOOLS = ['read', 'bash', 'edit', 'ast_grep', 'ast_edit', 'ask', 'debug', 'ida', 'eval', 'github', 'glob', 'grep', 'find', 'lsp', 'checkpoint', 'rewind', 'context_notes', 'new_context', 'security_scan', 'task', 'wait', 'todo', 'web_search', 'write', 'memory_edit', 'retain', 'recall', 'reflect', 'learn', 'manage_skill'];
-// Gated by `find.enabled` / `astGrep.enabled`, both off without user config.
-const GATED_TOOLS = new Set(['find', 'ast_grep']);
-const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'eval', 'glob', 'grep', 'task', 'wait', 'todo', 'web_search', 'write'];
+// Gated by `astGrep.enabled`, off without user config. Since 18.13.1 `find` is on by default.
+const GATED_TOOLS = new Set(['ast_grep']);
+const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'eval', 'glob', 'grep', 'find', 'task', 'wait', 'todo', 'web_search', 'write'];
 const VALUE_FLAGS = new Set(['--mode', '--extension', '--resume', '--append-system-prompt', '--model', '--thinking', '--add-dir', '--config', '--tools']);
 const BOOLEAN_FLAGS = new Set(['--no-tools']);
 

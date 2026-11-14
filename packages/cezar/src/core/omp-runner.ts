@@ -60,12 +60,13 @@ export const OMP_BUILTIN_TOOL_NAMES: readonly string[] = [
 ];
 
 /**
- * The tools OMP v18.4.11 enables with no `--tools` and no user config (recorded from the real
- * binary's `get_state.dumpTools`). Only read under governed delegation, which must name a list
- * to leave `task`, `wait` and `eval` out of it.
+ * The tools OMP v18.13.1 enables with no `--tools` and no user config (recorded from the real
+ * binary's `get_state.dumpTools`). Only read for an unset grant with a bashAllowlist, which must
+ * name a list to leave bash out. A tool a later OMP adds to its defaults is missing from that
+ * list until it is added here (hearsay-tools/squawk#2021).
  */
 const OMP_DEFAULT_TOOL_NAMES: readonly string[] = [
-  'read', 'bash', 'edit', 'eval', 'glob', 'grep', 'task', 'wait', 'todo', 'web_search', 'write',
+  'read', 'bash', 'edit', 'eval', 'glob', 'grep', 'find', 'task', 'wait', 'todo', 'web_search', 'write',
 ];
 
 /** Squawk tool names with an OMP equivalent; OMP built-ins and `mcp__*` pass through as-is. */
@@ -95,7 +96,7 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
   cwd: { honored: true, via: 'spawn cwd' },
-  toolGrant: { honored: true, via: "--tools, mapped onto OMP names; unmapped names dropped (fail closed); a bashAllowlist has no prefix equivalent, so bash is dropped from --tools (Pi's rule), and an unset grant names OMP's default set first so bash can be left out" },
+  toolGrant: { honored: true, via: "--tools, mapped onto OMP names; unmapped names dropped (fail closed); a bashAllowlist has no prefix equivalent, so bash is dropped from --tools (Pi's rule), and an unset grant names OMP's default set first so bash can be left out. --tools filters built-in tools only: MCP and extension tools stay callable under a narrowed list (hearsay-tools/squawk#1357)" },
   restrictCrossSessionMessaging: {
     honored: false,
     reason: 'OMP 18.13.1 has no cross-session tool in its default set; its irc tool is an in-process bus that reaches only agents inside the same OMP process, so subagent messaging and task stay (hearsay-tools/cezarion#2279)',

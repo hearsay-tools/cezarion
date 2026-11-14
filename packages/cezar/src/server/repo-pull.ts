@@ -1,5 +1,6 @@
 import { productEnv } from '../core/product-env.ts';
 import { execFile } from 'node:child_process';
+import { gitEnv } from '../git-command.ts';
 import { promisify } from 'node:util';
 import type { RepoPullBranchesResponse, RepoPullConfirmation, RepoPullError, RepoPullInput, RepoPullResponse } from '@open-mercato/cezar-contract';
 import { isSafeGitRef } from '../git-refs.ts';
@@ -20,7 +21,7 @@ async function git(root: string, args: string[]): Promise<string> {
     encoding: 'utf8',
     timeout: 60_000,
     maxBuffer: 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_MERGE_AUTOEDIT: 'no', GIT_EDITOR: 'true' },
+    env: gitEnv({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_MERGE_AUTOEDIT: 'no', GIT_EDITOR: 'true' }),
   });
   return stdout.trim();
 }
