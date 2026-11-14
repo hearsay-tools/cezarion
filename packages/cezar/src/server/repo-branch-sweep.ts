@@ -79,6 +79,12 @@ async function runSweep(project: SweepProject, options: SweepOptions): Promise<S
   }
 }
 
+/** Test-only: wait for every running sweep. A suite that resets a repository a sweep may still
+ *  write (it takes the worktree mutation lock) awaits this first. */
+export async function __settleBranchSweepsForTests(): Promise<void> {
+  await Promise.all(running.values());
+}
+
 /** Test-only: forget running sweeps and their start times. */
 export function __resetBranchSweepForTests(): void {
   running.clear();

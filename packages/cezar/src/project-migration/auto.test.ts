@@ -35,6 +35,7 @@ import { handoffPath } from '../handoff.ts';
 import { LEGACY_RUNS_FILE } from '../legacy-runs.ts';
 import { fallbackProjectWriteError } from '../project-paths.ts';
 import { createRunManager } from '../server/run-manager.testkit.ts';
+import { __settleBranchSweepsForTests } from '../server/repo-branch-sweep.ts';
 
 /**
  * The cockpit's automatic project move (hearsay-tools/cezarion#3089): at cockpit start and at a project's first open, a legacy project moves before anything
@@ -70,7 +71,9 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     process.env.CEZ_DRY_RUN = '1';
     clearProjectProbeCache();
   });
-  afterEach(() => {
+  // A background branch sweep from the last test's project open may still write the repository.
+  afterEach(async () => {
+    await __settleBranchSweepsForTests();
     vi.restoreAllMocks();
     for (const dispose of disposers.splice(0)) dispose();
     for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });

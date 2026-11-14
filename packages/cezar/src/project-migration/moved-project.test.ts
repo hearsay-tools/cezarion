@@ -23,6 +23,7 @@ import { migrateProject, resumeProjectMigration } from './engine.ts';
 import { planProjectMigration } from './plan.ts';
 import { buildMigrationProject, git, projectSnapshot, removeMigrationProject, TASK, WORKER, type MigrationProject } from './project-migration.testkit.ts';
 import { createRunManager } from '../server/run-manager.testkit.ts';
+import { __settleBranchSweepsForTests } from '../server/repo-branch-sweep.ts';
 
 /**
  * The write root of a moved project (hearsay-tools/cezarion#3150): the completed migration's marker makes `projectPaths` write `.ai/squawk/`
@@ -57,7 +58,9 @@ describe('a moved project', { timeout: TIMEOUT }, () => {
     homes.push(mkdtempSync(join(realpathSync(tmpdir()), 'cez-moved-project-home-')));
     useTestHome(Home.sandbox(homes.at(-1)!));
   });
-  afterEach(() => {
+  // A background branch sweep from the last test's project open may still write the repository.
+  afterEach(async () => {
+    await __settleBranchSweepsForTests();
     useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
   });
