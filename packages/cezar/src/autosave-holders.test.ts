@@ -1,5 +1,7 @@
 import { autosaveOwnerEnv } from './autosave-git.ts';
 import * as childProcess from 'node:child_process';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as liveness from './delegation/process-liveness.ts';
 import { AUTOSAVE_OWNER_ENV, watchAutosaveHolders, type OwnerProbe } from './autosave-holders.ts';
@@ -26,7 +28,7 @@ describe('autosave cwd-holder proof', () => {
     vi.spyOn(liveness, 'processStartToken').mockImplementation(pid => tokens.get(pid));
     vi.spyOn(liveness, 'recordedProcessLive').mockImplementation(entry => tokens.has(entry.pid) && tokens.get(entry.pid) === entry.startToken);
   });
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllGlobals(); });
 
   it.each(['freebsd'] as const)('refuses %s before spawning without a termination proof', async platform => {
     vi.stubGlobal('process', { ...process, platform });
@@ -91,6 +93,15 @@ describe('autosave cwd-holder proof', () => {
   it('fails closed on an environment it cannot read', async () => {
     const pending = (await watch())!;
     candidates = [101, 202]; tokens.set(202, 'hidden'); owners.set(202, { parent: 77 });
+    expect(await pending()).toBe(true);
+  });
+  it('fails closed on a Linux owner read error that does not prove exit', async () => {
+    const read = fsPromises.readFile;
+    vi.spyOn(fsPromises, 'readFile').mockImplementation(((path: string, ...rest: unknown[]) => String(path) === '/proc/202/stat'
+      ? Promise.reject(Object.assign(new Error('EMFILE'), { code: 'EMFILE' })) : Reflect.apply(read, fsPromises, [path, ...rest])) as typeof fsPromises.readFile);
+    syncBuiltinESMExports();
+    const pending = (await watchAutosaveHolders('/worktree', owner))!;
+    candidates = [101, 202]; tokens.set(202, 'unreadable');
     expect(await pending()).toBe(true);
   });
   it('skips a candidate that exits before its owner is read', async () => {

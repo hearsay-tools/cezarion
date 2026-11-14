@@ -118,16 +118,19 @@ export const AUTOSAVE_OWNER_ENV = 'CEZ_AUTOSAVE_OWNER';
 /** `marked` is absent when the environment cannot be read; `gone` means the process exited. */
 export type OwnerProbe = (pid: number, marker: string) => Promise<{ marked?: boolean | undefined; parent?: number } | 'gone'>;
 
+/** Only these codes prove the process exited; any other read error (EMFILE, EIO) is uncertainty. */
+const exited = (error: unknown) => ['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '');
+
 const linuxOwnerProbe: OwnerProbe = async (pid, marker) => {
   let stat: string;
   try { stat = await readFile(`/proc/${pid}/stat`, 'utf8'); }
-  catch { return 'gone'; }
+  catch (error) { return exited(error) ? 'gone' : {}; }
   const parent = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[1]);
   try {
     const environ = (await readFile(`/proc/${pid}/environ`, 'utf8')).split('\0');
     return { marked: environ.includes(`${AUTOSAVE_OWNER_ENV}=${marker}`), parent };
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'gone' : { parent };
+    return exited(error) ? 'gone' : { parent };
   }
 };
 
