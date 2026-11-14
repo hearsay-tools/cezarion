@@ -4,7 +4,6 @@ import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { autosaveOwnerEnv } from './autosave-git.ts';
 import { autosaveCleanupBlocker, autosaveCleanupIds, clearAutosaveCleanup, retainAutosaveCleanup } from './autosave-cleanup.ts';
 import { processStartToken } from './delegation/process-liveness.ts';
 import * as liveness from './delegation/process-liveness.ts';
@@ -100,26 +99,32 @@ describe('durable autosave cleanup', () => {
     expect(autosaveCleanupBlocker(dataDir, id)).toBeUndefined();
   });
 
-  it.runIf(process.platform === 'linux')('after controller death, only the save\'s own holders block, named by command (hearsay-tools/squawk#963)', async () => {
+  it.runIf(process.platform === 'linux')('after controller death, a holder that started before the save does not block; a later one does, named by command (hearsay-tools/squawk#963)', async () => {
     const { dataDir, id, deadOwner } = fixture();
-    const marker = randomUUID();
-    const holders: ReturnType<typeof spawn>[] = [];
-    const start = (env: NodeJS.ProcessEnv) => {
-      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: dataDir, stdio: 'ignore', env });
-      holders.push(child);
+    const exits = new Map<ReturnType<typeof spawn>, Promise<unknown>>();
+    const start = () => {
+      // A clean environment carries no autosave marker: after a crash that proves nothing.
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: dataDir, stdio: 'ignore', env: { PATH: process.env.PATH } });
+      exits.set(child, new Promise(resolve => child.once('exit', resolve)));
       return child;
     };
+    const stop = (child: ReturnType<typeof spawn>) => { child.kill('SIGKILL'); return exits.get(child); };
+    const ticks = (pid: number) => Number(processStartToken(pid)!.split(':').at(-1));
     try {
-      const unrelated = start({ PATH: process.env.PATH });
-      retainAutosaveCleanup(dataDir, id, dataDir, 'held', { processes: [], groups: [], uncertain: false, marker });
+      const before = start();
+      // The save's first Git leader: a process at least one clock tick younger than `before`.
+      let leader = start();
+      while (ticks(leader.pid!) <= ticks(before.pid!)) { await stop(leader); leader = start(); }
+      retainAutosaveCleanup(dataDir, id, dataDir, 'held', { processes: [], groups: [], uncertain: false, since: processStartToken(leader.pid!) });
+      await stop(leader);
       deadOwner();
       expect(autosaveCleanupBlocker(dataDir, id)).toBeUndefined();
-      const saved = start(autosaveOwnerEnv(marker, { PATH: process.env.PATH }));
+      const after = start();
       const blocker = autosaveCleanupBlocker(dataDir, id);
-      expect(blocker).toContain(`${saved.pid} (${basename(process.execPath)})`);
-      expect(blocker).not.toContain(String(unrelated.pid));
+      expect(blocker).toContain(`${after.pid} (${basename(process.execPath)})`);
+      expect(blocker).not.toContain(String(before.pid));
     } finally {
-      await Promise.all(holders.map(child => new Promise(resolve => { child.once('exit', resolve); child.kill('SIGKILL'); })));
+      await Promise.all([...exits.keys()].map(stop));
     }
   });
 

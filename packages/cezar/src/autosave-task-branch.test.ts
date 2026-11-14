@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { autosaveCommit, type AutosaveOutcome } from './autosave-commit.ts';
-import * as liveness from './delegation/process-liveness.ts';
+import * as holders from './autosave-holders.ts';
 
 const run = promisify(execFile);
 // The fixture reads Git directly, so a test's PATH shim reaches only the save.
@@ -53,13 +53,12 @@ describe('autosave task-branch rule (#1004)', () => {
     bin = undefined;
   });
 
-  // hearsay-tools/squawk#1694: the save's Git commands share one holder watch, which scans
-  // the worktree's processes before the first command and after the last.
-  it.runIf(process.platform === 'linux')('scans the worktree processes twice per save, not twice per Git command', async () => {
-    const scans = vi.spyOn(liveness, 'processesWithCwdUnder');
+  // hearsay-tools/squawk#1694: the save's Git commands share one holder watch and one marker.
+  it('starts one holder watch per save, not one per Git command', async () => {
+    const watches = vi.spyOn(holders, 'watchAutosaveHolders');
     writeFileSync(join(repo, 'a.txt'), 'edited\n');
     expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH })).toBe('committed');
-    expect(scans).toHaveBeenCalledTimes(2);
+    expect(watches).toHaveBeenCalledTimes(process.platform === 'win32' ? 0 : 1);
   });
 
   // hearsay-tools/squawk#3207: a cockpit started from a Git hook inherits GIT_DIR; the save still uses its worktree.

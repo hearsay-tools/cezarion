@@ -41,12 +41,14 @@ interface AutosaveSave {
   holders: AutosaveHolders;
   /** The running Git leader: an unmarked child of it is still Git's. */
   leader?: number | undefined;
+  /** The first Git leader's start token, null when unreadable: no process of the save started before it. */
+  since?: string | null;
   /** A command timed out: the save is unsuccessful, and its shutdown has started. */
   stopping: boolean;
   /** A blocked report went out: every later change is reported at once. */
   blocked: boolean;
   warn(label: string, message: string): void;
-  report(label: string, message: string, proof: Omit<AutosaveCleanupProof, 'marker'>): void;
+  report(label: string, message: string, proof: Omit<AutosaveCleanupProof, 'since'>): void;
 }
 
 /** A clean watch for win32, where the job-object proof in autosave-windows.ts replaces the cwd scan. */
@@ -73,12 +75,13 @@ async function groupAlive(pid: number, diagnostic: (message: string) => void): P
 
 /**
  * Runs one save's Git commands under one owner marker and one cwd-holder watch
- * (hearsay-tools/squawk#1694): the watch scans the worktree's processes once before the
- * first command and once after the last, not twice per command. Each command still waits
- * until its process group is gone. Git descendants that left the group are checked after
- * the last command: the caller holds the worktree for the whole save, so no other writer
- * can start in between. Returns `unsuccessful` when no Git command may start, or when a
- * descendant outlives the budget.
+ * (hearsay-tools/squawk#1694). The watch reads every process's cwd once, before the first
+ * command; the check after each command reads only the processes born since the previous
+ * one, so a Git descendant is observed, and stays tracked if it later leaves the worktree.
+ * Each command waits until its process group is gone; the save then waits for the observed
+ * descendants that left the group. The caller holds the worktree for the whole save, so no
+ * other writer starts while one of them runs. Returns `unsuccessful` when no Git command may
+ * start, or when a descendant outlives the budget.
  */
 export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, unsuccessful: T,
   run: (git: (args: string[]) => Promise<AutosaveGitResult>) => Promise<T>): Promise<T> {
@@ -101,7 +104,7 @@ export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, 
       if (blockedWarnings < BLOCKED_WARNINGS) save.warn(label, message);
       else if (blockedWarnings === BLOCKED_WARNINGS) save.warn(label, 'further cleanup changes suppressed until cleanup is confirmed; worktree reuse stays blocked');
       blockedWarnings++;
-      try { options.onBlocked?.(message, { ...proof, marker }); } catch { /* Retain cleanup if the caller cannot take its own hold. */ }
+      try { options.onBlocked?.(message, { ...proof, ...(save.since ? { since: save.since } : {}) }); } catch { /* Retain cleanup if the caller cannot take its own hold. */ }
     },
   };
   if (process.platform !== 'win32') {
@@ -112,7 +115,11 @@ export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, 
     }
     save.holders = holders;
   }
-  const result = await run(args => runAutosaveGit(save, args));
+  const result = await run(async args => {
+    const ran = await runAutosaveGit(save, args);
+    await save.holders(); // Observes this command's descendants; the save waits for them below.
+    return ran;
+  });
   return await settleHolders(save) ? result : unsuccessful;
 }
 
@@ -197,6 +204,7 @@ async function runAutosaveGit(save: AutosaveSave, args: string[]): Promise<Autos
     let groupDiagnostic = 'process inspection pending';
     let groupPending = true;
     const leaderToken = child.pid === undefined ? undefined : processStartToken(child.pid);
+    if (save.since === undefined) save.since = leaderToken ?? null;
     const reportBlocked = () => {
       if (!blocked || finished) return;
       const message = `termination not confirmed; Git PID ${child.pid ?? 'unknown'} ${exited ? 'exited' : 'has not exited'}; ${groupDiagnostic}; ` +
