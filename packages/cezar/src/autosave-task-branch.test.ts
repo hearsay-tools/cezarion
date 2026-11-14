@@ -62,6 +62,15 @@ describe('autosave task-branch rule (#1004)', () => {
     expect(scans).toHaveBeenCalledTimes(2);
   });
 
+  // hearsay-tools/squawk#3207: a cockpit started from a Git hook inherits GIT_DIR; the save still uses its worktree.
+  it('saves the worktree it was given when the process inherited GIT_DIR', async () => {
+    vi.stubEnv('GIT_DIR', join(tmpdir(), 'cez-autosave-absent-git-dir'));
+    writeFileSync(join(repo, 'a.txt'), 'edited\n');
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH })).toBe('committed');
+    vi.unstubAllEnvs();
+    expect(await out(['show', 'HEAD:a.txt'])).toBe('edited');
+  });
+
   it('leaves a dirty tree uncommitted on a branch other than the task branch', async () => {
     await git(['checkout', '-q', '-b', 'fix/1004-x']);
     const tip = await out(['rev-parse', 'fix/1004-x']);
