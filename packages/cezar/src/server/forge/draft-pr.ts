@@ -3,6 +3,7 @@ import { fallbackProjectWriteError } from '../../project-paths.ts';
 import { productEnv } from '../../core/product-env.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { execFile } from 'node:child_process';
+import { gitEnv } from '../../git-command.ts';
 import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-contract/handoff';
 import { autosaveCommit } from '../../autosave-commit.ts';
 import type { DraftPrInput, DraftPrOutcome } from './types.ts';
@@ -140,7 +141,7 @@ function execTool(args: string[], cwd: string, bin: string, timeoutMs = 30_000):
         // piped stdio is not enough to stop it. Without this a `git push` that
         // cannot authenticate hangs for the whole timeout and surfaces as a
         // blank one-minute stall instead of git's own "could not read Username".
-        env: { ...withoutHomeEnv(process.env), GIT_TERMINAL_PROMPT: '0' },
+        env: gitEnv({ GIT_TERMINAL_PROMPT: '0' }, withoutHomeEnv(process.env)),
       },
       (err, stdout, stderr) =>
         resolve({
