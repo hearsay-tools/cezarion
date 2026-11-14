@@ -52,7 +52,7 @@ describe('RunStore save lifecycle (#124)', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('retention archives overflow unarchived terminal runs, reaps their scratch, and keeps live ones', () => {
+  it('retention archives overflow settled runs, reaps their scratch, and keeps live and review ones', () => {
     const statuses = ['queued', 'running', 'waiting', 'done', 'review', 'failed', 'cancelled'] as const;
     const oldRuns = statuses.map((status) => ({ ...LEGACY_RUN, id: status, status, archived: false }));
     const kept = Array.from({ length: 300 }, (_, index) => ({
@@ -66,7 +66,7 @@ describe('RunStore save lifecycle (#124)', () => {
     const store = RunStore.open(dataDir, { keepLive: true });
     store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
     for (const status of statuses) {
-      const live = ['queued', 'running', 'waiting'].includes(status);
+      const live = ['queued', 'running', 'waiting', 'review'].includes(status);
       expect(store.getRun(status), status).toBeDefined();
       expect(store.getRun(status)?.archived, status).toBe(!live);
       expect(existsSync(join(dataDir, 'tmp', status)), status).toBe(live);
@@ -124,6 +124,33 @@ describe('RunStore save lifecycle (#124)', () => {
     const store = RunStore.open(dataDir);
     store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
     expect(store.getRun(pinnedId)).toMatchObject({ archived: false, pinned: true, title: 'pinned overflow' });
+    store.flush();
+  });
+
+  // hearsay-tools/squawk#777: a delegation root leaves with its workers, and only once none is live.
+  it('retention archives a settled family together and keeps a family with a live worker', () => {
+    const family = (root: string, worker: string, destroy?: object, extra: { pinned?: true; historyDeletion?: 'pending' } = {}) => [
+      { ...LEGACY_RUN, id: root, delegation: { role: 'root', permissions: ['spawn'], receipts: [],
+        ...(extra.historyDeletion ? { historyDeletion: extra.historyDeletion } : {}) } },
+      { ...LEGACY_RUN, id: worker, createdAt: '2026-01-02T00:00:00.000Z',
+        ...(extra.pinned ? { pinned: true, pinnedAt: '2026-01-02T00:00:00.000Z' } : {}), delegation: {
+        role: 'worker', parentRunId: root, permissions: [],
+        workspace: { ownerRunId: worker, resourceId: randomUUID(), kind: 'owned-isolated', path: '/tmp/worker', branch: 'worker', baselineSha: 'a'.repeat(40) },
+        ...(destroy ? { destroy } : {}),
+      } },
+    ];
+    const ids = Array.from({ length: 8 }, () => randomUUID());
+    const [settledRoot, settledWorker, liveRoot, liveWorker, pinnedRoot, pinnedWorker, deletingRoot, deletingWorker] = ids as [string, string, string, string, string, string, string, string];
+    const kept = Array.from({ length: 300 }, () => ({ ...LEGACY_RUN, id: randomUUID(), createdAt: '2026-02-01T00:00:00.000Z' }));
+    seedRuns(dataDir, [...family(settledRoot, settledWorker),
+      ...family(liveRoot, liveWorker, { requestedAt: '2026-01-03T00:00:00.000Z', phase: 'cleaning', remaining: ['branch'] }),
+      // A pinned worker, or a history deletion under way, keeps the whole family unchanged.
+      ...family(pinnedRoot, pinnedWorker, undefined, { pinned: true }),
+      ...family(deletingRoot, deletingWorker, undefined, { historyDeletion: 'pending' }), ...kept]);
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+    expect(ids.map((id) => store.getRun(id)?.archived)).toEqual([true, true, false, false, false, false, false, false]);
+    expect(store.getRun(pinnedWorker)?.pinned).toBe(true);
     store.flush();
   });
 

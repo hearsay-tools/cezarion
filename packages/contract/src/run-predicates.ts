@@ -110,9 +110,12 @@ export function isUnread(run: ReadStateInput): boolean {
   return run.seenAt === undefined || run.seenAt < finishedAt;
 }
 
-/** History retention excludes live tasks, delegation families and pinned runs. */
+/** History retention archives a settled, unpinned task with its whole worker family. A task at
+ *  `review` stays, and so do a worker (it leaves with its root) and an invalid record. The store
+ *  also keeps a family while any member is live (hearsay-tools/squawk#777). */
 export function isRetentionCandidate(run: Pick<RunRecord, 'status' | 'delegation' | 'pinned'>): boolean {
-  return !isLiveStatus(run.status) && !run.delegation && !run.pinned;
+  const settled = run.status === 'done' || run.status === 'failed' || run.status === 'cancelled';
+  return settled && (!run.delegation || run.delegation.role === 'root') && !run.pinned;
 }
 
 /** Whether a record names a referenced PR or issue; repository scoping remains separate. */
@@ -133,8 +136,9 @@ export const SWEEPABLE_RUN_RULE = {
 };
 
 export const RETENTION_RUN_RULE = {
-  sql: "id IN (SELECT value FROM json_each(?)) AND status NOT IN ('queued', 'running', 'waiting')" +
-    " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL" +
+  sql: "id IN (SELECT value FROM json_each(?)) AND status IN ('done', 'failed', 'cancelled')" +
+    " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation.role') IS NOT 'worker'" +
+    " AND json_extract(summary, '$.delegation.role') IS NOT 'invalid'" +
     " AND json_extract(summary, '$.pinned') IS NOT 1",
   matches: isRetentionCandidate,
 };

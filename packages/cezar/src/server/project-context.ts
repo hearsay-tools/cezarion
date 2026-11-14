@@ -18,7 +18,7 @@ import { reconcileAgentMarkers } from '../preview/agent-marker.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
-import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './repo-branch-sweep.ts';
+import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches, type SweepOptions, type SweepProject } from './repo-branch-sweep.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -206,6 +206,10 @@ export class ProjectContexts {
   private readonly building = new Map<string, Promise<ProjectContext>>();
   private readonly maintenance = new Map<string, Promise<unknown>>();
   private readonly repoHandleControllers = new WeakMap<RunStore, AbortController>();
+  /** Each context's branch sweeps (hearsay-tools/squawk#911): disposing the context aborts them,
+   *  and `disposeAll` resolves once every sweep, of any context, has stopped. */
+  private readonly sweepControllers = new WeakMap<RunStore, AbortController>();
+  private readonly sweeps = new Set<Promise<unknown>>();
   /** Live store-created subscribers; invoked before RunManager recovery. */
   private readonly storeListeners = new Set<(store: RunStore) => void>();
   /** Live `onContextBuilt` subscribers (workspace SSE, step 2.8). */
@@ -451,16 +455,28 @@ export class ProjectContexts {
     }
     this.repoHandleControllers.get(ctx.store)?.abort();
     this.repoHandleControllers.delete(ctx.store);
+    this.sweepControllers.get(ctx.store)?.abort();
     this.managerCleanups.get(ctx.manager)?.();
     this.managerCleanups.delete(ctx.manager);
     teardown(ctx);
   }
 
-  /** Tear down every built context (process shutdown), and every build still running. */
-  disposeAll(): void {
+  /** Tear down every built context (process shutdown), and every build still running. Resolves
+   *  once their background branch sweeps have stopped. */
+  disposeAll(): Promise<void> {
     this.generation += 1;
     for (const manager of this.buildingManagers.values()) manager.dispose();
     for (const id of this.ids()) this.dispose(id, { releasePreviews: false });
+    return Promise.allSettled([...this.sweeps]).then(() => undefined);
+  }
+
+  /** A branch sweep this store's context owns, stopped when the context is disposed. */
+  private sweep(store: RunStore, project: SweepProject, options: SweepOptions): void {
+    const controller = this.sweepControllers.get(store);
+    if (!controller || controller.signal.aborted) return;
+    const sweep = sweepMergedBranches(project, { ...options, signal: controller.signal });
+    this.sweeps.add(sweep);
+    void sweep.finally(() => this.sweeps.delete(sweep));
   }
 
   /** `stale` turns true once `dispose(id)` or `disposeAll` overtook this build. Checked after
@@ -502,11 +518,12 @@ export class ProjectContexts {
     reconcileAutomationReceipts(automationStore, store);
     this.notifyStoreCreated(store);
     armPreview(store, dataDir, this.deps.preview);
+    this.sweepControllers.set(store, new AbortController());
     const manager: RunManager = createManager(store, project.root, {
       home: this.deps.home,
       createRunner: this.deps.createRunner,
       semaphore: this.semaphore, preview: this.deps.preview, squawkPort: this.deps.squawkPort, toolActivity: this.deps.toolActivity,
-      sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager, home: this.deps.home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
+      sweepBranches: (keep) => this.sweep(store, { root: project.root, store, manager, home: this.deps.home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
     });
     this.buildingManagers.set(projectId, manager);
     try {
@@ -526,7 +543,8 @@ export class ProjectContexts {
         await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
         // In the background: the sweep may ask GitHub (hearsay-tools/cezarion#2268). Never over a
         // store that could not open: its runs are unknown, and every branch would look ownerless.
-        if (!store.unavailable) void sweepMergedBranches({ root: project.root, store, manager, home: this.deps.home }, { keep });
+        // Not from a build that disposal overtook: nothing would abort or await its sweep.
+        if (!store.unavailable && !stale()) this.sweep(store, { root: project.root, store, manager, home: this.deps.home }, { keep });
       }
       await manager.recover();
       // Archived transcripts left plain (or both-present after a crash) — fire-and-forget,
@@ -547,7 +565,8 @@ export class ProjectContexts {
       reportsIndex(store).start();
       return { home: this.deps.home, id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
-      // A failed build must not leak the half-built context's subscriptions.
+      // A failed build must not leak the half-built context's subscriptions, nor its sweep.
+      this.sweepControllers.get(store)?.abort();
       this.managerCleanups.get(manager)?.();
       this.managerCleanups.delete(manager);
       teardown({ store, manager });

@@ -68,6 +68,7 @@ import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
+import { listBranchOwners, type BranchOwner } from './branch-owners.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
 import { hasLegacyWaitFields, upgradeLegacyWaits, UNREADABLE_WAIT } from './legacy-waits.ts';
@@ -378,31 +379,7 @@ const AUTOMATION_ORIGIN_HEAL_SQL =
   "instr(data, '\"automation') > 0 AND json_extract(summary, '$.automationId') IS NULL" +
   " AND (json_extract(data, '$.automation.automationId') IS NOT NULL OR json_extract(data, '$.automationTrigger.automationId') IS NOT NULL)";
 
-/** What branch cleanup and git-log attribution read about a run (`RunStore.listBranchOwners`). */
-export interface BranchOwner {
-  id: string;
-  title: string;
-  status: RunStatus;
-  archived: boolean;
-  createdAt: string;
-  /** The branch the run owns (see `encodeRunRow`); absent for a run listed for its PR alone. */
-  branch?: string;
-  baseBranch?: string;
-  pullRequestUrl?: string;
-}
-
-/** A record as a branch owner, or undefined when it owns no branch and created no PR: the
- *  projection `listBranchOwners` reads off a row's summary and columns, computed from memory. */
-export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
-  const branch = encodeRunRow(run).branch;
-  if (!branch && run.pullRequestUrl === undefined) return undefined;
-  return {
-    id: run.id, title: run.title, status: run.status, archived: run.archived, createdAt: run.createdAt,
-    ...(branch ? { branch } : {}),
-    ...(run.baseBranch === undefined ? {} : { baseBranch: run.baseBranch }),
-    ...(run.pullRequestUrl === undefined ? {} : { pullRequestUrl: run.pullRequestUrl }),
-  };
-}
+export { branchOwnerOf, type BranchOwner } from './branch-owners.ts';
 
 /** Who may hold a run in memory besides its own record (see `RunStore.pin`). `maintenance` is the
  *  RunManager's publish, worktree-reclaim and branch-cleanup claims, held across their async work. */
@@ -1484,23 +1461,9 @@ export class RunStore extends EventEmitter {
    * no record. Held runs answer from memory.
    */
   listBranchOwners(): BranchOwner[] {
-    const owners = new Map<string, BranchOwner>();
-    for (const row of this.db?.listBranchOwners("branch IS NOT NULL OR json_extract(summary, '$.pullRequestUrl') IS NOT NULL") ?? []) {
-      if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
-      const summary = parseStoredSummary(row.summary);
-      owners.set(row.id, {
-        id: row.id, createdAt: row.createdAt, status: row.status as RunStatus, archived: row.archived,
-        ...(row.branch === null ? {} : { branch: row.branch }),
-        ...(row.baseBranch === null ? {} : { baseBranch: row.baseBranch }),
-        title: summary?.title ?? row.id,
-        ...(summary?.pullRequestUrl === undefined ? {} : { pullRequestUrl: summary.pullRequestUrl }),
-      });
-    }
-    for (const run of this.held.values()) {
-      const owner = branchOwnerOf(run);
-      if (owner) owners.set(run.id, owner);
-    }
-    return [...owners.values()];
+    const rows = (this.db?.listBranchOwners("branch IS NOT NULL OR json_extract(summary, '$.pullRequestUrl') IS NOT NULL") ?? [])
+      .filter((row) => !this.deleted.has(row.id) && !this.held.has(row.id));
+    return listBranchOwners(rows, [...this.held.values()], (id) => this.getRun(id));
   }
 
   /** The rows a column query returned, as records, with memory laid over them: a held run
@@ -3149,8 +3112,8 @@ export class RunStore extends EventEmitter {
 
   /**
    * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived ones,
-   * archive each finished run without delegation that is not pinned and whose family this store
-   * can claim. Ranked over the row keys (the `created_at` index, no record decoded) with memory
+   * archive each settled task that is not pinned and whose family this store can claim, together
+   * with its workers, once no member of the family is live (hearsay-tools/squawk#777). Ranked over the row keys (the `created_at` index, no record decoded) with memory
    * laid over them, since a run created or archived since the last save has no row yet; the rows
    * past the cut are then filtered in `runs.db`, so only real candidates decode. Archived runs
    * are never deleted by retention — only an explicit delete, worker destruction, or history
@@ -3166,8 +3129,7 @@ export class RunStore extends EventEmitter {
     if (overflow.length === 0) return;
     const stale = overflow.flatMap((id) => {
       const run = this.held.get(id);
-      // Retention must not archive a live task between turns, a pinned run, or a delegation
-      // family whose history is promised until explicit deletion.
+      // Retention must not archive a live task between turns, a pinned run, or a worker on its own.
       return run && !this.hasFallbackRun(id) && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
     const skipped = overflow.filter(id => this.hasFallbackRun(id)).length;
@@ -3182,8 +3144,19 @@ export class RunStore extends EventEmitter {
     for (const id of stale) {
       const run = this.record(id);
       if (!run || run.archived || !RETENTION_RUN_RULE.matches(run)) continue;
-      this.applyArchived(run, true);
-      removeAgentTmpDir(this.dataDir, id);
+      this.archiveSettledFamily(run);
+    }
+  }
+
+  /** Archive a root with its workers unless a member is live, mid-destroy or pinned, or a history
+   *  deletion is under way. Each member is marked dirty: the next save writes the family at once. */
+  private archiveSettledFamily(root: RunRecord): void {
+    const workers = this.listWorkersOf(root.id), family = [root, ...workers];
+    if (family.some((run) => isLiveRecord(run) || run.pinned) || (root.delegation?.role === 'root' && root.delegation.historyDeletion)) return;
+    for (const member of [root, ...workers.flatMap((worker) => this.record(worker.id) ?? [])]) {
+      if (member.archived) continue;
+      this.applyArchived(member, true);
+      removeAgentTmpDir(this.dataDir, member.id);
     }
   }
 

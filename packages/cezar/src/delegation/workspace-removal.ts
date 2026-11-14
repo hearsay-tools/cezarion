@@ -162,7 +162,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return undefined;
-        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
+        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared', forced: true };
         return checkpoint;
       }
 
@@ -196,26 +196,59 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           return undefined;
         }
         // hearsay-tools/cezarion#905: the worktree went away outside Squawk and left its branch behind.
-        // While the branch matches the receipt, is checked out nowhere, and it and every reflog entry
-        // sit at the baseline, it holds no work: delete it through the checkpointed compare-and-swap
-        // below. A branch reset back to its baseline keeps the worker's commits only in the reflog
-        // that the delete would drop. Commits on it are a human's call.
+        // While the branch matches the receipt, is checked out nowhere, and its tip and every reflog
+        // entry sit at the baseline or on another ref (hearsay-tools/squawk#911), it holds no work:
+        // delete it through the checkpointed compare-and-swap below, which verifies those refs too.
+        // A branch reset back to its baseline may keep the worker's commits only in the reflog that
+        // the delete would drop. Commits no other ref keeps are a human's call.
         remaining = ['branch'];
         if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return undefined; }
         const current = await verifyBranch(repoRoot, workspace, receipt);
-        if (current.sha !== workspace.baselineSha) {
-          named = await movedBranch(workspace.baselineSha, current.sha, 'its worker baseline');
-          return undefined;
-        }
-        const tips = current.log.content.toString('utf8').split('\n').filter(Boolean).map(entry => entry.split(' ')[1]);
-        if (tips.some(tip => tip !== workspace.baselineSha)) {
-          named = keepBranch('returned to its worker baseline after holding other commits');
+        if (!await keepingRefs(current)) {
+          named = await strandedName(current.sha);
           return undefined;
         }
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
         return { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
+      }
+
+      async function strandedName(tip: string): Promise<string> {
+        return tip !== workspace.baselineSha ? movedBranch(workspace.baselineSha, tip, 'its worker baseline')
+          : keepBranch('returned to its worker baseline after holding other commits');
+      }
+
+      /** For the branch tip and each reflog entry that is not the baseline, a branch or
+       * remote-tracking ref that contains it, other than this branch and never an alias; undefined
+       * when one has none, or when one ref is seen at two tips. A tip's ref also keeps every commit
+       * under it. */
+      async function keepingRefs(branch: { sha: string; log: { content: Buffer } }): Promise<Array<{ ref: string; sha: string }> | undefined> {
+        const tip = branch.sha;
+        const tips = branch.log.content.toString('utf8').split('\n').filter(Boolean).map(entry => entry.split(' ')[1] ?? '');
+        const refs = new Map<string, string>();
+        for (const sha of new Set([tip, ...tips])) {
+          if (sha === workspace.baselineSha) continue;
+          if (sha !== tip && refs.size > 0 && (await mutationGit(repoRoot, ['merge-base', '--is-ancestor', sha, tip])).ok) continue;
+          const listed = await mutationGit(repoRoot, ['for-each-ref', '--contains', sha, '--format=%(refname)%00%(objectname)%00%(symref)', 'refs/heads', 'refs/remotes']);
+          const witness = listed.ok ? listed.stdout.split('\n').map(line => line.split('\0'))
+            .find(([ref, at, symref]) => ref && at && !symref && ref !== `refs/heads/${workspace.branch}`) : undefined;
+          if (!witness || (refs.has(witness[0]!) && refs.get(witness[0]!) !== witness[1])) return undefined;
+          refs.set(witness[0]!, witness[1]!);
+        }
+        return [...refs].map(([ref, sha]) => ({ ref, sha }));
+      }
+
+      /** The refs the branch delete verifies. Unless the destroy removed the present checkout itself
+       * (`forced`, bound to the unchanged tip), prove on every attempt that no work is lost
+       * (hearsay-tools/squawk#911); the proof takes several Git calls, so the branch and its reflog
+       * are read once more, last. Undefined when the proof fails or the branch changed. */
+      async function deletionWitnesses(receipt: Receipt, checkpoint: Cleanup, current: Awaited<ReturnType<typeof verifyBranch>>) {
+        if (checkpoint.forced) return [];
+        const witnesses = await keepingRefs(current);
+        if (!witnesses) { named = await strandedName(current.sha); return undefined; }
+        const last = await verifyBranch(repoRoot, workspace, receipt);
+        return last.sha === checkpoint.sha && hash(last.log.content) === checkpoint.logHash ? witnesses : undefined;
       }
 
       async function removeBranch(receipt: Receipt, checkpoint: Cleanup): Promise<void> {
@@ -229,10 +262,16 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           // hearsay-tools/squawk#910: a tip that moved after the checkpoint is named like a stranded one.
           if (current.sha !== checkpoint.sha) { named = await movedBranch(checkpoint.sha, current.sha, 'the tip destroy recorded'); return; }
           if (hash(current.log.content) !== checkpoint.logHash) return;
+          const witnesses = await deletionWitnesses(receipt, checkpoint, current);
+          if (!witnesses) return;
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
           assertUnheld?.();
-          const removed = await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
+          // The refs that keep its commits must not have moved either: one ref transaction checks them.
+          const removed = witnesses.length === 0
+            ? await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha])
+            : await mutationGit(repoRoot, ['update-ref', '--no-deref', '--stdin'], undefined,
+              [...witnesses.map(({ ref, sha }) => `verify ${ref} ${sha}`), `delete refs/heads/${workspace.branch} ${checkpoint.sha}`].join('\n') + '\n');
           if (!removed.ok || await branchExists()) { report?.unexplained?.(); return; }
         }
         await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);

@@ -54,7 +54,7 @@ async function checkpoint(root: string, workspace: WorkerWorkspace): Promise<voi
 }
 
 const temporary: string[] = [];
-const disposers: Array<() => void> = [];
+const disposers: Array<() => unknown> = [];
 const savedHome = process.env.CEZ_HOME;
 const savedDryRun = process.env.CEZ_DRY_RUN;
 
@@ -70,9 +70,10 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     process.env.CEZ_DRY_RUN = '1';
     clearProjectProbeCache();
   });
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
-    for (const dispose of disposers.splice(0)) dispose();
+    // Closing the contexts waits for their branch sweeps, which may still write the repository.
+    for (const dispose of disposers.splice(0)) await dispose();
     for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
     useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
@@ -86,7 +87,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
       listProjects: async () => [{ id: 'p', root: project.root, status: 'ok' as const }] });
     disposers.push(() => contexts.disposeAll());
-    return { ownership, contexts, stop: () => { contexts.disposeAll(); ownership.releaseAll(); } };
+    return { ownership, contexts, stop: () => { void contexts.disposeAll(); ownership.releaseAll(); } };
   }
 
   const movedState = () => existsSync(join(project.newDir, 'runs.db')) && !existsSync(join(project.dataDir, 'runs.db'));
@@ -283,7 +284,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(contexts.peek(projectId)).toBeUndefined();
     } finally {
       await new Promise<void>(resolve => { server.close(() => resolve()); });
-      contexts.disposeAll();
+      await contexts.disposeAll();
       bootStore.close();
       warn.mockRestore();
       vi.unstubAllEnvs();
@@ -307,7 +308,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     const bootStore = RunStore.open(bootData, { keepLive: true });
     const started = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership,
       manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts, ...options }, 0);
-    disposers.push(() => { started.close(); contexts.disposeAll(); bootStore.close(); vi.unstubAllEnvs(); });
+    disposers.push(async () => { started.close(); await contexts.disposeAll(); bootStore.close(); vi.unstubAllEnvs(); });
     return started;
   }
 

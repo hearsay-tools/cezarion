@@ -131,6 +131,8 @@ export const repoBranchEntrySchema = z.object({
   /** Why a branch that might be merged is kept: present only when GitHub did not return its full
    *  PR history, so no merged PR could be ruled in. */
   keptReason: z.string().optional(),
+  /** The parent task of a worker's branch (hearsay-tools/squawk#911). Absent for any other run. */
+  parentRunId: z.string().optional(),
 });
 export type RepoBranchEntry = z.infer<typeof repoBranchEntrySchema>;
 

@@ -17,8 +17,11 @@ export const RECEIPT_CAP = 16_384;
 const fileIdentitySchema = z.object({ dev: z.number(), ino: z.number(), birthtimeMs: z.number() }).strict();
 const branchIdentitySchema = z.object({ file: fileIdentitySchema, prefixBytes: z.number().int().min(1).max(4096), prefixHash: z.string().length(64) }).strict();
 const receiptSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.string().min(1), branchIdentity: branchIdentitySchema.optional() }).strict();
+// `forced`: the destroy that wrote it removed the present checkout, so its branch goes at `sha`
+// whatever it holds (hearsay-tools/squawk#911); without it, every attempt proves no work is lost.
 export const cleanupSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.string(), sha: workerWorkspaceSchema.shape.baselineSha,
-  logFile: fileIdentitySchema, logHash: z.string().length(64), phase: z.enum(['prepared', 'worktree-removed', 'complete']) }).strict();
+  logFile: fileIdentitySchema, logHash: z.string().length(64), phase: z.enum(['prepared', 'worktree-removed', 'complete']),
+  forced: z.literal(true).optional() }).strict();
 export type Cleanup = z.infer<typeof cleanupSchema>;
 export const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
 export async function replaceIdentityFile(path: string, content: string, assertCurrent?: () => void): Promise<void> {
@@ -59,6 +62,23 @@ export async function ownedWorkspaceRecordFiles(repoRoot: string): Promise<strin
   const dir = await receiptDirectory(repoRoot, false);
   if (!await exists(dir)) return [];
   return (await readdir(dir)).filter(name => name.endsWith('.json')).sort().map(name => join(dir, name));
+}
+/** Each readable receipt's workspace, and whether its cleanup checkpoint says the removal completed.
+ *  An unreadable record is skipped: only an explicit destroy acts on it. */
+export async function ownedWorkspaceReceipts(repoRoot: string): Promise<Array<{ workspace: WorkerWorkspace; cleaned: boolean }>> {
+  const receipts: Array<{ workspace: WorkerWorkspace; cleaned: boolean }> = [];
+  for (const path of await ownedWorkspaceRecordFiles(repoRoot)) {
+    if (path.endsWith('.cleanup.json')) continue;
+    try {
+      const receipt = await readReceipt(path);
+      if (!receipt) continue;
+      const checkpoint = path.replace(/\.json$/, '.cleanup.json');
+      const cleaned = await exists(checkpoint) &&
+        cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpoint, RECEIPT_CAP))).phase === 'complete';
+      receipts.push({ workspace: receipt.workspace, cleaned });
+    } catch { /* unreadable */ }
+  }
+  return receipts;
 }
 /** One receipt or cleanup checkpoint, read with the identity-file checks. */
 export function readOwnedWorkspaceRecord(path: string): Promise<string> {

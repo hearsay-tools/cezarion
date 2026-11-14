@@ -68,16 +68,50 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
     },
   );
 
-  it('keeps a stranded branch moved behind its baseline, though it holds no commits of its own (hearsay-tools/cezarion#905)', async () => {
+  // hearsay-tools/squawk#911: commits another ref keeps are no work the delete would lose.
+  it('deletes a stranded branch moved behind its baseline onto a commit another branch keeps', async () => {
     const { root, first, second } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), second);
     await strand(root, workspace, 'externally removed');
     git(root, 'update-ref', `refs/heads/${workspace.branch}`, first);
-    const result = await removeOwnedWorkspace(root, workspace);
-    expect(result).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
-    expect(result.error).toBe(`Owned branch ${workspace.branch} no longer points at its worker baseline; ` +
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    expect(git(root, 'branch', '--list', workspace.branch)).toBe('');
+  });
+
+  it.each(['its tip', 'its reflog'] as const)('deletes a stranded branch when another branch keeps the commits in %s (hearsay-tools/squawk#911)', async (where) => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    await writeFile(join(workspace.path, 'tracked.txt'), 'worker');
+    git(workspace.path, 'commit', '-qam', 'worker');
+    const tip = git(workspace.path, 'rev-parse', 'HEAD');
+    git(root, 'branch', 'keeper', tip);
+    if (where === 'its reflog') git(workspace.path, 'reset', '-q', '--hard', first);
+    await strand(root, workspace, 'deleted and pruned');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    expect(git(root, 'branch', '--list', workspace.branch)).toBe('');
+    expect(git(root, 'rev-parse', 'keeper')).toBe(tip);
+  });
+
+  it('keeps a stranded branch when the branch that keeps its commits moves before the delete (hearsay-tools/squawk#911)', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    await writeFile(join(workspace.path, 'tracked.txt'), 'worker');
+    git(workspace.path, 'commit', '-qam', 'worker');
+    const tip = git(workspace.path, 'rev-parse', 'HEAD');
+    git(root, 'branch', 'keeper', tip);
+    await strand(root, workspace, 'deleted and pruned');
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => {
+      git(root, 'update-ref', 'refs/heads/keeper', first);
+    })).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(tip);
+    // The retry resumes from the checkpoint the failed delete wrote, and proves the commits again.
+    expect(JSON.parse(await readFile(receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json'), 'utf8')))
+      .toMatchObject({ sha: tip, phase: 'worktree-removed' });
+    const retry = await removeOwnedWorkspace(root, workspace);
+    expect(retry).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(retry.error).toBe(`Owned branch ${workspace.branch} holds 1 commit beyond its worker baseline; ` +
       'keep what you need, delete the branch, then retry destroy');
-    expect(git(root, 'rev-parse', workspace.branch)).toBe(first);
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(tip);
   });
 
   it('keeps a stranded branch reset to its baseline, whose reflog still records worker commits (hearsay-tools/cezarion#905)', async () => {

@@ -4015,7 +4015,7 @@ export function createApp(deps: ServerDeps) {
       });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       const { run, release } = checkout;
-      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true, previewHost: deps.previewHost }).finally(release);
+      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { previewHost: deps.previewHost }).finally(release);
       if (!worktreeReclaimedAt) {
         return c.json({ error: await reclaimCheckoutError(run) }, 409);
       }

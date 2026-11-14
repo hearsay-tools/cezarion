@@ -9,10 +9,16 @@
  * run claims and the worktree mutation lock, a recheck of checkouts and owned-workspace receipts,
  * and a ref transaction that verifies the base and the tip it classified. It also holds the
  * cockpit's checkout-and-pull claim, so no branch switch lands between the verdict and the delete.
+ * First it releases the branches of ended worker families (hearsay-tools/squawk#911): those go
+ * through the owned-workspace removal, which a receipt-owned branch needs.
  * `worktreeRetention: 0` ("keep every worktree") turns it off with retention. Never throws.
  */
+import { releaseEndedWorkerBranches, type FamilyEndStore } from '../delegation/family-end.ts';
 import { claimRepoGitMutation } from './repo-pull.ts';
 import { classifyBranches, classifyInputFor, deleteBranches, githubBranchForge, type BranchForge, type ClassifyProject, type DeleteBranchesResult } from './repo-branches.ts';
+
+/** The project a sweep reads and writes: the classification's, with the run store's worker writes. */
+export type SweepProject = ClassifyProject & { store: ClassifyProject['store'] & FamilyEndStore };
 
 export interface SweepResult {
   deleted: string[];
@@ -27,6 +33,8 @@ export interface SweepOptions {
   minIntervalMs?: number;
   /** Where the one summary line goes. */
   log?: (line: string) => void;
+  /** Stops the sweep between its steps: the project context that started it is closing. */
+  signal?: AbortSignal | undefined;
 }
 
 /** After a terminal transition, at most one sweep per repository in this window. */
@@ -37,7 +45,7 @@ const lastStarted = new Map<string, number>();
 
 /** Delete every `merged` and `empty` branch of `project`. A sweep already running for the same
  *  repository is joined, not repeated. Resolves null when nothing ran. */
-export function sweepMergedBranches(project: ClassifyProject, options: SweepOptions): Promise<SweepResult | null> {
+export function sweepMergedBranches(project: SweepProject, options: SweepOptions): Promise<SweepResult | null> {
   if (!Number.isFinite(options.keep) || options.keep <= 0) return Promise.resolve(null);
   const joined = running.get(project.root);
   if (joined) return joined;
@@ -49,16 +57,19 @@ export function sweepMergedBranches(project: ClassifyProject, options: SweepOpti
   return sweep;
 }
 
-async function runSweep(project: ClassifyProject, options: SweepOptions): Promise<SweepResult | null> {
+async function runSweep(project: SweepProject, options: SweepOptions): Promise<SweepResult | null> {
   const input = await classifyInputFor(project, options.forge ?? githubBranchForge);
   if (!input) return null;
   const release = claimRepoGitMutation(input.root);
   // A branch switch or pull is running: the next sweep tries again.
   if (!release) return null;
   try {
+    const released = await releaseEndedWorkerBranches(input.root, project.store, (id) => project.manager.claimForBranchCleanup([id]), options.signal);
+    if (released.length > 0) (options.log ?? console.log)(`  removed ${released.length} branch(es) of ended worker families`);
+    if (options.signal?.aborted) return null;
     const { payload } = await classifyBranches(input, { diffStats: false });
     const names = payload.branches.filter((b) => b.class === 'merged' || b.class === 'empty').map((b) => b.name);
-    if (names.length === 0) return { deleted: [], refused: [] };
+    if (names.length === 0 || options.signal?.aborted) return { deleted: [], refused: [] };
     const result = await deleteBranches(input, names);
     if (result.deleted.length > 0 || result.refused.length > 0) {
       (options.log ?? console.log)(

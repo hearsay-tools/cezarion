@@ -888,6 +888,76 @@ describe('the branch classifier (issue 08 §A)', () => {
       expect(result.deleted).toEqual([]);
       expect(await git(root, 'rev-parse', '--verify', workspace.branch)).toBe(base);
     });
+
+    // hearsay-tools/squawk#911: once its family has ended, the receipt no longer keeps the branch in
+    // use, so unlanded work is listed and needs the typed delete; while it has not, it stays active.
+    it('lists an ended worker family branch as not landed and deletes it only with confirmation', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      await commit(workspace.path, 'work.txt', 'unlanded');
+      await git(workspace.path, 'checkout', '-q', '--detach');
+      const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
+      const ended = { ...input(), runs: [{ ...owner, endedWorker: true as const, parentRunId: 'parent-run' }] };
+      expect((await classesOf({ runs: [runRecord(workerId, 'done', { branch: workspace.branch })] })).cls[workspace.branch]).toBe('active');
+      const { payload } = await classifyBranches(ended);
+      expect(payload.branches.find((row) => row.name === workspace.branch)).toMatchObject({ class: 'not-landed', ahead: 1, runId: workerId, parentRunId: 'parent-run' });
+      expect((await deleteBranches(ended, [workspace.branch])).deleted).toEqual([]);
+      expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch] });
+    });
+
+    it('deletes an ended worker family branch whose reflog commit the base keeps, verifying the base once', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      const landed = await commit(workspace.path, 'landed.txt', 'landed');
+      await git(root, 'merge', '-q', '--ff-only', landed);
+      await git(workspace.path, 'reset', '-q', '--hard', base);
+      await commit(workspace.path, 'work.txt', 'unlanded');
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
+      const ended = { ...input({ configuredBase: 'main' }), runs: [{ ...owner, endedWorker: true as const }] };
+      expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch], refused: [] });
+    });
+
+    it('lists the unlanded branch of an ended worker still at review', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      await commit(workspace.path, 'work.txt', 'unlanded');
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = owners([runRecord(workerId, 'review', { branch: workspace.branch })])[0]!;
+      const { payload } = await classifyBranches({ ...input(), runs: [{ ...owner, endedWorker: true as const }] });
+      expect(payload.branches.find((row) => row.name === workspace.branch)?.class).toBe('not-landed');
+    });
+
+    it('keeps an ended worker family branch in use while its reflog holds a commit no other ref keeps', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      await commit(workspace.path, 'work.txt', 'reset away');
+      await git(workspace.path, 'reset', '-q', '--hard', base);
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
+      const ended = { ...input(), runs: [{ ...owner, endedWorker: true as const }] };
+      expect((await classesOf()).cls[workspace.branch]).toBe('active');
+      const { payload } = await classifyBranches(ended);
+      expect(payload.branches.find((row) => row.name === workspace.branch)?.class).toBe('active');
+      expect((await deleteBranches(ended, [workspace.branch], workspace.branch)).deleted).toEqual([]);
+      expect(await git(root, 'rev-parse', workspace.branch)).toBe(base);
+    });
+
+    it('lists the unlanded branch of a receipt with no run, and keeps its landed one for the owned removal', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const unlanded = await createOwnedWorkspace(root, randomUUID(), base);
+      await commit(unlanded.path, 'work.txt', 'unlanded');
+      await git(unlanded.path, 'checkout', '-q', '--detach');
+      const landed = await createOwnedWorkspace(root, randomUUID(), base);
+      await git(landed.path, 'checkout', '-q', '--detach');
+      const { cls } = await classesOf();
+      expect(cls).toMatchObject({ [unlanded.branch]: 'orphan', [landed.branch]: 'active' });
+      expect(await deleteBranches(input(), [unlanded.branch], unlanded.branch)).toMatchObject({ deleted: [unlanded.branch] });
+    });
   });
 });
 

@@ -272,6 +272,7 @@ export interface BranchOwnerRow {
   branch: string | null;
   baseBranch: string | null;
   summary: string;
+  live: boolean; // another process's live run is a row here, not held in memory
 }
 
 export interface RunRevision {
@@ -776,15 +777,14 @@ export class RunDatabase {
   /** The rows matching `where` (by default, every row that owns a branch) as branch owners,
    *  with their summary, in no particular order. Same contract for `where` as `listWhere`. */
   listBranchOwners(where = 'branch IS NOT NULL'): BranchOwnerRow[] {
-    const sql = `SELECT id, created_at, status, archived, branch, base_branch, summary FROM runs WHERE ${where}`;
+    const sql = `SELECT id, created_at, status, archived, branch, base_branch, summary, live FROM runs WHERE ${where}`;
     return this.run(() => this.db.prepare(sql).all()).map((row) => ({
       id: row.id as string,
       createdAt: row.created_at as string,
       status: row.status as string,
       archived: row.archived === 1,
-      branch: row.branch as string | null,
-      baseBranch: row.base_branch as string | null,
-      summary: row.summary as string,
+      branch: row.branch as string | null, baseBranch: row.base_branch as string | null,
+      summary: row.summary as string, live: row.live === 1,
     }));
   }
 

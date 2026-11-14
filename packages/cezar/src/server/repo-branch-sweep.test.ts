@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunRecord } from '../runs/store.ts';
-import { __clearPrListCacheForTests, type BranchForge, type ClassifyProject } from './repo-branches.ts';
-import { __resetBranchSweepForTests, sweepMergedBranches } from './repo-branch-sweep.ts';
+import { __clearPrListCacheForTests, type BranchForge } from './repo-branches.ts';
+import { __resetBranchSweepForTests, sweepMergedBranches, type SweepProject } from './repo-branch-sweep.ts';
 import { claimRepoGitMutation } from './repo-pull.ts';
 import { addOrigin, commit, fakeForge, git, mergedPr, owners, runRecord, taskBranch } from './repo-branches.testkit.ts';
 
@@ -36,10 +36,12 @@ describe('the branch sweep', () => {
   function claimAll(): () => void {
     return release;
   }
-  function project(runs: readonly RunRecord[], claim: (ids: readonly string[]) => (() => void) | null = claimAll): ClassifyProject {
+  function project(runs: readonly RunRecord[], claim: (ids: readonly string[]) => (() => void) | null = claimAll): SweepProject {
     return { home: testHome(),
       root,
-      store: { listBranchOwners: () => owners(runs) },
+      // No owned-workspace receipts here, so the family-end step reads no run.
+      store: { listBranchOwners: () => owners(runs), unavailable: undefined, getRun: () => undefined, commitDelegation: () => undefined, listWorkersOf: () => [],
+        readWorkerExecution: () => undefined, workerResourcesSafe: () => false, sourceDataDir: () => root },
       manager: { isActive: () => false, claimForBranchCleanup: claim },
     };
   }
@@ -89,6 +91,14 @@ describe('the branch sweep', () => {
     const { runs, forge } = await everyCase();
     const before = await branches();
     expect(await sweepMergedBranches(project(runs), { keep: 0, forge, log })).toBeNull();
+    expect(await branches()).toEqual(before);
+  });
+
+  // The project context that started a sweep aborts it when it closes (hearsay-tools/squawk#911).
+  it('deletes nothing once its project context has aborted it', async () => {
+    const { runs, forge } = await everyCase();
+    const before = await branches();
+    expect(await sweepMergedBranches(project(runs), { keep: 8, forge, log, signal: AbortSignal.abort() })).toBeNull();
     expect(await branches()).toEqual(before);
   });
 

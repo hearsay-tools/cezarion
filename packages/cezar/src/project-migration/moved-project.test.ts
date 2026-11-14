@@ -139,7 +139,7 @@ describe('a moved project', { timeout: TIMEOUT }, () => {
       context.store.flush();
       expect(context.store.sourceDataDir(run.id)).toBe(project.newDir);
       expect(context.store.writeRefusal(TASK)).toBeUndefined();
-    } finally { contexts.disposeAll(); ownership.releaseAll(); }
+    } finally { await contexts.disposeAll(); ownership.releaseAll(); }
     expect(existsSync(join(project.dataDir, RUNS_DB_FILE))).toBe(false);
     // The next cockpit run finds the marker: nothing to move, no plan, no journal.
     const next = new CockpitOwnership();

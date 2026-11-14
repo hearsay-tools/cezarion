@@ -234,6 +234,12 @@ describe('not-landed branch decisions', () => {
     expect(document.querySelectorAll('[data-slot="not-landed-row"]')).toHaveLength(0)
   })
 
+  // hearsay-tools/squawk#911: a worker's unlanded branch names its parent task.
+  it("links a worker branch to its parent task", () => {
+    showSection([{ ...BRANCH, parentRunId: 'parent-run' }])
+    expect(screen.getByRole('link', { name: 'Worker of its parent task' }).getAttribute('href')).toBe('/tasks/parent-run')
+  })
+
   it('opens deletion from the row and closes it without deleting', async () => {
     showSection([BRANCH])
     fireEvent.click(await openMenu())
