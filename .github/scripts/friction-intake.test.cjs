@@ -202,6 +202,28 @@ test('the daily digest recommends at most the configured top groups in one publi
   assert.ok(!/Offer a comment/.test(prompt), 'comments with new evidence are posted, not offered');
 });
 
+test('the daily digest checks whether each merged fix made its signal go quiet before it gives verdicts', () => {
+  const { prompt } = buildDigestAutomation().task;
+  assert.equal(INBOX.fixQuietDays, 14);
+  for (const text of [
+    'fix check',
+    `closed in the last ${INBOX.watchDays} days`,
+    'that no finalized digest has marked "came back"',
+    `dated within ${INBOX.fixQuietDays} days after the merge`,
+    'the inbox issues dated in that window, reviewed ones included',
+    'comes from a mechanism that pull request added',
+    '"quiet since <merge date>"',
+    'code from before the merge does not count',
+  ]) assert.ok(prompt.includes(text), text);
+  assert.ok(prompt.indexOf('Then run the fix check') < prompt.indexOf('4. Give each group one verdict'), 'the fix check runs before the verdicts');
+  assert.ok(prompt.includes('or it holds a "came back" finding'), 'a recurrence of a merged fix always ranks as act');
+  assert.ok(prompt.includes('never a group that holds a "came back" finding'), 'a closed issue does not drop its recurrence');
+  // The window is fixed per merge, so the check is safe to repeat and keeps no state between digests.
+  for (const stateful of ['fix check results carry', 'Carry every other result forward', 'leaves the fix check']) {
+    assert.ok(!prompt.includes(stateful), stateful);
+  }
+});
+
 test('inbox labels stay out of the routing labels the intake applicator manages', () => {
   const managed = LABELS.map(label => label.name);
   for (const label of [INBOX.label, INBOX.reviewedLabel]) assert.ok(!managed.includes(label), label);

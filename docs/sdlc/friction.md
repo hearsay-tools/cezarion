@@ -56,9 +56,23 @@ previous digest carried forward, by root cause. It checks each group against
 
 | Verdict | When |
 | --- | --- |
-| Act | One run lost more than 30 minutes to it, it gave a wrong result, or it occurred in two or more runs |
+| Act | One run lost more than 30 minutes to it, it gave a wrong result, it occurred in two or more runs, or it holds a `came back` finding |
 | Watch | A first occurrence below that bar. The digest carries it forward with its count and first-seen date |
-| Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days |
+| Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days. A group with a `came back` finding is never dropped as fixed |
+
+**Fix check.** A merged fix is not proof that the problem stopped. The check
+takes each issue that a digest filed, that a merged pull request closed in the
+last 30 days, and that no digest has marked `came back`. A finding counts
+against the fix when it is dated within 14 days after the merge and has the
+same root cause, or comes from a mechanism that pull request added. The digest
+looks for such findings in the findings it reviews, in the evidence of every
+carried-forward Act group and watch item, and in the inbox issues dated in that
+window, reviewed ones included. A finding from a cockpit that still ran the
+code from before the merge does not count, and the digest says so. The digest
+lists each counted finding under the filed issue and marks the fix `came back`.
+Otherwise it marks the fix `quiet since <merge date>` and says whether its
+14-day window is still open. The window is fixed for each merge, so the check
+keeps no state between digests and gives the same answer when it runs again.
 
 For each Act group, the digest names the smallest fix that removes the whole
 class, and places any new rule as
@@ -86,7 +100,7 @@ The digest writes three things:
 
 | Output | What it holds |
 | --- | --- |
-| A comment on the newest issue it reviewed | The full record. Every group with its verdict, evidence links, fix and destination in full, the recommended groups marked, the carried-forward Act groups and the whole watch list. It stands alone: it never says "unchanged" or points to an earlier digest instead of the content |
+| A comment on the newest issue it reviewed | The full record. Every group with its verdict, evidence links, fix and destination in full, the recommended groups marked, the carried-forward Act groups, the whole watch list and each fix check result. It stands alone: it never says "unchanged" or points to an earlier digest instead of the content |
 | An HTML report, published with `hsq artifact publish` | One card per recommended group, in rank order: title, cost chips (runs, time lost), what happens, the fix, the destination, and the evidence links folded. Everything else is folded at the bottom. The report uses no scripts and no external resources |
 | A comment on each tracked issue that its evidence is new to | The new evidence links. The digest posts these without asking |
 
@@ -124,7 +138,10 @@ An Act group has its own lifecycle across digests:
 | Carried forward | The next digest runs | The schedule | Ranked again with the new evidence: recommended, carried forward again, or dropped when it is fixed or tracked |
 | Recommended | The owner approves it, or answers without leaving it out | The owner | Filed |
 | Recommended | The owner leaves it out | The owner | Carried forward |
-| Filed | None | Nothing | Final; later evidence becomes a comment on the filed issue |
+| Filed | New evidence while the issue is open | The next digest | Stays filed; the evidence becomes a comment on the filed issue |
+| Filed | A merged pull request closes the issue | The next digest | Fix check, for 30 days after the merge |
+| Fix check | A finding dated within 14 days after the merge has the same root cause, or comes from a mechanism the pull request added | A digest | Came back: the finding's group names the filed issue and the pull request, and the digest ranks it like any Act group. Later digests skip the issue |
+| Fix check | 30 days after the merge | Nothing | Final |
 
 ## Categories
 
