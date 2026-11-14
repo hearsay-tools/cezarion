@@ -145,7 +145,9 @@ One dispatch takes one **candidate commit** through every stage
    the registry serves the new version (npm processes a publish for minutes), then installs the candidate,
    and its alias when one is published, from the registry into an empty prefix, boots it and loads the cockpit, then boots
    the version its stable dist-tag holds now (`latest`, or `latest-x.y` on a maintenance
-   line) on a fresh home and project and upgrades it to the candidate.
+   line) on a fresh home and project and upgrades it to the candidate. On Windows the
+   upgrade half is skipped when that version is 0.18.0 or older: its registry refused
+   Windows paths (hearsay-tools/squawk#3493), so it holds no project to keep.
    It runs on Linux, macOS and Windows, on the `engines.node` floor and the current
    LTS. The browser specs run shuffled on the candidate's source commit: the published
    bundle has no e2e mode.

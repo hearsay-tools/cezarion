@@ -244,8 +244,26 @@ async function checkCockpit(base) {
   if (script.status !== 200 || !/javascript/.test(script.type)) throw new Error(`The cockpit script ${asset} answered HTTP ${script.status} (${script.type})`);
 }
 
+// Up to 0.18.0 the project registry took only a leading `/` as absolute, so on Windows
+// it refused and dropped every project (hearsay-tools/squawk#3493, fixed by
+// hearsay-tools/squawk#3498). Such a version holds no project to upgrade there.
+const WINDOWS_REGISTRY_BROKEN_THROUGH = [0, 18, 0];
+
+export function upgradeHoldsProjects(upgradeFrom, platform) {
+  if (platform !== 'win32') return true;
+  const core = upgradeFrom.split('-')[0].split('.').map(Number);
+  for (const [i, part] of core.entries()) {
+    if (part !== WINDOWS_REGISTRY_BROKEN_THROUGH[i]) return part > WINDOWS_REGISTRY_BROKEN_THROUGH[i];
+  }
+  return false;
+}
+
 // `install` is the registry install; tests pass a local one.
-export async function run({ name, version, upgradeFrom }, { install = registryInstall } = {}) {
+export async function run({ name, version, upgradeFrom }, { install = registryInstall, platform = process.platform } = {}) {
+  if (upgradeFrom && !upgradeHoldsProjects(upgradeFrom, platform)) {
+    console.log(`release-smoke: ${upgradeFrom} keeps no project on ${platform}, so the upgrade check is skipped.`);
+    upgradeFrom = undefined;
+  }
   const root = mkdtempSync(join(tmpdir(), 'release-smoke-'));
   try {
     const repository = name => {
