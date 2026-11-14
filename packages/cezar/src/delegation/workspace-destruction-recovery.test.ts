@@ -28,7 +28,10 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
     const lock = join(root, '.git/refs/heads', workspace.branch + '.lock'); await writeFile(lock, 'lock');
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ remaining: ['branch'] }); await rm(lock);
     git(root, 'branch', '-f', workspace.branch, second);
-    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    const commits = Number(git(root, 'rev-list', '--count', `${first}..${second}`));
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'],
+      error: `Owned branch ${workspace.branch} holds ${commits} commit${commits === 1 ? '' : 's'} beyond the tip destroy recorded; ` +
+        'keep what you need, delete the branch, then retry destroy' }); // hearsay-tools/squawk#910
     git(root, 'worktree', 'add', join(root, 'other-checkout'), workspace.branch);
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
     expect(git(root, 'rev-parse', workspace.branch)).toBe(second);

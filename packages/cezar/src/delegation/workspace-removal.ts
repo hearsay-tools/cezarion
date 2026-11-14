@@ -1,5 +1,6 @@
 /** Checked removal of an owned worker workspace, on top of the record and Git layers. */
 import { fallbackProjectWriteError } from '../project-paths.ts';
+import { headLeftTaskBranch } from '../task-branch-head.ts';
 import { describeProcesses, inspectGeneration } from './process-liveness.ts';
 import { entryExists as exists } from './entry-exists.ts';
 import { readdir } from 'node:fs/promises';
@@ -68,12 +69,12 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
-  let stranded: string | undefined;
+  // A refusal that names its blocker and the step that clears it.
+  let named: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${describeProcesses(heldBy)} may still hold the worker worktree or scratch; retry destroy after they exit`
-      : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
-      : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
+      : named ?? 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
       ...(!remaining.includes('branch') ? [{ kind: 'branch' as const, ref: `refs/heads/${value.branch}` }] : []),
@@ -111,6 +112,15 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       await removeBranch(receipt, checkpoint);
       return result();
 
+      function keepBranch(state: string): string {
+        return `Owned branch ${workspace.branch} ${state}; keep what you need, delete the branch, then retry destroy`;
+      }
+
+      async function movedBranch(from: string, to: string, what: string): Promise<string> {
+        const commits = Number(await checkedGit(repoRoot, ['rev-list', '--count', `${from}..${to}`]));
+        return keepBranch(commits ? `holds ${commits} commit${commits === 1 ? '' : 's'} beyond ${what}` : `no longer points at ${what}`);
+      }
+
       // Each phase shares this attempt's partial result while the mutation fence stays held.
       async function completeWithoutReceipt(): Promise<void> {
         // #878: without a receipt, the identity marker in a Git admin directory is the
@@ -141,7 +151,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
             await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) !== workspace.resourceId) return undefined;
         // HEAD files (this worktree's, another's) are not in a retrying caller's observation: these
         // refusals report unexplained, so a retry never skips them (hearsay-tools/cezarion#879).
-        if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) { report?.unexplained?.(); return undefined; }
+        named = await headLeftTaskBranch(workspace.path, workspace.branch);
+        if (named) { report?.unexplained?.(); return undefined; }
         // Git permits duplicate checkouts with --force. Preserve both resources
         // before the first removal if another registered path uses this branch.
         let registeredPath: string | undefined;
@@ -193,13 +204,12 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return undefined; }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (current.sha !== workspace.baselineSha) {
-          const commits = Number(await checkedGit(repoRoot, ['rev-list', '--count', `${workspace.baselineSha}..${current.sha}`]));
-          stranded = commits ? `holds ${commits} commit${commits === 1 ? '' : 's'} beyond its worker baseline` : 'no longer points at its worker baseline';
+          named = await movedBranch(workspace.baselineSha, current.sha, 'its worker baseline');
           return undefined;
         }
         const tips = current.log.content.toString('utf8').split('\n').filter(Boolean).map(entry => entry.split(' ')[1]);
         if (tips.some(tip => tip !== workspace.baselineSha)) {
-          stranded = 'returned to its worker baseline after holding other commits';
+          named = keepBranch('returned to its worker baseline after holding other commits');
           return undefined;
         }
         assertCurrent?.();
@@ -216,7 +226,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (await branchExists()) {
           if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return; }
           const current = await verifyBranch(repoRoot, workspace, receipt);
-          if (current.sha !== checkpoint.sha || hash(current.log.content) !== checkpoint.logHash) return;
+          // hearsay-tools/squawk#910: a tip that moved after the checkpoint is named like a stranded one.
+          if (current.sha !== checkpoint.sha) { named = await movedBranch(checkpoint.sha, current.sha, 'the tip destroy recorded'); return; }
+          if (hash(current.log.content) !== checkpoint.logHash) return;
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
           assertUnheld?.();

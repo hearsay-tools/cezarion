@@ -121,9 +121,14 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
       if (attack === 'rewritten reflog') await writeFile(log, 'changed');
       if (attack === 'symlink reflog') { await rename(log, log + '-real'); await symlink(log + '-real', log); }
       const target = attack === 'resource collision' ? { ...workspace, resourceId: randomUUID() } : workspace;
-      expect(await removeOwnedWorkspace(root, target)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      const result = await removeOwnedWorkspace(root, target);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
       expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
       expect(existsSync(attack === 'moved' ? workspace.path + '-moved' : workspace.path)).toBe(true);
+      // hearsay-tools/squawk#910: the refusal names where HEAD went and the command that returns it.
+      const fix = `Keep the work you need on ${workspace.branch}, run git -C '${workspace.path}' switch '${workspace.branch}', then retry.`;
+      if (attack === 'foreign checkout') expect(result.error).toBe(`Worktree HEAD is on unowned, not on its task branch ${workspace.branch}. ${fix}`);
+      if (attack === 'detached') expect(result.error).toBe(`Worktree HEAD is detached at ${first.slice(0, 7)}, not on its task branch ${workspace.branch}. ${fix}`);
     });
   }
 });

@@ -16,6 +16,7 @@ vi.mock('node:child_process', async importOriginal => {
 vi.mock('../autosave-commit.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../autosave-commit.ts')>(), autosaveCommit: async () => 'clean',
 }));
+vi.mock('../task-branch-head.ts', () => ({ headLeftTaskBranch: async () => undefined }));
 
 import { createDraftPr } from '../server/forge/draft-pr.ts';
 import { fetchGithubPrDiff, fetchGithubChecks } from '../server/forge/github.ts';
