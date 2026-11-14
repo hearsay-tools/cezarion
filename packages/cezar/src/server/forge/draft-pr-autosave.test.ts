@@ -7,6 +7,17 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDraftPr } from './github.ts';
+
+// Runs inside the pre-PR autosave, before its first Git call: a checkout there comes after any
+// HEAD read that publish makes before the save.
+const duringAutosave = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>) }));
+vi.mock('../../autosave-commit.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../autosave-commit.ts')>();
+  return { ...actual, autosaveCommit: async (...args: Parameters<typeof actual.autosaveCommit>) => {
+    await duringAutosave.hook?.();
+    return actual.autosaveCommit(...args);
+  } };
+});
 import type { RunRecord } from '../../runs/store.ts';
 
 const run = promisify(execFile);
@@ -32,7 +43,7 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
 
   beforeEach(async () => {
     repo = mkdtempSync(join(tmpdir(), 'cez-draft-pr-'));
-    await git(['init', '-q', '-b', 'main']);
+    await git(['init', '-q', '-b', 'cez/abc123']);
     writeFileSync(join(repo, 'a.txt'), 'base\n');
     await git(['add', '-A']);
     await git([...GIT_ID, 'commit', '-q', '-m', 'base']);
@@ -41,6 +52,7 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
   });
 
   afterEach(() => {
+    duringAutosave.hook = undefined;
     warn.mockRestore();
     vi.unstubAllEnvs();
     rmSync(repo, { recursive: true, force: true });
@@ -57,7 +69,6 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
     try {
       await run('git', ['init', '--bare', '-q', remote]);
       await git(['remote', 'add', 'origin', remote]);
-      await git(['branch', 'cez/abc123']);
       writeFileSync(join(repo, '.git', 'hooks', 'pre-push'),
         '#!/bin/sh\necho "prompt-setting=$GIT_TERMINAL_PROMPT home=${CEZ_HOME-unset} secret=$PUSH_SECRET full=$CEZ_AGENT_ENV_FULL passthrough=$CEZ_ENV_PASSTHROUGH" >&2\nexit 1\n', { mode: 0o755 });
       const outcome = await createDraftPr(input());
@@ -83,7 +94,7 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
     writeFileSync(join(repo, 'a.txt'), 'theirs\n');
     await git(['add', '-A']);
     await git([...GIT_ID, 'commit', '-q', '-m', 'theirs']);
-    await git([...GIT_ID, 'checkout', '-q', 'main']);
+    await git([...GIT_ID, 'checkout', '-q', 'cez/abc123']);
     writeFileSync(join(repo, 'a.txt'), 'ours\n');
     await git(['add', '-A']);
     await git([...GIT_ID, 'commit', '-q', '-m', 'ours']);
@@ -101,6 +112,30 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
     // The final state landed on the branch before publishing.
     const { stdout } = await run('git', ['log', '-1', '--format=%s'], { cwd: repo });
     expect(stdout.trim()).toBe('cezar autosave (pre-PR)');
+  });
+
+  it.each(['other branch', 'detached HEAD'])('refuses to publish from %s and commits nothing (hearsay-tools/squawk#1110)', async (where) => {
+    const base = (await git(['rev-parse', 'HEAD'])).stdout.trim();
+    if (where === 'other branch') await git(['checkout', '-q', '-b', 'agent-branch']);
+    else await git(['checkout', '-q', '--detach']);
+    writeFileSync(join(repo, 'a.txt'), 'final work\n');
+    const outcome = await createDraftPr(input());
+    const fix = `Keep the work you need on cez/abc123, run git -C '${repo}' switch 'cez/abc123', then retry.`;
+    expect(outcome).toEqual({ ok: false, error: where === 'other branch'
+      ? `Worktree HEAD is on agent-branch, not on its task branch cez/abc123. ${fix}`
+      : `Worktree HEAD is detached at ${base.slice(0, 7)}, not on its task branch cez/abc123. ${fix}` });
+    expect((await git(['rev-parse', 'HEAD', 'cez/abc123'])).stdout.split('\n').slice(0, 2)).toEqual([base, base]);
+    expect((await git(['status', '--porcelain'])).stdout.trim()).toBe('M a.txt');
+  });
+
+  it('refuses to publish when the final work is committed on another branch during the save, leaving the tree clean', async () => {
+    duringAutosave.hook = async () => {
+      await git(['checkout', '-q', '-b', 'agent-branch']);
+      writeFileSync(join(repo, 'a.txt'), 'final work\n');
+      await git([...GIT_ID, 'commit', '-qam', 'final work']);
+    };
+    const outcome = await createDraftPr(input());
+    expect(outcome.ok === false && outcome.error).toMatch(/^Worktree HEAD is on agent-branch, not on its task branch cez\/abc123\./);
   });
 
   it('publishes when there was nothing left to flush', async () => {

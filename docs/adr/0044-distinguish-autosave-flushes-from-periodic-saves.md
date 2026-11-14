@@ -7,8 +7,9 @@ timer cannot be confused with a required flush.
 ## Consequences
 
 Turn-end, finalization and periodic saves require HEAD to remain on the task branch. They do
-not commit work on a branch the agent checked out. The pre-PR save follows the current branch
-and must report refusal or failure, since pushing without final work is visible data loss.
+not commit work on a branch the agent checked out. The pre-PR save requires it too: draft-PR
+publish refuses, naming both branches, while HEAD is elsewhere (hearsay-tools/squawk#1110). It
+must report refusal or failure, since pushing without final work is visible data loss.
 
 A save remains non-atomic across Git’s staging and commit operations. Retain the nearby race,
 holder and operation-state checks; an ADR does not replace those safety notes. No-change,

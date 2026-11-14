@@ -6,8 +6,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 /**
- * Autosave reason. Only periodic saves are opt-in. Turn-end, finalization and timer saves
- * require the task branch; pre-PR saves follow current HEAD.
+ * Autosave reason. Only periodic saves are opt-in. Every caller passes the task branch when the
+ * run has one; draft-PR publish refuses before its pre-PR save when HEAD left it.
  */
 export type AutosaveReason = 'periodic' | 'turn end' | 'run finalize' | 'pre-PR';
 
