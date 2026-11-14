@@ -33,6 +33,8 @@ export interface SweepOptions {
   minIntervalMs?: number;
   /** Where the one summary line goes. */
   log?: (line: string) => void;
+  /** Stops the sweep between its steps: the project context that started it is closing. */
+  signal?: AbortSignal | undefined;
 }
 
 /** After a terminal transition, at most one sweep per repository in this window. */
@@ -62,11 +64,12 @@ async function runSweep(project: SweepProject, options: SweepOptions): Promise<S
   // A branch switch or pull is running: the next sweep tries again.
   if (!release) return null;
   try {
-    const released = await releaseEndedWorkerBranches(input.root, project.store, (id) => project.manager.claimForBranchCleanup([id]));
+    const released = await releaseEndedWorkerBranches(input.root, project.store, (id) => project.manager.claimForBranchCleanup([id]), options.signal);
     if (released.length > 0) (options.log ?? console.log)(`  removed ${released.length} branch(es) of ended worker families`);
+    if (options.signal?.aborted) return null;
     const { payload } = await classifyBranches(input, { diffStats: false });
     const names = payload.branches.filter((b) => b.class === 'merged' || b.class === 'empty').map((b) => b.name);
-    if (names.length === 0) return { deleted: [], refused: [] };
+    if (names.length === 0 || options.signal?.aborted) return { deleted: [], refused: [] };
     const result = await deleteBranches(input, names);
     if (result.deleted.length > 0 || result.refused.length > 0) {
       (options.log ?? console.log)(
@@ -77,12 +80,6 @@ async function runSweep(project: SweepProject, options: SweepOptions): Promise<S
   } finally {
     release();
   }
-}
-
-/** Test-only: wait for every running sweep. A suite that resets a repository a sweep may still
- *  write (it takes the worktree mutation lock) awaits this first. */
-export async function __settleBranchSweepsForTests(): Promise<void> {
-  await Promise.all(running.values());
 }
 
 /** Test-only: forget running sweeps and their start times. */

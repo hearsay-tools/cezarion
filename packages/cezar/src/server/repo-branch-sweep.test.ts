@@ -94,6 +94,14 @@ describe('the branch sweep', () => {
     expect(await branches()).toEqual(before);
   });
 
+  // The project context that started a sweep aborts it when it closes (hearsay-tools/squawk#911).
+  it('deletes nothing once its project context has aborted it', async () => {
+    const { runs, forge } = await everyCase();
+    const before = await branches();
+    expect(await sweepMergedBranches(project(runs), { keep: 8, forge, log, signal: AbortSignal.abort() })).toBeNull();
+    expect(await branches()).toEqual(before);
+  });
+
   it('keeps the refs of a run it cannot claim, and deletes the rest', async () => {
     const { runs, forge } = await everyCase();
     const claim = (ids: readonly string[]) => (ids.includes('merged01-1') ? null : () => undefined);

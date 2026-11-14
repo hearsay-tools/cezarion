@@ -274,7 +274,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     resolveProject: (projectId) => workspaceProjects.lookupProject(projectId),
   });
   server.once('close', () => {
-    unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
+    unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); automationScheduler.stop(); void sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
     previewSockets.close();
     void deps.previewHost?.close().catch(() => undefined);
@@ -283,7 +283,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), ...previewSockets.routes]);
   const shutdownForRestart = async (): Promise<void> => {
     lifecycle.stop(); archiveOnMerge.stop(); completionActions.stop();
-    sharedContexts.disposeAll(); // close every built secondary project before old process exits
+    void sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
     // Dev servers run in their own process groups: they outlive Squawk unless stopped here.

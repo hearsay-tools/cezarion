@@ -33,14 +33,15 @@ export function endedWorkerBranch(run: RunRecord, store: Pick<FamilyEndStore, 'g
 }
 
 /** Release the branch of every ended worker family in `repoRoot`. `claim` holds the worker's run
- *  against Continue and other cleanup for the removal, or returns null when it is in use. Returns
- *  the worker ids whose branch went. */
+ *  against Continue and other cleanup for the removal, or returns null when it is in use. `signal`
+ *  stops the step before its next workspace. Returns the worker ids whose branch went. */
 export async function releaseEndedWorkerBranches(repoRoot: string, store: FamilyEndStore,
-  claim: (runId: string) => (() => void) | null): Promise<string[]> {
+  claim: (runId: string) => (() => void) | null, signal?: AbortSignal): Promise<string[]> {
   // Without its runs every receipt would look orphaned.
   if (store.unavailable) return [];
   const released: string[] = [];
   for (const { workspace, cleaned } of await ownedWorkspaceReceipts(repoRoot).catch(() => [])) {
+    if (signal?.aborted) break;
     const run = store.getRun(workspace.ownerRunId);
     const due = run
       ? endedWorkerBranch(run, store) && JSON.stringify(run.delegation?.role === 'worker' && run.delegation.workspace) === JSON.stringify(workspace)
