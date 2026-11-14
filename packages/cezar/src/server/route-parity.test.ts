@@ -41,7 +41,6 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   const savedHome = process.env.CEZ_HOME;
   const savedRemote = process.env.CEZ_REMOTE;
   const savedFollowups = process.env.CEZ_FOLLOWUPS;
-  const savedSingleProject = process.env.CEZ_SINGLE_PROJECT;
   const savedAutomations = process.env.CEZ_AUTOMATIONS;
   const savedDryRun = process.env.CEZ_DRY_RUN;
   let home: string;
@@ -60,7 +59,6 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_FOLLOWUPS;
-    delete process.env.CEZ_SINGLE_PROJECT;
     // #801: automations can be disabled, and this suite compares the REAL answers of every mirrored
     // route. If disabled, the whole `/automations*` family would answer an identical 409 under all
     // three spellings — parity would pass while testing nothing about those routes.
@@ -78,7 +76,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
       task: 'parity',
       steps: [],
     }).id;
-    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome())});
     bootId = (await registerProject(repoRoot, undefined, testHome())).id;
     app = createApp({ home: testHome(),
       repoRoot,
@@ -101,8 +99,6 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
     else process.env.CEZ_FOLLOWUPS = savedFollowups;
-    if (savedSingleProject === undefined) delete process.env.CEZ_SINGLE_PROJECT;
-    else process.env.CEZ_SINGLE_PROJECT = savedSingleProject;
     if (savedAutomations === undefined) delete process.env.CEZ_AUTOMATIONS;
     else process.env.CEZ_AUTOMATIONS = savedAutomations;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;

@@ -24,8 +24,7 @@ import { toast } from '@/components/ui/toaster'
  * 1. every candidate is a dotfolder (`~/.claude-second`), and a folder that does not exist yet
  *    cannot be browsed to at all — yet that is the normal case, because the documented flow is
  *    *add the account → Connect → the CLI creates the folder on login*;
- * 2. `GET /api/v1/fs/browse` is refused in single-project mode and is rooted at the configured
- *    browse root, so a browse-only field would make the whole feature unreachable for anyone
+ * 2. `GET /api/v1/fs/browse` is rooted at the configured browse root, so a browse-only field would make the whole feature unreachable for anyone
  *    whose accounts live outside it.
  *
  * The browser is therefore an assist that fills the field, and it asks for hidden folders because

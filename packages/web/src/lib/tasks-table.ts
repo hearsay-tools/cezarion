@@ -203,7 +203,7 @@ export interface TaskReference {
  * hide the other's (review round 6). With a URL the key carries its host and `owner/repo`
  * (lower-cased, so `github.com/O/R` and `github.com/o/r` agree); an unparseable URL counts as
  * itself; a number-only reference uses its project identity. The default scope is local to
- * a single-project caller; cross-project callers must supply projectId. The group row's line 2 and
+ * a one-project caller; cross-project callers must supply projectId. The group row's line 2 and
  * every variant's own-reference filter use this one key.
  */
 export function referenceKey(reference: { kind: string; number?: number | undefined; url?: string | undefined; projectId?: string | undefined }): string {

@@ -28,7 +28,7 @@ function wire() {
     return () => { gate = undefined; release(); };
   };
   const workspaceProjects = {
-    listVisibleProjects: async () => { await gate; return registry as never; },
+    listProjects: async () => { await gate; return registry as never; },
     resolveBootProject: async () => 'boot',
     projectFailure: (error: unknown) => error instanceof ProjectContextError && error.reason === 'unknown-project'
       ? { error: error.message, status: 404 as const }

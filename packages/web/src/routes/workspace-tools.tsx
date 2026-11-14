@@ -15,14 +15,13 @@ type ProjectsQuery = ReturnType<typeof useProjects>
 type ProjectAction = 'new' | 'local' | 'clone'
 
 /** The Add project launchers: what exists (local folder, repository, checkout folder) and the
- *  three ways to add one. Hidden when the server runs in single-project mode. */
+ *  three ways to add one. */
 function AddProjectSection({ health, projects, repository, onAction }: {
   health: HealthQuery
   projects: ProjectsQuery
   repository: string | undefined
   onAction: (action: ProjectAction) => void
 }) {
-  if (health.data?.capabilities.singleProject === true) return null
   return (
     <section className="space-y-4 rounded-xl border border-border bg-card p-6 max-md:p-4" aria-labelledby="add-project-heading">
       <h2 id="add-project-heading" className="text-lg font-normal leading-[1.5]">Add project</h2>

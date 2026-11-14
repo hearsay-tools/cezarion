@@ -61,7 +61,7 @@ describe('workspace activity API', () => {
     const boot = await registerProject(repoRoot, undefined, testHome());
     const other = await registerProject(otherRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(testHome())});
 
     const res = await get('/api/v1/workspace/activity', contexts);
 
@@ -129,7 +129,7 @@ describe('workspace activity API', () => {
   it('keeps an unregistered boot project when the registry reads fine', async () => {
     const other = await registerProject(otherRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(testHome())});
 
     const body = activitySnapshotSchema.parse(await (await get('/api/v1/workspace/activity', contexts)).json());
 
@@ -146,7 +146,7 @@ describe('workspace activity API', () => {
     const unavailable = { status: 409 as const, error: 'runs.db is damaged' };
     const boot = (over: object) => ({ id: 'default', root: '/repo/shop', manager, ...over }) as never;
     const routesWith = (bootContext: never) => createActivityRoutes({ bootContext, contexts: { peek: () => undefined }, workspaceProjects: {
-      listVisibleProjects: async () => { throw new Error('config.json is not JSON'); },
+      listProjects: async () => { throw new Error('config.json is not JSON'); },
       resolveBootProject: async () => 'shop',
       resolveLiveProject: async () => bootContext,
       projectFailure: () => unavailable,
@@ -167,7 +167,7 @@ describe('workspace activity API', () => {
     const loaded = { id: 'shop', root: '/repo/shop', store, manager } as never;
     const projects = [{ id: 'shop', name: 'Shop', root: '/repo/shop' }, { id: 'docs', name: 'Docs', root: '/repo/docs' }];
     const workspaceProjects = {
-      listVisibleProjects: async () => projects,
+      listProjects: async () => projects,
       resolveBootProject: async () => 'shop',
       resolveLiveProject: async () => loaded,
       projectFailure: () => ({ error: 'unknown project', status: 404 as const }),
@@ -223,7 +223,7 @@ describe('workspace activity API', () => {
       boot.registry.publish(bootWait.id, pending);
       other.registry.publish(otherWait.id, pending);
       const workspaceProjects = {
-        listVisibleProjects: async () => [{ id: 'shop', name: 'Shop', root: repoRoot }, { id: 'docs', name: 'Docs', root: otherRoot }],
+        listProjects: async () => [{ id: 'shop', name: 'Shop', root: repoRoot }, { id: 'docs', name: 'Docs', root: otherRoot }],
         resolveBootProject: async () => 'shop',
         resolveLiveProject: async () => boot.owned,
         projectFailure: () => ({ error: 'unknown project', status: 404 as const }),

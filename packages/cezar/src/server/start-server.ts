@@ -42,10 +42,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
   let listeningPort: number | undefined;
   const squawkPort = deps.squawkPort ?? (() => listeningPort);
-  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost, home: deps.home });
-  // Every registry reader below sees what createApp sees: single-project mode hides other projects.
-  const visibleProjects = () => workspaceProjects.listVisibleProjects();
-  const automationCoordinator = new AutomationCoordinator({ listProjects: () => visibleProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home] })) }); // projects arrive prepared
+  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, home: deps.home });
+  const registeredProjects = () => workspaceProjects.listProjects();
+  const automationCoordinator = new AutomationCoordinator({ listProjects: () => registeredProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home] })) }); // projects arrive prepared
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = () => automationCoordinator.store(bootProjectId, deps.repoRoot)!; // resolve after preparation
   const taskWebhooks = createTaskWebhooks(deps);
@@ -58,7 +57,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   };
   const sharedContexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
     ownership: deps.ownership,
-    listProjects: visibleProjects,
+    listProjects: registeredProjects,
     squawkPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
@@ -66,7 +65,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = prepareBeforeTicks({ ownership: deps.ownership, homes: [deps.home] }, {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
-      return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
+      return [boot, ...(await registeredProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
     },
     enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root, deps.home), await loadWorkspaceConfig(deps.home.workspaceConfig)).enabled,
     repository: async project => {
@@ -235,7 +234,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const lifecycle = closingSignal(server);
   const startBackgroundServices = () => {
     if (!deps.store.unavailable) reportsIndex(deps.store).start();
-    void visibleProjects().then(async (projects) => {
+    void registeredProjects().then(async (projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
       await prepareProjects(all, { ownership: deps.ownership, homes: [deps.home], stopped: lifecycle.stopped }); // before any touch below
@@ -246,9 +245,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       // its store open, worktree sweeps and recovery. The boot project is built already.
       // Not after a close that landed while the registry was being read: `disposeAll` has run, and
       // a warm-up started now would build contexts nothing will ever dispose.
-      // Not in single-project mode either: every other project is out of reach there, and
-      // building one would resume its interrupted runs behind the operator's back.
-      if (projectWarmupEnabled() && server.listening && !resolveCapabilities(process.env, deps.bindHost).singleProject) {
+      if (projectWarmupEnabled() && server.listening) {
         const bootId = deps.bootProjectId ?? 'default';
         void sharedContexts.warmAll(all.filter((project) => project.id !== bootId && project.root !== deps.repoRoot))
           .catch(() => undefined);

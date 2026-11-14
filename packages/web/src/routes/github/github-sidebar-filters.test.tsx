@@ -50,7 +50,7 @@ const GITHUB: GithubData = {
 const HEALTH = {
   version: '0.0.0-test', projects: [], bootProject: 'default', repoRoot: '/repo', repo: { root: '/repo', branch: 'main' },
   checks: [], defaultRunner: 'claude', forge: { available: true },
-  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, automations: false },
 } as unknown as HealthResponse
 
 const json = (body: unknown, status = 200) =>

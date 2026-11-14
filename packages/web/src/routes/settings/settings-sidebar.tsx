@@ -1,5 +1,4 @@
 import { NavLink } from 'react-router'
-import type { Capabilities } from '@open-mercato/cezar-api-client'
 import {
   SIDEBAR_LIST_BODY_CLASS, SIDEBAR_LIST_GROUP_LABEL_CLASS, SIDEBAR_LIST_ICON_CLASS, SIDEBAR_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, SIDEBAR_SELECTED_CLASS,
 } from '@/components/nav-row-styles'
@@ -18,17 +17,16 @@ import { visibleSettingsSections, type SettingsScope } from './registry'
  * the project index (`ProjectGeneral`), which was otherwise reachable only through the Settings
  * tab. The global group has no such row because the global area has no index page.
  */
-export function SettingsSidebar({ projectId, projectName, capabilities }: {
+export function SettingsSidebar({ projectId, projectName }: {
   projectId: string
   projectName: string | null
-  capabilities?: Pick<Capabilities, 'singleProject'> | undefined
 }) {
   return (
     <div data-slot="settings-sidebar" className={SIDEBAR_LIST_BODY_CLASS}>
       {(['project', 'global'] as const).map((scope: SettingsScope) => {
         const label = scope === 'project' ? `This project${projectName ? ` · ${projectName}` : ''}` : 'Global · every project'
         const root = scope === 'project' ? `/p/${encodeURIComponent(projectId)}/settings` : '/settings/global'
-        const sections = visibleSettingsSections(scope, capabilities).map((section) => ({ id: section.id, title: section.title, icon: section.icon, to: `${root}/${section.id}` }))
+        const sections = visibleSettingsSections(scope).map((section) => ({ id: section.id, title: section.title, icon: section.icon, to: `${root}/${section.id}` }))
         const entries = scope === 'project' ? [{ id: 'general', title: 'General', icon: SettingsIcon, to: root }, ...sections] : sections
         return (
           <nav key={scope} aria-label={label} data-slot="settings-nav" data-scope={scope} className={cn('flex flex-col gap-px', scope === 'global' && 'pt-[6px]')}>

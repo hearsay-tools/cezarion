@@ -208,23 +208,6 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
   });
 });
 
-describe('resolveCapabilities — singleProject', () => {
-  it('is off by default', () => {
-    expect(resolveCapabilities({}).singleProject).toBe(false);
-  });
-
-  it('is on with CEZ_SINGLE_PROJECT=1', () => {
-    expect(resolveCapabilities({ CEZ_SINGLE_PROJECT: '1' }).singleProject).toBe(true);
-  });
-
-  it.each(['0', 'true', 'yes', '', 'on'])(
-    'stays off for CEZ_SINGLE_PROJECT=%j — only an exact "1" opts in',
-    (value) => {
-      expect(resolveCapabilities({ CEZ_SINGLE_PROJECT: value }).singleProject).toBe(false);
-    },
-  );
-});
-
 describe('resolveCapabilities — automations', () => {
   it.each([undefined, '', '1', 'true', 'yes', 'on', 'false'])('is on unless explicitly disabled: %j', (value) => {
     expect(resolveCapabilities(value === undefined ? {} : { CEZ_AUTOMATIONS: value }).automations).toBe(true);
@@ -241,7 +224,6 @@ describe('resolveCapabilities — automations', () => {
       automations: true,
       preview: false,
       voice: false,
-      singleProject: false,
     });
   });
 });

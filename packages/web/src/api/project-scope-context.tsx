@@ -7,7 +7,7 @@ import { API_PREFIX, getApiScope, setApiScope } from '@open-mercato/cezar-api-cl
  * `{projectId, apiBase}` from context; the module-level client seam (project-scope.ts) is kept
  * in sync by the provider. Step 3.2 mounts the provider from the `/p/:projectId` URL param —
  * until then nothing mounts it, the default below applies, and the app is byte-identical to the
- * single-project cockpit.
+ * pre-workspace cockpit.
  */
 export interface ProjectScope {
   /** The registered project id from the URL, or null when unscoped (the boot project). */

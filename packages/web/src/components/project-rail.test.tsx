@@ -53,7 +53,6 @@ function renderRail(props: Partial<ProjectRailProps> = {}, entry = '/p/toolkit-d
           projects={[project('toolkit-dev'), project('open_mercato')]}
           signals={new Map()}
           version="0.15.0"
-          singleProject={false}
           {...props}
         />
       </MemoryRouter>
@@ -118,22 +117,12 @@ describe('ProjectRail layout', () => {
   })
 })
 
-describe('ProjectRail single-project capability', () => {
-  it('keeps Add project and All projects with one registered project when the capability is off', () => {
-    renderRail({ projects: [project('toolkit-dev')], singleProject: false })
+describe('ProjectRail with one registered project', () => {
+  it('keeps Add project and All projects', () => {
+    renderRail({ projects: [project('toolkit-dev')] })
     expect(screen.getByRole('button', { name: 'Add project' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'All projects' })).toBeTruthy()
     expect(document.querySelectorAll('[data-slot="rail-project"]')).toHaveLength(1)
-  })
-
-  it('drops Add project and All projects, and keeps the rest, when the capability is on', () => {
-    renderRail({ projects: [project('toolkit-dev'), project('other')], singleProject: true })
-    expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(screen.queryByRole('link', { name: 'All projects' })).toBeNull()
-    expect(screen.getByAltText(`${productName("Cezarion")} v0.15.0`)).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="rail-project"]')).toHaveLength(2)
-    expect(screen.getByRole('link', { name: 'Global settings' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Theme:/ })).toBeTruthy()
   })
 })
 
@@ -337,13 +326,6 @@ describe('ProjectRail expanded rows (#711)', () => {
     expect(within(rail).getByRole('button', { name: /^Theme:/ }).textContent).toMatch(/System|Light|Dark/)
     expect(within(rail).getByRole('button', { name: 'Collapse projects' }).textContent).toBe('Collapse')
   })
-
-  it('drops Add project and All projects under the single-project capability', () => {
-    renderExpanded({ singleProject: true })
-    expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(screen.queryByRole('link', { name: 'All projects' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Collapse projects' })).toBeTruthy()
-  })
 })
 
 describe('ProjectRail remembered pages', () => {
@@ -517,7 +499,7 @@ describe('ProjectRail reorder', () => {
     rerender(
       <ThemeProvider>
         <MemoryRouter initialEntries={['/p/toolkit-dev/']}>
-          <ProjectRail projects={[...three]} signals={new Map()} version="0.15.0" singleProject={false} canReorder onReorder={onReorder} />
+          <ProjectRail projects={[...three]} signals={new Map()} version="0.15.0" canReorder onReorder={onReorder} />
         </MemoryRouter>
       </ThemeProvider>,
     )

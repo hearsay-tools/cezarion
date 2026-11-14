@@ -119,7 +119,7 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
 
   clearProjectProbeCache();
   const store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-  const contexts = new ProjectContexts({ createRunner, createManager: (store, root, options) => new RealRunManager(store, root, { ...options, acquireCiResources }), home: selectedHome, listProjects: () => listProjects(undefined, selectedHome) });
+  const contexts = new ProjectContexts({ createRunner, createManager: (store, root, options) => new RealRunManager(store, root, { ...options, acquireCiResources }), home: selectedHome, listProjects: () => listProjects(selectedHome) });
   cleanups.push(() => { contexts.disposeAll(); store.flush(); });
   await registerProject(repoRoot, undefined, selectedHome);
   const app = createApp({

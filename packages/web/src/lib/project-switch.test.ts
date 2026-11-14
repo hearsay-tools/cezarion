@@ -1,5 +1,5 @@
 import { runAddress } from '@/api/run-address'
-import type { Capabilities, ProjectsResponse } from '@open-mercato/cezar-api-client'
+import type { ProjectsResponse } from '@open-mercato/cezar-api-client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/api/client', async (importOriginal) => ({
@@ -30,8 +30,7 @@ const registry = {
     status: 'ok',
   })),
 } as ProjectsResponse
-const capabilities = undefined as Capabilities | undefined
-const ctx = { registry, capabilities, matchRoute: matchProjectRoute }
+const ctx = { registry, matchRoute: matchProjectRoute }
 const saved = (pathname: string, extra: object = {}) => ({ projectId: 'other', pathname, ...extra })
 const apiError = (status: number, message = `HTTP ${status}`) => new client.ApiError(status, message)
 
@@ -81,17 +80,15 @@ describe('projectSwitchTarget', () => {
     }
   })
 
-  it('follows the settings sections the capabilities make visible', () => {
-    const section = visibleSettingsSections('project', capabilities)[0]
+  it('follows the routed settings sections', () => {
+    const section = visibleSettingsSections('project')[0]
     expect(projectSwitchTarget('other', saved(`/p/other/settings/${section?.id}`), ctx).href).toBe(
       `/p/other/settings/${section?.id}`,
     )
   })
 
-  it('hides the sections a single-project server hides', () => {
-    const single = { registry, capabilities: { singleProject: true } as Capabilities, matchRoute: matchProjectRoute }
+  it('keeps the project path of a moved global section', () => {
     expect(projectSwitchTarget('other', saved('/p/other/settings/projects'), ctx).href).toBe('/p/other/settings/projects')
-    expect(projectSwitchTarget('other', saved('/p/other/settings/projects'), single).href).toBe('/p/other/')
   })
 
   it('never throws on a malformed percent escape', () => {

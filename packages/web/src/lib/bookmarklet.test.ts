@@ -63,7 +63,7 @@ describe('bookmarkletUrl (spec 011, protected /new deep-link contract)', () => {
   })
 
   it('omits the prefix without a project — byte-identical to the legacy launcher', () => {
-    // The single-project spelling must survive verbatim: it is what every already-saved
+    // The unprefixed spelling must survive verbatim: it is what every already-saved
     // bookmarklet contains, and the cockpit redirects it onto the boot project.
     const scoped = bookmarkletUrl('om-fix', true, 'sekret', 'http://localhost:4327')
     expect(scoped).toBe(bookmarkletUrl('om-fix', true, 'sekret', 'http://localhost:4327', null))

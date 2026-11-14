@@ -106,7 +106,7 @@ export function NewTaskRoute() {
   //    step-3.1 invariant). It keys the draft, so the boot project keeps the bare legacy
   //    storage key and a draft typed before this upgrade survives it.
   // Both are absent when this route renders outside a `/p/:projectId` prefix (a component
-  // test), and everything below degrades to exactly the single-project behavior.
+  // test), and everything below degrades to exactly the unscoped (boot project) behavior.
   const { projectId: urlProjectId } = useParams()
   const draftProjectId = useProjectScope().projectId
 

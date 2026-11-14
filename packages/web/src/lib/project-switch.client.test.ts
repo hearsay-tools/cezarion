@@ -16,7 +16,7 @@ const registry = {
 } as ProjectsResponse
 const OWN = 'https://github.com/acme/widgets'
 const go = (pathname: string, repoBaseOf: ((id: string) => string | undefined) | undefined = () => OWN) =>
-  resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, capabilities: undefined, repoBaseOf, matchRoute: matchProjectRoute })
+  resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, repoBaseOf, matchRoute: matchProjectRoute })
 
 function answer(routes: Record<string, { status?: number | undefined; body: unknown }>) {
   vi.stubGlobal(

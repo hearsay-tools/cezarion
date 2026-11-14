@@ -65,7 +65,7 @@ it.each(['registered', 'added', 'busy'] as const)('keeps poll and schedule state
   const boot = await registerProject(bootRoot, undefined, home);
   const bootRuns = RunStore.open(projectPaths(bootRoot).write);
   const ownership = new CockpitOwnership();
-  const contexts = new ProjectContexts({ createRunner, home, ownership, listProjects: () => listProjects(undefined, home) });
+  const contexts = new ProjectContexts({ createRunner, home, ownership, listProjects: () => listProjects(home) });
   vi.spyOn(contexts, 'context').mockImplementation(async id => ({ id, home, root, dataDir: projectPaths(root).write,
     store: runs, manager, automationStore: AutomationStore.open(projectPaths(root).write), launchKey: 'test' }) as ProjectContext);
   let release = moment === 'busy' ? initial.acquireLease() : undefined;

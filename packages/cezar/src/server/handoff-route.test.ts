@@ -18,7 +18,7 @@ import { createApp } from './server.ts';
  * the last write.
  */
 describe('GET /runs/:id/handoff', () => {
-  const saved = { home: process.env.CEZ_HOME, single: process.env.CEZ_SINGLE_PROJECT };
+  const saved = { home: process.env.CEZ_HOME };
   let home: string;
   let repoRoot: string;
   let dataDir: string;
@@ -30,7 +30,6 @@ describe('GET /runs/:id/handoff', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-handoff-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-handoff-repo-'));
     useTestHome(home ? Home.sandbox(home) : undefined);
-    delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     dataDir = join(repoRoot, '.ai/cezar');
     store = RunStore.open(dataDir);
@@ -40,7 +39,7 @@ describe('GET /runs/:id/handoff', () => {
   afterEach(() => {
     store.close();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    for (const [key, env] of [['home', 'CEZ_HOME'], ['single', 'CEZ_SINGLE_PROJECT']] as const) {
+    for (const [key, env] of [['home', 'CEZ_HOME']] as const) {
       if (saved[key] === undefined) delete process.env[env];
       else process.env[env] = saved[key];
     }

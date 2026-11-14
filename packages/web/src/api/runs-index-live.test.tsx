@@ -28,7 +28,7 @@ class Worker {
 
 type SyncMessage = { type: string; epoch: number; entries: Array<{ id: string; demand: { kind: string; path?: string; intervalMs?: number } }> }
 
-const HEALTH = { bootProject: 'boot', capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } }
+const HEALTH = { bootProject: 'boot', capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } }
 const INDEX_PATH = '/api/v1/workspace/runs-index'
 
 function summary(id: string, over: Partial<RunSummary> = {}): RunSummary {

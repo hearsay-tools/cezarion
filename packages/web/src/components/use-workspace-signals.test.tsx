@@ -19,7 +19,7 @@ const INDEX: RunsIndexResponse = {
   referenceStatuses: {}, perProjectLimit: 200, truncated: ['b'], generation: 'g1', eventSeq: 0,
 }
 
-const HEALTH = { bootProject: 'a', capabilities: { singleProject: false } }
+const HEALTH = { bootProject: 'a', capabilities: {} }
 
 let client: QueryClient
 /** What `GET /workspace/projects` answers: the registry ids of the moment. */

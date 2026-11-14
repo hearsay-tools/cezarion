@@ -30,7 +30,7 @@ const HANG_GUARD_MS = 15_000;
  * `notify` opt-in on `POST /runs`, `POST /runs/:id/notify`, and "Send test".
  */
 describe('task webhook API', () => {
-  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN, single: process.env.CEZ_SINGLE_PROJECT };
+  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN };
   let home: string;
   let repoRoot: string;
   let store: RunStore;
@@ -48,7 +48,6 @@ describe('task webhook API', () => {
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-webhook-repo-'));
     useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
-    delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     projectId = (await registerProject(repoRoot, undefined, testHome())).id;
@@ -59,7 +58,7 @@ describe('task webhook API', () => {
   afterEach(() => {
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    for (const [key, env] of [['home', 'CEZ_HOME'], ['dryRun', 'CEZ_DRY_RUN'], ['single', 'CEZ_SINGLE_PROJECT']] as const) {
+    for (const [key, env] of [['home', 'CEZ_HOME'], ['dryRun', 'CEZ_DRY_RUN']] as const) {
       if (saved[key] === undefined) delete process.env[env];
       else process.env[env] = saved[key];
     }

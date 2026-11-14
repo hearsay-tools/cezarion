@@ -153,44 +153,17 @@ describe('workspace projects', () => {
   });
 
   describe('listProjects', () => {
-    it('keeps default reads unchanged and pins explicit reads without pruning the registry', async () => {
+    it('lists every registry entry in stored order', async () => {
       const first = await registerProject(makeDir('first'), undefined, testHome());
       const second = await registerProject(makeDir('second'), undefined, testHome());
 
-      expect((await listProjects(undefined, testHome())).map((project) => project.id)).toEqual([first.id, second.id]);
-      expect((await listProjects({ projectId: second.id }, testHome())).map((project) => project.id)).toEqual([
-        second.id,
-      ]);
-      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((project) => project.id)).toEqual([
-        first.id,
-        second.id,
-      ]);
-    });
-
-    it('returns an empty pinned read when the selected id is not registered', async () => {
-      await registerProject(makeDir('existing'), undefined, testHome());
-      expect(await listProjects({ projectId: 'unknown' }, testHome())).toEqual([]);
-    });
-
-    it('keeps boot registration self-healing while reads are pinned', async () => {
-      const hidden = await registerProject(makeDir('hidden'), undefined, testHome());
-      const boot = await registerProject(makeDir('boot'), undefined, testHome());
-
-      expect((await listProjects({ projectId: boot.id }, testHome())).map((project) => project.id)).toEqual([
-        boot.id,
-      ]);
-      const registeredAgain = await registerProject(boot.root, undefined, testHome());
-      expect(registeredAgain.id).toBe(boot.id);
-      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((project) => project.id)).toEqual([
-        hidden.id,
-        boot.id,
-      ]);
+      expect((await listProjects(testHome())).map((project) => project.id)).toEqual([first.id, second.id]);
     });
 
     it('reports a git repo as ok with its current branch', async () => {
       const root = makeRepo('gitful');
       await registerProject(root, undefined, testHome());
-      const [entry] = await listProjects(undefined, testHome());
+      const [entry] = await listProjects(testHome());
       expect(entry).toMatchObject({ id: 'gitful', status: 'ok', branch: 'main' });
     });
 
@@ -198,7 +171,7 @@ describe('workspace projects', () => {
       const root = makeRepo('forged');
       execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/forged.git'], { cwd: root });
       await registerProject(root, undefined, testHome());
-      const [entry] = await listProjects(undefined, testHome());
+      const [entry] = await listProjects(testHome());
       expect(entry).toMatchObject({ status: 'ok', forge: 'github' });
     });
 
@@ -208,7 +181,7 @@ describe('workspace projects', () => {
       const bare = makeRepo('loner');
       await registerProject(gitlab, undefined, testHome());
       await registerProject(bare, undefined, testHome());
-      const entries = await listProjects(undefined, testHome());
+      const entries = await listProjects(testHome());
       expect(entries.every((entry) => entry.forge === undefined)).toBe(true);
     });
 
@@ -217,14 +190,14 @@ describe('workspace projects', () => {
       await registerProject(root, undefined, testHome());
       rmSync(root, { recursive: true, force: true });
       clearProjectProbeCache();
-      const [entry] = await listProjects(undefined, testHome());
+      const [entry] = await listProjects(testHome());
       expect(entry?.status).toBe('missing');
       expect(entry?.branch).toBeUndefined();
     });
 
     it('reports an existing non-git dir as not-git', async () => {
       await registerProject(makeDir('plain-folder'), undefined, testHome());
-      const [entry] = await listProjects(undefined, testHome());
+      const [entry] = await listProjects(testHome());
       expect(entry?.status).toBe('not-git');
       expect(entry?.branch).toBeUndefined();
     });
@@ -232,13 +205,13 @@ describe('workspace projects', () => {
     it('serves a repeat render from the TTL cache instead of re-probing', async () => {
       const root = makeDir('cached');
       await registerProject(root, undefined, testHome());
-      expect((await listProjects(undefined, testHome()))[0]?.status).toBe('not-git');
+      expect((await listProjects(testHome()))[0]?.status).toBe('not-git');
       rmSync(root, { recursive: true, force: true });
       // Within the TTL the stale probe is served (no fs/git work per render)…
-      expect((await listProjects(undefined, testHome()))[0]?.status).toBe('not-git');
+      expect((await listProjects(testHome()))[0]?.status).toBe('not-git');
       // …and a cleared cache sees reality again.
       clearProjectProbeCache();
-      expect((await listProjects(undefined, testHome()))[0]?.status).toBe('missing');
+      expect((await listProjects(testHome()))[0]?.status).toBe('missing');
     });
   });
 
@@ -331,7 +304,7 @@ describe('workspace projects', () => {
     await registerProject(root, undefined, testHome());
     clearProjectProbeCache();
 
-    const listed = (await listProjects(undefined, testHome()))[0];
+    const listed = (await listProjects(testHome()))[0];
     // Rebuilt from the parsed remote, so the token in it cannot reach the cockpit.
     expect(listed?.repoUrl).toBe('https://github.com/acme/linked');
     expect(listed?.forge).toBe('github');
@@ -343,7 +316,7 @@ describe('workspace projects', () => {
     await registerProject(root, undefined, testHome());
     clearProjectProbeCache();
 
-    const listed = (await listProjects(undefined, testHome()))[0];
+    const listed = (await listProjects(testHome()))[0];
     expect(listed?.repoUrl).toBeUndefined();
     expect(listed?.forge).toBeUndefined();
   });
@@ -390,7 +363,7 @@ describe('workspace projects', () => {
       if (stored) stored.tags = ['api', 'storefront'];
     }, testHome());
     clearProjectProbeCache();
-    const listed = (await listProjects(undefined, testHome())).find((p) => p.id === entry.id);
+    const listed = (await listProjects(testHome())).find((p) => p.id === entry.id);
     expect(listed?.tags).toEqual(['api', 'storefront']);
   });
 
@@ -403,7 +376,7 @@ describe('workspace projects', () => {
       // rather than evicting the whole project from the registry.
       if (stored) (stored as { tags?: unknown }).tags = 'storefront';
     }, testHome());
-    const listed = (await listProjects(undefined, testHome())).find((p) => p.id === entry.id);
+    const listed = (await listProjects(testHome())).find((p) => p.id === entry.id);
     expect(listed).toBeDefined();
     expect(listed?.tags).toBeUndefined();
   });

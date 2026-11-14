@@ -15,7 +15,6 @@ const health = (
     localHandoff: true,
     settingsAdmin: true,
     remoteSettingsAdmin: false,
-    singleProject: false,
     ...capabilities,
   },
 })

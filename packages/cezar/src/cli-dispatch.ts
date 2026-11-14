@@ -2,7 +2,6 @@ import { productName } from './home/display.ts';
 import { commandText, oldCommandNotice } from './home/command.ts';
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
-import { productEnv } from './core/product-env.ts';
 import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
 import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
@@ -14,7 +13,7 @@ import type { serverCommand } from './server-command.ts';
 import type { TaskAccess } from './headless-run.ts';
 
 export const defaultCliDeps = {
-  parseArgs, productEnv, operatorHomeEntry, prepareOperatorHome,
+  parseArgs, operatorHomeEntry, prepareOperatorHome,
   runSubcommand, getRepoInfo, runProjectsCommand, process, console,
 };
 
@@ -25,7 +24,6 @@ export type CliDeps = typeof defaultCliDeps & {
   serverCommand: typeof serverCommand;
   runCommand: (home: Home, root: string, task: string, workflow: string | undefined, model: string | undefined, access: TaskAccess) => Promise<void>;
   initCommand: (root: string) => void | Promise<void>;
-  initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
 };
 
 function cliHelp(): string {
@@ -93,9 +91,8 @@ workflows in .ai/squawk/workflows/. A project also reads .ai/cezar/, the old fol
  *  migration fence before they touch it; each re-checks right before its first project write.
  *  `serve` recovers and checks in its ownership claim. The recovery module loads only when a
  *  journal exists. */
-async function admitProjectCommand(command: string, args: readonly string[], repoRoot: string, singleProject: boolean): Promise<void> {
-  const projectList = command === 'projects' && singleProject && (args.length === 0 || args[0] === 'list');
-  if (command !== 'run' && command !== 'init' && !projectList) return;
+async function admitProjectCommand(command: string, repoRoot: string): Promise<void> {
+  if (command !== 'run' && command !== 'init') return;
   const dataDir = projectPaths(repoRoot).write;
   if (projectAdmissionRefusal(dataDir)?.reason === 'journal') await (await import('./project-migration/recovery.ts')).recoverProjectMigration(repoRoot);
   assertProjectAdmitted(dataDir);
@@ -179,7 +176,7 @@ async function dispatch(deps: CliDeps): Promise<void> {
   const cwd = resolve(values.repo ?? deps.process.cwd());
   const repoInfo = await deps.getRepoInfo(cwd);
   const repoRoot = repoInfo?.root ?? cwd;
-  await admitProjectCommand(command, positionals.slice(1), repoRoot, deps.productEnv('SINGLE_PROJECT') === '1');
+  await admitProjectCommand(command, repoRoot);
 
   switch (command) {
     case 'serve':
@@ -193,19 +190,10 @@ async function dispatch(deps: CliDeps): Promise<void> {
       home();
       await deps.initCommand(repoRoot);
       return;
-    case 'projects': {
+    case 'projects':
       // Registry-only (no server, no HTTP) — see workspace/projects-cli.ts.
-      // In single-project mode a listing is a launch-context read: register
-      // the boot repo through the normal self-healing path and pin the output
-      // to that explicit identity. Mutations are left to their own guards.
-      const projectArgs = positionals.slice(1);
-      const isList = projectArgs.length === 0 || projectArgs[0] === 'list';
-      const bootProjectId = deps.productEnv('SINGLE_PROJECT') === '1' && isList
-        ? await deps.initWorkspace(repoRoot, home())
-        : undefined;
-      deps.process.exitCode = await deps.runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId, home: home() });
+      deps.process.exitCode = await deps.runProjectsCommand(positionals.slice(1), { defaultRoot: repoRoot, home: home() });
       return;
-    }
     case 'server-install':
       await deps.serverCommand('install', home(), repoRoot, values.platform, {
         yes: Boolean(values.yes),

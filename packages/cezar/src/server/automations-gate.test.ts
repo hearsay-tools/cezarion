@@ -272,7 +272,7 @@ describe('automations gate (#801)', () => {
       const reached = new Promise<void>((resolve) => { entered = resolve; });
       const pending = new Promise<void>((resolve) => { release = resolve; });
       const workspace = createWorkspaceProjects({ home: testHome(), bootRoot: repoRoot });
-      vi.spyOn(workspace, 'listVisibleProjects').mockImplementation(async () => {
+      vi.spyOn(workspace, 'listProjects').mockImplementation(async () => {
         if (stage === 'project discovery') {
           entered();
           await pending;

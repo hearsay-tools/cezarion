@@ -1341,7 +1341,7 @@ describe('useGlobalEvents — provider status', () => {
     const health = {
       version: 'test', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
       projects: [], bootProject: BOOT,
-      capabilities: { localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+      capabilities: { localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
       checks: [{ name: 'cursor', available: true }],
     }
     client.removeQueries({ queryKey: queryKeys.health })
@@ -1363,7 +1363,7 @@ describe('useGlobalEvents — provider status', () => {
     const health = {
       version: 'old', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
       projects: [], bootProject: BOOT,
-      capabilities: { localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false, singleProject: false },
+      capabilities: { localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false },
       checks: [{ name: 'cursor', available: true }],
     }
     client.removeQueries({ queryKey: queryKeys.health })

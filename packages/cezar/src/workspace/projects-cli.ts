@@ -1,6 +1,5 @@
 import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
-import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -40,13 +39,7 @@ const USAGE = commandText(`usage:
   cez projects add [<dir>]     register a folder (default: --repo, else cwd)
   cez projects remove|rm <id>  drop a registry entry (the repo is untouched)
   cez projects tag <id> [<tag>…]
-                               set the grouping tags of a project (none clears them)
-
-  add/remove/tag are unavailable when CEZ_SINGLE_PROJECT=1`);
-
-const SINGLE_PROJECT_ADD_ERROR = 'single-project mode is enabled; adding projects is disabled';
-const SINGLE_PROJECT_REMOVE_ERROR = 'single-project mode is enabled; removing projects is disabled';
-const SINGLE_PROJECT_EDIT_ERROR = 'single-project mode is enabled; editing projects is disabled';
+                               set the grouping tags of a project (none clears them)`);
 
 /**
  * Run one `projects` subcommand. Returns the process exit code (0 ok, 1 for a
@@ -55,32 +48,19 @@ const SINGLE_PROJECT_EDIT_ERROR = 'single-project mode is enabled; editing proje
  */
 export async function runProjectsCommand(
   args: string[],
-  opts: { home: Home; defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
+  opts: { home: Home; defaultRoot: string; io?: ProjectsCommandIo },
 ): Promise<number> {
   const io = opts.io ?? defaultIo;
-  const singleProject = productEnv('SINGLE_PROJECT', (opts.env ?? process.env)) === '1';
   const [sub = 'list', ...rest] = args;
   switch (sub) {
     case 'list':
-      return listCommand(io, singleProject, opts.bootProjectId, opts.home);
+      return listCommand(io, opts.home);
     case 'add':
-      if (singleProject) {
-        io.error(SINGLE_PROJECT_ADD_ERROR);
-        return 1;
-      }
       return addCommand(rest[0] ? resolve(rest[0]) : opts.defaultRoot, io, opts.home);
     case 'remove':
     case 'rm':
-      if (singleProject) {
-        io.error(SINGLE_PROJECT_REMOVE_ERROR);
-        return 1;
-      }
       return removeCommand(rest[0], io, opts.home);
     case 'tag':
-      if (singleProject) {
-        io.error(SINGLE_PROJECT_EDIT_ERROR);
-        return 1;
-      }
       return tagCommand(rest[0], rest.slice(1), io, opts.home);
     default:
       io.error(`unknown projects subcommand: ${sub}\n`);
@@ -101,17 +81,8 @@ function statusMark(status: string): string {
   return status === 'missing' ? '✗' : status === 'not-git' ? '·' : '✓';
 }
 
-async function listCommand(
-  io: ProjectsCommandIo,
-  singleProject: boolean,
-  bootProjectId: string | undefined,
-  home: Home,
-): Promise<number> {
-  const projects = bootProjectId
-    ? await listProjects({ projectId: bootProjectId }, home)
-    : singleProject
-      ? []
-      : await listProjects(undefined, home);
+async function listCommand(io: ProjectsCommandIo, home: Home): Promise<number> {
+  const projects = await listProjects(home);
   if (projects.length === 0) {
     io.log('\n  no projects registered yet');
     io.log(commandText('  start the cockpit in a repo (npx cezarion) or add one: cez projects add <dir>\n'));
