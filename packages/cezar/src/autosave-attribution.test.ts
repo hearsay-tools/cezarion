@@ -1,9 +1,10 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { autosaveGit } from './autosave-git.ts';
+import { autosaveGit, withAutosaveGit } from './autosave-git.ts';
+import * as holders from './autosave-holders.ts';
 import { autosaveCommit } from './autosave-commit.ts';
 import { killFromPidFile, readPids, requirePid, writePidSource } from './pid-file.testkit.ts';
 
@@ -169,6 +170,178 @@ setTimeout(() => process.exit(0), 50);
     expect(readFileSync(join(repo, 'late.txt'), 'utf8')).toBe('last write');
     expect(other.exitCode).toBeNull();
     expect(existsSync(join(bin, 'signalled'))).toBe(false);
+  });
+
+  // Review of hearsay-tools/squawk#3545: the save observes each command's descendants when the
+  // command ends, so one that leaves the worktree before the save's last command stays retained.
+  it('retains a descendant of an early command that leaves the worktree before the save ends', async () => {
+    const descendant = join(bin, 'mover.cjs');
+    const move = join(bin, 'move');
+    const release = join(bin, 'release');
+    writeFileSync(descendant, `
+const fs = require('node:fs');
+${writePidSource(join(bin, 'pid'), { append: true })}
+const timer = setInterval(() => {
+  if (fs.existsSync(${JSON.stringify(move)}) && process.cwd() !== ${JSON.stringify(bin)}) process.chdir(${JSON.stringify(bin)});
+  if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }
+}, 10);
+`);
+    // Only the first command, `status`, starts the detached descendant.
+    writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
+if (process.argv.includes('status')) require('node:child_process').spawn(process.execPath, [${JSON.stringify(descendant)}], { detached: true, stdio: 'ignore' }).unref();
+setTimeout(() => process.exit(0), 50);
+`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    const blocked = vi.fn();
+    let settled = false;
+    const productClock = holdProductClock();
+    const job = withAutosaveGit(repo, { timeoutMs: 300, killGraceMs: 50, confirmMs: 50, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['status']);
+      await until(() => readPids(join(bin, 'pid')).length > 0, 'the detached descendant to publish its pid');
+      const holder = requirePid(join(bin, 'pid'));
+      writeFileSync(move, '');
+      await until(() => readlinkSync(`/proc/${holder}/cwd`) === bin, 'the descendant to leave the worktree');
+      await git(['rev-parse']);
+      return 'saved';
+    }).then(result => { settled = true; return result; });
+    jobs.push(job);
+    await until(() => existsSync(move), 'the first command to end');
+    const holder = requirePid(join(bin, 'pid'));
+    productClock.start();
+    const proofs = () => blocked.mock.calls.map(([, proof]) => proof as { processes: { pid: number }[] });
+    // A save that settles first never retained the descendant: that ends the wait and fails below.
+    await until(() => settled || proofs().at(-1)?.processes.some(entry => entry.pid === holder) === true, 'a blocked proof naming the descendant');
+    expect(settled).toBe(false);
+    writeFileSync(release, '');
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
+  // Review round 2 of hearsay-tools/squawk#3545: each check reads every cwd again, so a descendant
+  // first seen outside the worktree is retained once it enters it.
+  it('retains a descendant that starts outside the worktree and enters it during the save', async () => {
+    const descendant = join(bin, 'enterer.cjs');
+    const enter = join(bin, 'enter');
+    const release = join(bin, 'release');
+    writeFileSync(descendant, `
+const fs = require('node:fs');
+${writePidSource(join(bin, 'pid'), { append: true })}
+const timer = setInterval(() => {
+  if (fs.existsSync(${JSON.stringify(enter)}) && process.cwd() !== ${JSON.stringify(repo)}) process.chdir(${JSON.stringify(repo)});
+  if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }
+}, 10);
+`);
+    // Only the first command, `status`, starts the detached descendant, outside the worktree.
+    writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
+if (process.argv.includes('status')) require('node:child_process').spawn(process.execPath, [${JSON.stringify(descendant)}], { cwd: ${JSON.stringify(bin)}, detached: true, stdio: 'ignore' }).unref();
+setTimeout(() => process.exit(0), 50);
+`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    const blocked = vi.fn();
+    let settled = false;
+    const productClock = holdProductClock();
+    const job = withAutosaveGit(repo, { timeoutMs: 300, killGraceMs: 50, confirmMs: 50, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['status']);
+      await until(() => readPids(join(bin, 'pid')).length > 0, 'the detached descendant to publish its pid');
+      const holder = requirePid(join(bin, 'pid'));
+      writeFileSync(enter, '');
+      await until(() => readlinkSync(`/proc/${holder}/cwd`) === repo, 'the descendant to enter the worktree');
+      await git(['rev-parse']);
+      return 'saved';
+    }).then(result => { settled = true; return result; });
+    jobs.push(job);
+    await until(() => existsSync(enter), 'the first command to end');
+    const holder = requirePid(join(bin, 'pid'));
+    productClock.start();
+    const proofs = () => blocked.mock.calls.map(([, proof]) => proof as { processes: { pid: number }[] });
+    await until(() => settled || proofs().at(-1)?.processes.some(entry => entry.pid === holder) === true, 'a blocked proof naming the descendant');
+    expect(settled).toBe(false);
+    writeFileSync(release, '');
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
+  // CodeRabbit on hearsay-tools/squawk#3545: a holder an earlier command left may have moved out
+  // of the worktree, where the restart-time cwd scan cannot find it, so every proof names it.
+  it('names the holders earlier commands left in a later command\'s blocked proof', async () => {
+    writeFileSync(join(bin, 'git'), '#!/bin/sh\nfor a; do [ "$a" = stall ] && exec sleep 30; done\nexit 0\n', { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    let held = true;
+    const left = { pid: 4242, startToken: 'left-by-the-first-command' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [left.pid] : [], processes: held ? [left] : [], inspectionFailed: false }) }));
+    // The stalled command's group stays unproven until the case lifts this.
+    let obscure = true;
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid < 0 && signal === 0 && obscure) throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
+      return kill(pid, signal);
+    });
+    const blocked = vi.fn();
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['first']);
+      return (await git(['stall'])).ok ? 'saved' : 'unsuccessful';
+    });
+    jobs.push(job);
+    await until(() => blocked.mock.calls.length > 0, 'the stalled command to report blocked');
+    expect(blocked.mock.calls[0]![1]).toMatchObject({ processes: expect.arrayContaining([left]), groups: [expect.any(Number)] });
+    obscure = false; held = false;
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
+  // Review round 3 of hearsay-tools/squawk#3545: the caller does more work after its last Git
+  // command (the conflict-marker reads), so the save scans again once `run` returns.
+  it('waits for a holder that appears after the last Git command\'s check', async () => {
+    let held = false;
+    const late = { pid: 4343, startToken: 'after-the-last-command' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [late.pid] : [], processes: held ? [late] : [], inspectionFailed: false }) }));
+    const blocked = vi.fn();
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['status', '--porcelain']);
+      held = true;
+      return 'refused';
+    });
+    jobs.push(job);
+    await until(() => blocked.mock.calls.length > 0, 'the save to report the late holder');
+    expect(blocked.mock.calls[0]![1]).toMatchObject({ processes: [late] });
+    held = false;
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
+  // CodeRabbit on hearsay-tools/squawk#3545: a caller that throws still waits for Git's descendants.
+  it('waits for observed holders before a failing save rejects', async () => {
+    let held = true;
+    const left = { pid: 4545, startToken: 'left-before-the-throw' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [left.pid] : [], processes: held ? [left] : [], inspectionFailed: false }) }));
+    const blocked = vi.fn();
+    let settled = false;
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['status']);
+      throw new Error('unexpected');
+    }).finally(() => { settled = true; });
+    const rejected = job.catch((error: Error) => error.message);
+    await until(() => settled || blocked.mock.calls.length > 0, 'the save to report the held worktree');
+    expect(settled).toBe(false);
+    held = false;
+    expect(await Promise.race([rejected, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unexpected');
+  });
+
+  // Review round 3 of hearsay-tools/squawk#3545: the proof is compared after the holders are
+  // merged in, so a new incarnation of the same PID and executable reaches the evidence.
+  it('reports a new incarnation of the same holder PID', async () => {
+    let held = true;
+    let holder = { pid: 4444, startToken: 'first' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [holder.pid] : [], processes: held ? [holder] : [], inspectionFailed: false }) }));
+    const blocked = vi.fn();
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => (await git(['status'])).ok ? 'saved' : 'failed');
+    jobs.push(job);
+    const tokens = () => blocked.mock.calls.flatMap(([, proof]) => (proof as { processes: { startToken?: string }[] }).processes.map(entry => entry.startToken));
+    await until(() => tokens().includes('first'), 'a proof naming the first incarnation');
+    holder = { pid: 4444, startToken: 'second' };
+    await until(() => tokens().includes('second'), 'a proof naming the second incarnation');
+    held = false;
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
   });
 
   it('bounds cleanup warnings while the retained descendants keep changing PIDs', async () => {

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fsyncSync, lstatSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { processesWithCwdUnder, processStartToken, processPredatesCurrentBoot, recordedProcessLive } from './delegation/process-liveness.ts';
+import { describeProcesses, processesWithCwdUnder, processStartToken, processPredatesCurrentBoot, recordedProcessLive } from './delegation/process-liveness.ts';
 
 const processSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().optional() });
 /** Private safety evidence, independent of the run store's ownership/session lifetime. */
@@ -13,8 +13,10 @@ const cleanupSchema = z.object({
   version: z.literal(1), cwd: z.string().min(1), controller: processSchema,
   processes: z.array(processSchema), groups: z.array(z.number().int().min(2)),
   uncertain: z.boolean(), message: z.string(),
+  /** The save's first Git leader's start token; absent in evidence written before hearsay-tools/squawk#963. */
+  since: z.string().optional(),
 });
-export type AutosaveCleanupProof = Pick<z.infer<typeof cleanupSchema>, 'processes' | 'groups' | 'uncertain'>;
+export type AutosaveCleanupProof = Pick<z.infer<typeof cleanupSchema>, 'processes' | 'groups' | 'uncertain' | 'since'>;
 const processLive = (entry: { pid: number; startToken?: string | undefined }) => process.platform === 'win32' ? windowsAutosaveProcessLive(entry) : recordedProcessLive(entry);
 const pathFor = (dataDir: string, id: string) => join(runDataDir(dataDir, z.uuid().parse(id)), 'runs', `${id}.autosave-cleanup.json`);
 
@@ -46,6 +48,17 @@ export function autosaveCleanupIds(dataDir: string): string[] | undefined {
   }), ...legacyRunsBeside(dataDir).filter(id => autosaveCleanupBlocker(dataDir, id))]; } catch { return undefined; }
 }
 
+/** A Linux start token: the boot id and `starttime`, clock ticks since that boot. */
+const LINUX_START = /^([0-9a-f-]{36}):(\d+)$/;
+/** Whether a process with start token `token` cannot be the save's: it started before the save's
+ *  first Git leader (`since`), or the save ran in an earlier boot. Only Linux boot-relative ticks
+ *  are monotonic; macOS `lstart` follows the wall clock, which can step back. Unknown is false. */
+function predatesSave(token: string | undefined, since: string): boolean {
+  const holder = token === undefined ? null : LINUX_START.exec(token), first = LINUX_START.exec(since);
+  if (!holder || !first) return false;
+  return holder[1] !== first[1] || Number(holder[2]) < Number(first[2]);
+}
+
 /** Synchronous admission/cleanup proof, with no signalling or invented timeout release. */
 export function autosaveCleanupBlocker(dataDir: string, id: string): string | undefined {
   if (!z.uuid().safeParse(id).success) return undefined;
@@ -63,9 +76,15 @@ export function autosaveCleanupBlocker(dataDir: string, id: string): string | un
   if (processLive(record.controller)) return record.message;
   const pids = record.processes.filter(processLive).map(entry => entry.pid);
   const groups = processPredatesCurrentBoot(record.controller) ? [] : record.groups.filter(autosaveGroupAliveSync);
-  const holders = processesWithCwdUnder(record.cwd);
+  // A process in the worktree that started before the save is not the save's (hearsay-tools/squawk#963).
+  // Any later one may be: without the dead controller's observation of ancestry, an environment
+  // without the save's marker is no proof. Without a Linux `since` (older evidence, macOS) every
+  // holder blocks.
+  const scan = processesWithCwdUnder(record.cwd);
+  const since = record.since;
+  const holders = scan === 'unknown' || since === undefined ? scan : scan.filter(pid => !predatesSave(processStartToken(pid), since));
   if (record.uncertain || pids.length || groups.length || holders === 'unknown' || holders.length) {
-    return `autosave cleanup pending; retained PIDs: ${[...new Set([...pids, ...(holders === 'unknown' ? [] : holders)])].join(', ') || 'none'}; ` +
+    return `autosave cleanup pending; retained PIDs: ${describeProcesses([...new Set([...pids, ...(holders === 'unknown' ? [] : holders)])]) || 'none'}; ` +
       `process groups: ${groups.join(', ') || 'none'}${record.uncertain || holders === 'unknown' ? '; process inspection uncertain' : ''}; worktree reuse blocked`;
   }
   // Reads never unlink evidence: another process may have published a newer

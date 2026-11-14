@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { autosaveCleanupBlocker, autosaveCleanupIds, clearAutosaveCleanup, retainAutosaveCleanup } from './autosave-cleanup.ts';
 import { processStartToken } from './delegation/process-liveness.ts';
@@ -97,6 +97,44 @@ describe('durable autosave cleanup', () => {
     expect(autosaveCleanupBlocker(dataDir, id)).toContain('123');
     scan.mockReturnValue([]);
     expect(autosaveCleanupBlocker(dataDir, id)).toBeUndefined();
+  });
+
+  it.runIf(process.platform === 'linux')('after controller death, a holder that started before the save does not block; a later one does, named by command (hearsay-tools/squawk#963)', async () => {
+    const { dataDir, id, deadOwner } = fixture();
+    const exits = new Map<ReturnType<typeof spawn>, Promise<unknown>>();
+    const start = () => {
+      // A clean environment carries no autosave marker: after a crash that proves nothing.
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: dataDir, stdio: 'ignore', env: { PATH: process.env.PATH } });
+      exits.set(child, new Promise(resolve => child.once('exit', resolve)));
+      return child;
+    };
+    const stop = (child: ReturnType<typeof spawn>) => { child.kill('SIGKILL'); return exits.get(child); };
+    const ticks = (pid: number) => Number(processStartToken(pid)!.split(':').at(-1));
+    try {
+      const before = start();
+      // The save's first Git leader: a process at least one clock tick younger than `before`.
+      let leader = start();
+      while (ticks(leader.pid!) <= ticks(before.pid!)) { await stop(leader); leader = start(); }
+      retainAutosaveCleanup(dataDir, id, dataDir, 'held', { processes: [], groups: [], uncertain: false, since: processStartToken(leader.pid!) });
+      await stop(leader);
+      deadOwner();
+      expect(autosaveCleanupBlocker(dataDir, id)).toBeUndefined();
+      const after = start();
+      const blocker = autosaveCleanupBlocker(dataDir, id);
+      expect(blocker).toContain(`${after.pid} (${basename(process.execPath)})`);
+      expect(blocker).not.toContain(String(before.pid));
+    } finally {
+      await Promise.all([...exits.keys()].map(stop));
+    }
+  });
+
+  it('a macOS start token proves nothing after controller death: its wall clock can step back', () => {
+    const { dataDir, id, deadOwner } = fixture();
+    retainAutosaveCleanup(dataDir, id, dataDir, 'held', { processes: [], groups: [], uncertain: false, since: 'Tue Sep 29 10:00:00 2026' });
+    deadOwner();
+    vi.spyOn(liveness, 'processesWithCwdUnder').mockReturnValue([123]);
+    vi.spyOn(liveness, 'processStartToken').mockReturnValue('Mon Sep 28 10:00:00 2026');
+    expect(autosaveCleanupBlocker(dataDir, id)).toContain('123');
   });
 
   it('an unreadable cwd scan cannot retire a dead controller proof', () => {
