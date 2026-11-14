@@ -160,7 +160,7 @@ function createRegistrar(scope: HarnessParityScope, registration: HarnessRegistr
 }
 
 /** How many cells each group's suite registers for one runner, by suite name. A shared group can
- *  hold none for a runner outside the derived set, and Vitest 4 fails an empty suite. */
+ *  hold none for a runner other than the scenario runner, and Vitest 4 fails an empty suite. */
 function groupCellCounts(scope: Exclude<HarnessParityScope, 'once'>, groups: readonly HarnessGroup[], toolGrantCells: number): Map<string, number> {
   const counts = new Map<string, number>();
   let cells = 0;

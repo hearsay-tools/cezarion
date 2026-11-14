@@ -19,7 +19,7 @@ import { toolCall, thenSay, gatedProviderFailure } from './waits-parity.testkit.
 
 // The asks part of the wait parity cells (`WAIT_PARITY_PARTS` in `waits-parity-catalog.testkit.ts`).
 // A wait parity file imports this module first, so it loads no other part's cells (hearsay-tools/cezarion#3242).
-export const { describeWaitParity, describeWaitParityFamily } = waitPartDescribers('asks', asksCells);
+export const { describeWaitParity } = waitPartDescribers('asks', asksCells);
 
 /** The run waits on exactly one human wait, surfaced as its one card, and reads Needs you; the
  *  answer moves the wait to `lastWaits` as delivered, with the card's askSeq. */

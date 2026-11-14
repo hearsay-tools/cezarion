@@ -19,29 +19,19 @@ import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 // signal, on every runner's native wire. Its last agent step signals done; a check step ends the chain.
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   "no-done": [
-    "claude C1",
-    "cursor C1",
-    "omp C1"
+    "claude C1"
   ],
   "clean-close": [
-    "claude C3",
-    "cursor C3",
-    "omp C3"
+    "claude C3"
   ],
   "idle-close": [
-    "claude C4",
-    "cursor C4",
-    "omp C4"
+    "claude C4"
   ],
   "recovery": [
-    "claude C5",
-    "cursor C5",
-    "omp C5"
+    "claude C5"
   ],
   "autonomous": [
-    "claude C6",
-    "cursor C6",
-    "omp C6"
+    "claude C6"
   ]
 };
 

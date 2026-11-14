@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
@@ -14,51 +14,47 @@ import {
 import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
 import { MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA, MONITORING_TURN_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import {
-  NO_SESSION_RUNNER, PARITY_FAMILIES, PARITY_FILES, SHARED_RUNNERS, deriveRunnerSet, parityRowId, parityRunners, turnPathValues,
-  type ParityFamilyName,
+  FACT_VALUE_TESTS, NO_SESSION_RUNNER, PARITY_FAMILIES, PARITY_FILES, SCENARIO_RUNNER, SHARED_RUNNERS, parityRowId, parityRunners, turnPathValues,
+  type ParityFamilyName, type TurnPathFact,
   SCENARIO_CLASSES,
 } from './parity-classes.testkit.ts';
 import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
 import { COMBINATION_ROWS, type CombinationException } from '../lint/runner-fact-combination.ts';
 
 const src = join(import.meta.dirname, '..');
-const facts = (overrides: Partial<RunnerFacts['inputDelivery']> & { systemPromptOnResume?: RunnerFacts['systemPromptOnResume'] } = {}): RunnerFacts => {
-  const { systemPromptOnResume = 'resent', ...delivery } = overrides;
-  return {
-    ...RUNNER_FACTS.codex, systemPromptOnResume,
-    inputDelivery: { ...RUNNER_FACTS.codex.inputDelivery, ...delivery } as RunnerFacts['inputDelivery'],
-  };
-};
 
-describe('the shared parity runner set (hearsay-tools/cezarion#2991)', () => {
-  // Guard 1: a value no member shows fails here, and deriveRunnerSet then picks a runner that has it.
-  it('shows every declared value of every turn-path fact', () => {
-    const declared = turnPathValues(RUNNER_IDS, RUNNER_FACTS);
-    const shown = turnPathValues(SHARED_RUNNERS, RUNNER_FACTS);
-    for (const [fact, values] of Object.entries(declared)) expect([...shown[fact]!].sort(), fact).toEqual([...values].sort());
+describe('the scenario runner and the fact-value unit tests (docs/adr/0063-one-scenario-runner.md)', () => {
+  it('runs shared and no-session rows on the scenario runner alone', () => {
+    expect(RUNNER_IDS).toContain(SCENARIO_RUNNER);
+    expect(SHARED_RUNNERS).toEqual([SCENARIO_RUNNER]);
+    expect(NO_SESSION_RUNNER).toBe(SCENARIO_RUNNER);
   });
 
-  it('is the smallest such set, in RUNNER_IDS order, and the no-session runner is its first', () => {
-    const declared = turnPathValues(RUNNER_IDS, RUNNER_FACTS);
-    const subsets = (size: number, from = 0): string[][] => size === 0 ? [[]]
-      : RUNNER_IDS.slice(from).flatMap((id, at) => subsets(size - 1, from + at + 1).map(rest => [id, ...rest]));
-    for (let size = 1; size < SHARED_RUNNERS.length; size++) {
-      for (const set of subsets(size)) {
-        const shown = turnPathValues(set as typeof RUNNER_IDS[number][], RUNNER_FACTS);
-        expect(Object.entries(declared).every(([fact, values]) => [...values].every(value => shown[fact]!.has(value))), set.join(',')).toBe(false);
-      }
-    }
-    expect(SHARED_RUNNERS).toEqual(RUNNER_IDS.filter(id => SHARED_RUNNERS.includes(id)));
-    expect(NO_SESSION_RUNNER).toBe(SHARED_RUNNERS[0]);
+  // Guard 1: every declared value the scenario runner does not show names unit tests that spell it.
+  it('names unit tests for every turn-path fact value the scenario runner does not declare', () => {
+    expect(factValueProblems(FACT_VALUE_TESTS, RUNNER_FACTS)).toEqual([]);
   });
 
-  it('takes in a runner that declares a new value, and breaks ties by order', () => {
-    const table = { a: facts(), b: facts({ humanInputAtTurnEnd: 'never-held' }), c: facts({ systemPromptOnResume: 'in-thread' }) };
-    expect(deriveRunnerSet(['a', 'b', 'c'], table)).toEqual(['b', 'c']);
-    const grown = { ...table, d: facts({ mode: 'boundary', humanInputAtTurnEnd: 'always-held', acknowledgement: 'model-work' }) };
-    expect(deriveRunnerSet(['a', 'b', 'c', 'd'], grown)).toEqual(['b', 'c', 'd']);
-    const tie = { a: facts({ consumption: 'unobservable' }), b: facts({ consumption: 'unobservable' }), c: facts() };
-    expect(deriveRunnerSet(['a', 'b', 'c'], tie)).toEqual(['a', 'c']);
+  it('fails a missing value, a stale value, the scenario runner\'s own value and a bad file', () => {
+    const tests = { ...FACT_VALUE_TESTS, 'inputDelivery.mode': {} };
+    expect(factValueProblems(tests, RUNNER_FACTS)).toEqual(['inputDelivery.mode boundary: no unit test is named']);
+    // Without cursor, no runner declares boundary, unobservable or model-work: their entries go stale.
+    const { cursor: _cursor, ...withoutCursor } = RUNNER_FACTS;
+    expect(factValueProblems(FACT_VALUE_TESTS, withoutCursor)).toEqual([
+      'inputDelivery.mode boundary: no runner declares it',
+      'inputDelivery.consumption unobservable: no runner declares it',
+      'inputDelivery.acknowledgement model-work: no runner declares it',
+    ]);
+    const stale = { ...FACT_VALUE_TESTS, 'inputDelivery.consumption': { ...FACT_VALUE_TESTS['inputDelivery.consumption'], gone: ['workflows/turn-path-fact-values.test.ts'] } };
+    expect(factValueProblems(stale, RUNNER_FACTS)).toEqual(['inputDelivery.consumption gone: no runner declares it']);
+    const own = { ...FACT_VALUE_TESTS, systemPromptOnResume: { ...FACT_VALUE_TESTS.systemPromptOnResume, resent: ['workflows/launch-system-prompt.test.ts'] } };
+    expect(factValueProblems(own, RUNNER_FACTS)).toEqual([`systemPromptOnResume resent: the scenario runner ${SCENARIO_RUNNER} declares it, so its parity rows test it`]);
+    const files = { ...FACT_VALUE_TESTS, 'inputDelivery.mode': { boundary: ['workflows/nowhere.test.ts', 'workflows/waits-parity.test.ts', 'workflows/launch-system-prompt.test.ts'] } };
+    expect(factValueProblems(files, RUNNER_FACTS)).toEqual([
+      'inputDelivery.mode boundary: workflows/nowhere.test.ts does not exist',
+      'inputDelivery.mode boundary: workflows/waits-parity.test.ts is a parity file',
+      'inputDelivery.mode boundary: workflows/launch-system-prompt.test.ts does not spell \'boundary\'',
+    ]);
   });
 });
 
@@ -241,5 +237,27 @@ function combinationRowProblems(exceptions: Readonly<Record<string, CombinationE
     if (!registered.has(row)) return [`${site}: ${row} is not a registered row of ${family}`];
     if (parityRunners(family as ParityFamilyName, row).length !== RUNNER_IDS.length) return [`${site}: ${entry} does not run on every runner`];
     return [];
+  });
+}
+
+/** Each problem with the fact-value unit tests: a declared value with none, a value no runner or
+ *  only the scenario runner declares, and a file that is missing, a parity file or silent on its value. */
+function factValueProblems(tests: Readonly<Record<TurnPathFact, Readonly<Record<string, readonly string[]>>>>, table: Readonly<Record<string, RunnerFacts>>): string[] {
+  const declared = turnPathValues(Object.keys(table), table);
+  const own = turnPathValues([SCENARIO_RUNNER], table);
+  return (Object.keys(declared) as TurnPathFact[]).flatMap(fact => {
+    const named = tests[fact];
+    const missing = [...declared[fact]].filter(value => !own[fact].has(value) && !named[value]?.length)
+      .map(value => `${fact} ${value}: no unit test is named`);
+    const wrong = Object.entries(named).flatMap(([value, files]) => {
+      if (!declared[fact].has(value)) return [`${fact} ${value}: no runner declares it`];
+      if (own[fact].has(value)) return [`${fact} ${value}: the scenario runner ${SCENARIO_RUNNER} declares it, so its parity rows test it`];
+      return files.flatMap(file => {
+        if (!existsSync(join(src, file))) return [`${fact} ${value}: ${file} does not exist`];
+        if (file.endsWith('-parity.test.ts')) return [`${fact} ${value}: ${file} is a parity file`];
+        return readFileSync(join(src, file), 'utf8').includes(`'${value}'`) ? [] : [`${fact} ${value}: ${file} does not spell '${value}'`];
+      });
+    });
+    return [...missing, ...wrong];
   });
 }

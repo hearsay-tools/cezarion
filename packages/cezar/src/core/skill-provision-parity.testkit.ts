@@ -165,16 +165,10 @@ async function liveProvisioning(after: number): Promise<void> {
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   "start-and-stop": [
     "claude R92",
-    "claude R96",
-    "cursor R92",
-    "cursor R96",
-    "omp R92",
-    "omp R96"
+    "claude R96"
   ],
   "continue": [
-    "claude R93",
-    "cursor R93",
-    "omp R93"
+    "claude R93"
   ],
   "slash-install": [
     "claude R95",
@@ -185,9 +179,7 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "pi R95"
   ],
   "recovery": [
-    "claude R94",
-    "cursor R94",
-    "omp R94"
+    "claude R94"
   ]
 };
 

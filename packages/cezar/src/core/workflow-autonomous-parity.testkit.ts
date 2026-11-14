@@ -50,63 +50,35 @@ const nudges = (events: readonly Record<string, unknown>[]) => events.filter(e =
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   "budget-fresh": [
-    "cursor A5 fresh"
-  ],
-  "budget-fresh-claude-omp": [
-    "claude A5 fresh",
-    "omp A5 fresh"
+    "claude A5 fresh"
   ],
   "budget-continuation": [
-    "claude A5 continuation",
-    "cursor A5 continuation",
-    "omp A5 continuation"
+    "claude A5 continuation"
   ],
   "late-readiness-fresh": [
-    "claude A11 fresh",
-    "cursor A11 fresh",
-    "omp A11 fresh"
+    "claude A11 fresh"
   ],
   "late-readiness-continuation": [
-    "claude A12 continuation",
-    "cursor A12 continuation",
-    "omp A12 continuation"
+    "claude A12 continuation"
   ],
   "nudges": [
     "claude A1 fresh",
-    "claude A2 continuation",
-    "cursor A1 fresh",
-    "cursor A2 continuation",
-    "omp A1 fresh",
-    "omp A2 continuation"
+    "claude A2 continuation"
   ],
   "ask-refusal": [
     "claude A3 fresh",
-    "claude A4 continuation",
-    "cursor A3 fresh",
-    "cursor A4 continuation",
-    "omp A3 fresh",
-    "omp A4 continuation"
+    "claude A4 continuation"
   ],
   "unanswered-question": [
-    "claude A10 fresh",
-    "cursor A10 fresh",
-    "omp A10 fresh"
+    "claude A10 fresh"
   ],
   "non-autonomous": [
     "claude A6 continuation",
-    "claude A6 fresh",
-    "cursor A6 continuation",
-    "cursor A6 fresh",
-    "omp A6 continuation",
-    "omp A6 fresh"
+    "claude A6 fresh"
   ],
   "tool-parking": [
     "claude A7 fresh",
-    "claude A8 fresh",
-    "cursor A7 fresh",
-    "cursor A8 fresh",
-    "omp A7 fresh",
-    "omp A8 fresh"
+    "claude A8 fresh"
   ],
   "native-questions": [
     "claude A9",

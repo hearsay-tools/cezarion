@@ -16,7 +16,7 @@ import { MESSAGE_WAKE_OPENING, toolCall, thenSay } from './waits-parity.testkit.
 
 // The closed part of the wait parity cells (`WAIT_PARITY_PARTS` in `waits-parity-catalog.testkit.ts`).
 // A wait parity file imports this module first, so it loads no other part's cells (hearsay-tools/cezarion#3242).
-export const { describeWaitParity, describeWaitParityFamily } = waitPartDescribers('closed', closedCells);
+export const { describeWaitParity } = waitPartDescribers('closed', closedCells);
 
 /** Claude U22c/k/x cross several real process launches. Keep the shared 15 s guard per
  *  signal, rather than charging every delivery attempt to one window (hearsay-tools/cezarion#1450). */
