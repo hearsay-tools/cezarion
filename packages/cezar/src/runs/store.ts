@@ -67,6 +67,7 @@ import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
+  type BranchOwnerRow,
 } from './run-database.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
@@ -389,6 +390,17 @@ export interface BranchOwner {
   branch?: string;
   baseBranch?: string;
   pullRequestUrl?: string;
+  /** A settled owned worker whose parent is archived (hearsay-tools/squawk#911): its ownership
+   *  receipt no longer keeps its branch in use. */
+  endedWorker?: true;
+}
+
+const SETTLED_WORKER: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'failed', 'cancelled', 'review']);
+
+/** The parent of a worker that may end with its family: settled, not live, no destroy recorded. */
+function settledWorkerParent(run: Pick<RunRecord, 'status'> & { delegation?: { role?: string; parentRunId?: string; destroy?: unknown } | null | undefined }): string | undefined {
+  const delegation = run.delegation;
+  return delegation?.role === 'worker' && !delegation.destroy && SETTLED_WORKER.has(run.status) ? delegation.parentRunId : undefined;
 }
 
 /** A record as a branch owner, or undefined when it owns no branch and created no PR: the
@@ -401,6 +413,17 @@ export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
     ...(branch ? { branch } : {}),
     ...(run.baseBranch === undefined ? {} : { baseBranch: run.baseBranch }),
     ...(run.pullRequestUrl === undefined ? {} : { pullRequestUrl: run.pullRequestUrl }),
+  };
+}
+
+/** A stored row as a branch owner: its summary and columns, no record decoded. */
+function branchOwnerOfRow(row: BranchOwnerRow, summary: ReturnType<typeof parseStoredSummary>): BranchOwner {
+  return {
+    id: row.id, createdAt: row.createdAt, status: row.status as RunStatus, archived: row.archived,
+    ...(row.branch === null ? {} : { branch: row.branch }),
+    ...(row.baseBranch === null ? {} : { baseBranch: row.baseBranch }),
+    title: summary?.title ?? row.id,
+    ...(summary?.pullRequestUrl === undefined ? {} : { pullRequestUrl: summary.pullRequestUrl }),
   };
 }
 
@@ -1485,20 +1508,25 @@ export class RunStore extends EventEmitter {
    */
   listBranchOwners(): BranchOwner[] {
     const owners = new Map<string, BranchOwner>();
+    // Each settled worker's parent; its owner is marked `endedWorker` once the parent is archived.
+    const parents = new Map<string, string>();
     for (const row of this.db?.listBranchOwners("branch IS NOT NULL OR json_extract(summary, '$.pullRequestUrl') IS NOT NULL") ?? []) {
       if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary);
-      owners.set(row.id, {
-        id: row.id, createdAt: row.createdAt, status: row.status as RunStatus, archived: row.archived,
-        ...(row.branch === null ? {} : { branch: row.branch }),
-        ...(row.baseBranch === null ? {} : { baseBranch: row.baseBranch }),
-        title: summary?.title ?? row.id,
-        ...(summary?.pullRequestUrl === undefined ? {} : { pullRequestUrl: summary.pullRequestUrl }),
-      });
+      // A row not held is not live (`isLiveRecord` rows are held).
+      const parent = summary && settledWorkerParent({ status: row.status as RunStatus, delegation: summary.delegation });
+      if (parent) parents.set(row.id, parent);
+      owners.set(row.id, branchOwnerOfRow(row, summary));
     }
     for (const run of this.held.values()) {
       const owner = branchOwnerOf(run);
-      if (owner) owners.set(run.id, owner);
+      if (!owner) continue;
+      owners.set(run.id, owner);
+      const parent = isLiveRecord(run) ? undefined : settledWorkerParent(run);
+      if (parent) parents.set(run.id, parent);
+    }
+    for (const [id, parent] of parents) {
+      if (owners.get(parent)?.archived ?? this.getRun(parent)?.archived) owners.get(id)!.endedWorker = true;
     }
     return [...owners.values()];
   }
@@ -3149,8 +3177,8 @@ export class RunStore extends EventEmitter {
 
   /**
    * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived ones,
-   * archive each finished run without delegation that is not pinned and whose family this store
-   * can claim. Ranked over the row keys (the `created_at` index, no record decoded) with memory
+   * archive each settled task that is not pinned and whose family this store can claim, together
+   * with its workers, once no member of the family is live (hearsay-tools/squawk#777). Ranked over the row keys (the `created_at` index, no record decoded) with memory
    * laid over them, since a run created or archived since the last save has no row yet; the rows
    * past the cut are then filtered in `runs.db`, so only real candidates decode. Archived runs
    * are never deleted by retention — only an explicit delete, worker destruction, or history
@@ -3166,8 +3194,7 @@ export class RunStore extends EventEmitter {
     if (overflow.length === 0) return;
     const stale = overflow.flatMap((id) => {
       const run = this.held.get(id);
-      // Retention must not archive a live task between turns, a pinned run, or a delegation
-      // family whose history is promised until explicit deletion.
+      // Retention must not archive a live task between turns, a pinned run, or a worker on its own.
       return run && !this.hasFallbackRun(id) && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
     const skipped = overflow.filter(id => this.hasFallbackRun(id)).length;
@@ -3182,7 +3209,19 @@ export class RunStore extends EventEmitter {
     for (const id of stale) {
       const run = this.record(id);
       if (!run || run.archived || !RETENTION_RUN_RULE.matches(run)) continue;
-      this.applyArchived(run, true);
+      this.archiveSettledFamily(run);
+    }
+  }
+
+  /** Archive a root with its workers when no member is live or mid-destroy. Best effort: a failed
+   *  write leaves the family for the next pass. */
+  private archiveSettledFamily(root: RunRecord): void {
+    if ([root, ...this.listWorkersOf(root.id)].some(isLiveRecord)) return;
+    const staged = new Map<string, RunRecord | null>();
+    this.stageArchive(staged, root, true);
+    try { this.commitIndex(staged); } catch { return; }
+    for (const id of staged.keys()) {
+      this.compressor.enqueue(id);
       removeAgentTmpDir(this.dataDir, id);
     }
   }

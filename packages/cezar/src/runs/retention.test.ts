@@ -140,23 +140,29 @@ describe('selectReclaimableWorktrees (#483)', () => {
     expect(isReclaimable(run({ id: 'w', status: RUN_STATUS.cancelled, role: 'worker' }))).toBe(true);
   });
 
-  it('keeps a finished worker while its parent is still live so collect can verify the workspace', () => {
-    const parent = run({ id: 'parent', status: RUN_STATUS.waiting });
-    const worker = run({
-      id: 'w',
-      status: RUN_STATUS.done,
-      role: 'worker',
-      finishedAt: '2026-07-01T00:00:00Z',
-    });
-    expect(isReclaimable(worker, (id) => [parent, worker].find((r) => r.id === id))).toBe(false);
-    expect(selectReclaimableWorktrees([parent, worker], 1)).toEqual([]);
-    const finishedParent = run({
-      id: 'parent',
-      status: RUN_STATUS.done,
-      finishedAt: '2026-07-02T00:00:00Z',
-    });
-    expect(isReclaimable(worker, (id) => [finishedParent, worker].find((r) => r.id === id))).toBe(true);
-    expect(selectReclaimableWorktrees([finishedParent, worker], 1)).toEqual(['w']);
+  // hearsay-tools/squawk#2987: a failed or cancelled parent no longer pins a worker's directory.
+  it('reclaims a finished worker within keep-N once its parent settles, and past it once the parent is archived', () => {
+    const worker = run({ id: 'w', status: RUN_STATUS.done, role: 'worker', finishedAt: '2026-07-01T00:00:00Z' });
+    const newer = run({ id: 'n', status: RUN_STATUS.done, finishedAt: '2026-07-03T00:00:00Z' });
+    const parent = (status: RunStatus) => run({ id: 'parent', status, worktreePath: null });
+    for (const status of [RUN_STATUS.waiting, RUN_STATUS.review]) {
+      expect(isReclaimable(worker, () => parent(status)), status).toBe(false);
+      expect(selectReclaimableWorktrees([parent(status), worker, newer], 1), status).toEqual([]);
+    }
+    for (const status of [RUN_STATUS.done, RUN_STATUS.failed, RUN_STATUS.cancelled]) {
+      expect(isReclaimable(worker, () => parent(status)), status).toBe(true);
+      expect(selectReclaimableWorktrees([parent(status), worker, newer], 1), status).toEqual(['w']);
+      expect(selectReclaimableWorktrees([parent(status), worker, newer], 2), status).toEqual([]);
+    }
+    const archived = { ...parent(RUN_STATUS.failed), archived: true };
+    expect(selectReclaimableWorktrees([archived, worker, newer], 2)).toEqual(['w']);
+  });
+
+  it('counts a worker at review as settled only once its family has ended', () => {
+    const worker = run({ id: 'w', status: RUN_STATUS.review, role: 'worker' });
+    const parent = run({ id: 'parent', status: RUN_STATUS.done, worktreePath: null });
+    expect(isReclaimable(worker, () => parent)).toBe(false);
+    expect(isReclaimable(worker, () => ({ ...parent, archived: true }))).toBe(true);
   });
 
   it('leaves live, review, destroying, and invalid workers non-reclaimable (#575)', () => {

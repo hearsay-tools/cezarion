@@ -174,6 +174,15 @@ function runBranch(run: BranchOwner): string | undefined {
   return run.branch;
 }
 
+/** Whether an ownership receipt still keeps `branch` in use. Once every run that owns it is a
+ *  worker of an ended family, it does not (hearsay-tools/squawk#911): the branch is classified like
+ *  any task branch, so the Git view lists unlanded work and the sweep deletes landed work. */
+function receiptProtects(protection: { branches: ReadonlySet<string> }, runs: readonly BranchOwner[], branch: string): boolean {
+  if (!protection.branches.has(branch)) return false;
+  const owners = runs.filter((run) => runBranch(run) === branch);
+  return owners.length === 0 || !owners.every((run) => run.endedWorker);
+}
+
 function isFinished(run: BranchOwner): boolean {
   return FINISHED.has(run.status) || run.archived === true;
 }
@@ -485,7 +494,7 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
       head.name === input.currentBranch ||
       head.name === base ||
       checkedOut.has(head.name) ||
-      protection.branches.has(head.name) ||
+      receiptProtects(protection, input.runs, head.name) ||
       (task && protection.uncertain) ||
       (runs?.some(liveRun) ?? false);
     // A symbolic alias is never a task branch, whatever its name says: deleting it by name would
@@ -753,7 +762,7 @@ export async function deleteBranches(
         const requestedRefs = new Set(candidates.map((c) => `refs/heads/${c.name}`));
         for (const candidate of candidates) {
           const { name } = candidate;
-          if (protection.uncertain || protection.branches.has(name)) {
+          if (protection.uncertain || receiptProtects(protection, input.runs, name)) {
             refused.push({ name, reason: 'owned by a delegated workspace' });
             continue;
           }

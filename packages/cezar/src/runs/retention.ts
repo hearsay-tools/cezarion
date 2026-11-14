@@ -26,29 +26,34 @@ function recencyKey(run: RunRecord): string {
   return run.finishedAt ?? run.createdAt;
 }
 
-/** A run is reclaimable when it is finished, still has a materialized worktree
- *  directory, and has not already been reclaimed. Finished owned workers count
- *  (#575) once their parent is gone or `done` (collection-gated). A live,
- *  failed, or cancelled parent can still collect/diff from the dir. Live runs,
- *  `review`, `invalid`, and workers mid-destroy do not. `lookup` finds the parent
- *  by id (the store's `getRun`; a parent need not have a worktree of its own). */
+/** Whether an owned worker's family has ended: its parent was archived, by the user or by history
+ *  retention (hearsay-tools/squawk#2987). */
+export function workerFamilyEnded(run: RunRecord, lookup: (id: string) => RunRecord | undefined): boolean {
+  return run.delegation?.role === 'worker' && lookup(run.delegation.parentRunId)?.archived === true;
+}
+
+/** A run is reclaimable when it is finished, still has a materialized worktree directory, and
+ *  has not already been reclaimed. A finished owned worker counts once its parent is gone or
+ *  settled (done, failed or cancelled, hearsay-tools/squawk#2987): its evidence is snapshotted
+ *  and its branch kept, and only a clean directory goes. A live parent, or one at `review`, may
+ *  still collect or diff from it. A worker at `review` counts once its family has ended. Live
+ *  runs, `review`, `invalid`, and workers mid-destroy do not. `lookup` finds the parent by id
+ *  (the store's `getRun`; a parent need not have a worktree of its own). */
 export function isReclaimable(run: RunRecord, lookup: (id: string) => RunRecord | undefined = () => undefined): boolean {
   if (run.delegation?.role === 'invalid') return false;
-  if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
-  if (!FINISHED.has(run.status) || !run.worktreePath || !existsSync(run.worktreePath) || run.worktreeReclaimedAt) return false;
   if (run.delegation?.role === 'worker') {
     const parent = lookup(run.delegation.parentRunId);
-    // `done` is collection-gated. failed/cancelled parents can still collect later.
-    if (parent && parent.status !== 'done') return false;
+    if (run.delegation.destroy || (parent && !FINISHED.has(parent.status))) return false;
   }
-  return true;
+  const settled = FINISHED.has(run.status) || (run.status === 'review' && workerFamilyEnded(run, lookup));
+  return settled && Boolean(run.worktreePath) && existsSync(run.worktreePath!) && !run.worktreeReclaimedAt;
 }
 
 /**
  * Given the runs with a worktree and the keep-count `keep`, return the ids of the finished
- * worktrees whose *directory* should be reclaimed: keep the `keep`
- * most-recently-finished reclaimable worktrees, reclaim the rest. `lookup` finds an owned
- * worker's parent; without it, the parent is looked for among `runs`.
+ * worktrees whose *directory* should be reclaimed: every worker of an ended family, then, of the
+ * rest, keep the `keep` most-recently-finished reclaimable worktrees and reclaim the others.
+ * `lookup` finds an owned worker's parent; without it, the parent is looked for among `runs`.
  *
  * `keep === 0` means "unlimited — never auto-reclaim" and returns `[]`.
  * Pure: no I/O, no mutation of the input.
@@ -59,10 +64,11 @@ export function selectReclaimableWorktrees(
   lookup: (id: string) => RunRecord | undefined = (id) => runs.find((run) => run.id === id),
 ): string[] {
   if (!Number.isFinite(keep) || keep <= 0) return [];
-  const reclaimable = runs
-    .filter((run) => isReclaimable(run, lookup))
+  const reclaimable = runs.filter((run) => isReclaimable(run, lookup));
+  const ended = reclaimable.filter((run) => workerFamilyEnded(run, lookup));
+  const budgeted = reclaimable.filter((run) => !ended.includes(run))
     .sort((a, b) => (recencyKey(a) < recencyKey(b) ? 1 : recencyKey(a) > recencyKey(b) ? -1 : 0));
-  return reclaimable.slice(keep).map((r) => r.id);
+  return [...ended, ...budgeted.slice(keep)].map((r) => r.id);
 }
 
 /** The slice of the runs store the enforcer needs. Kept structural so the
@@ -133,10 +139,6 @@ export interface ReclaimOptions {
    *  the forced removal is about to delete. The run manager's `claimWorktreeReclaim` is the one
    *  that also blocks admission; startup sweeps run before any run can start and omit it. */
   claim?: (run: RunRecord) => (() => void) | null;
-  /** Require a clean, ref-kept checkout for an owned worker too. Retention (#575) relies on the
-   *  worker's evidence snapshot; a person pressing Reclaim on one row (issue 08 §B4) is not shown
-   *  that a diff snapshot drops binary content and caps its size, so that path asks for clean. */
-  requireClean?: boolean;
   /** The workspace preview host (#781): the default reclaimer releases the run's preview first. */
   previewHost?: Pick<PreviewHostLike, 'release'> | undefined;
 }
@@ -151,6 +153,23 @@ async function preserveWorkerResult(repoRoot: string, store: RetentionStore, run
   const evidence = await collectWorkerEvidence(repoRoot, store as RunStore, run);
   commit.call(store, run.delegation.parentRunId, evidence.result, evidence.diffSnapshot);
   return evidence.diffSnapshot !== undefined || evidence.result.diff.state === 'available';
+}
+
+/**
+ * The proof a destructive step on `run`'s resources re-checks right before each step, as a
+ * function that throws when it fails. Startup has no manager claim, and a terminal execution can
+ * still have a retained autosave writer, so the autosave's durable proof is read each time. An
+ * owned worker's generation and fresh resource holders must also be safe, including after async
+ * evidence or preview work. Structural test stores have no execution machinery and skip that part.
+ */
+export function cleanupSafety(repoRoot: string, store: Partial<RunStore>, run: RunRecord): () => void {
+  const execution = store.readWorkerExecution?.(run.id);
+  return () => {
+    if (autosaveCleanupBlocker(store.sourceDataDir?.(run.id) ?? projectPaths(repoRoot).write, run.id)) throw Error('Autosave cleanup is not confirmed');
+    if (run.delegation?.role !== 'worker') return;
+    if (typeof store.workerResourcesSafe === 'function' && (!execution ||
+      !store.workerResourcesSafe(run.id, execution.generation, run.delegation.workspace.resourceId))) throw Error('Worker resources are not safe to reclaim');
+  };
 }
 
 function readOnlyWorktree(repoRoot: string, store: RetentionStore, run: RunRecord): boolean {
@@ -195,24 +214,14 @@ export async function reclaimWorktree(
 ): Promise<string | null> {
   if (readOnlyWorktree(repoRoot, store, run)) return null;
   const now = opts.now ?? (() => new Date().toISOString());
-  // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
-  // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
-  const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
+  // Branch kept, and only a clean checkout goes: uncommitted work lives only in the directory. An
+  // owned worker's evidence is snapshotted first, but a diff snapshot drops binary content and
+  // caps its size, so it does not stand in for the directory (hearsay-tools/squawk#2987).
   const real = store as Partial<RunStore>;
-  const execution = real.readWorkerExecution?.(run.id);
-  const assertSafe = () => {
-    // Startup has no manager claim. Terminal execution can still have a retained
-    // autosave writer, so recheck its durable proof before every destructive step.
-    if (autosaveCleanupBlocker(real.sourceDataDir?.(run.id) ?? projectPaths(repoRoot).write, run.id)) throw Error('Autosave cleanup is not confirmed');
-    if (run.delegation?.role !== 'worker') return;
-    // Structural test stores have no private execution machinery. Real stores must attest both
-    // generation ownership and fresh resource holders, including after async evidence/preview.
-    if (typeof real.workerResourcesSafe === 'function' && (!execution ||
-      !real.workerResourcesSafe(run.id, execution.generation, run.delegation.workspace.resourceId))) throw Error('Worker resources are not safe to reclaim');
-  };
+  const assertSafe = cleanupSafety(repoRoot, real, run);
   const remove = opts.remove ?? ((root, path) =>
     releaseThenRemoveWorktree({ previewHost: opts.previewHost }, run.id, root, path, undefined,
-      { reclaimOwnedDirectory: true, onlyClean, assertCurrent: assertSafe }));
+      { reclaimOwnedDirectory: true, onlyClean: true, assertCurrent: assertSafe }));
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected

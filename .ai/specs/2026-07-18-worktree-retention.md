@@ -240,11 +240,54 @@ follows retention (ADR 0054):
   without a worktree directory. That includes a run's merged PR branch outside `cez/*`, and its
   unused starter `cez/<id8>`.
 - **What stays:** commits that are not on the base, open PRs, checkouts, live runs and runs at
-  `review`, receipt-owned workers (hearsay-tools/cezarion#911), user branches, and any branch
-  whose PR history GitHub did not return in full. Such a row says why it is kept.
+  `review`, receipt-owned workers until their family ends (see Family end below), user branches,
+  and any branch whose PR history GitHub did not return in full. Such a row says why it is kept.
 - **Recovery:** Continue on a run whose branch was swept recreates `cez/<id8>` from the base. The
   swept branch held no local-only commits, so this guarantee from the Edge Cases above still
   holds for every branch that has some.
+
+## Family end (hearsay-tools/squawk#777, hearsay-tools/squawk#911, hearsay-tools/squawk#2987)
+
+A worker family is a delegation root and its owned workers. Before this rule, three things never
+ended: history retention skipped every run with a `delegation` field (almost every task has one),
+a worker's directory stayed while its parent was failed or cancelled, and a receipt-owned worker
+branch counted as `active` forever. One rule now releases a settled family. Owner-approved on
+2026-11-13.
+
+N = no unlanded work: the branch tip and every reflog entry are the worker baseline or reached by
+another branch or remote-tracking ref (or the Git view proves a squash merge). C = commits that
+no other ref reaches. U = uncommitted changes in the worker directory. "Archived" means archived
+by the user or by history retention past its cap of 300 unarchived runs.
+
+| Root | Worker | Work | History | Directory | Branch | User told |
+| --- | --- | --- | --- | --- | --- | --- |
+| queued, running, waiting or `review` | any | any | stays active | kept | kept | - |
+| any | live, or destroy in progress | any | the family stays active | kept | kept | - |
+| settled, not archived | settled | N or C | the family is archived once the root passes the cap | reclaimed within keep-N for any settled parent | kept: the parent may resume the worker | - |
+| settled, archived | settled | N | archived | reclaimed outside keep-N | deleted by the owned-workspace compare-and-swap; the worker's destroy completes and frees its slot | - |
+| settled, archived | settled | C | archived | reclaimed if clean | kept | the Git view lists it `not-landed` with the worker and its commit count; a typed delete removes it |
+| settled, any | settled | U | archived with the family | kept: retention never removes a dirty directory | kept | the Worktrees panel and `hsq worker` show the path |
+| settled | destroyed | - | archived with the family | gone | gone | - |
+| - | a receipt whose run no longer exists | any | - | kept | as the archived rows | as the archived rows |
+
+A worker at `review` counts as settled once its parent is archived. Explicit `worker destroy` of
+C or U work keeps its behaviour: it removes the work.
+
+Safety invariant: never remove a worktree or a branch holding commits that no other ref reaches,
+nor a directory with uncommitted changes, and never delete a receipt before its branch is gone
+(hearsay-tools/cezarion#2272). The compare-and-swap verifies, in one ref transaction, the branch
+tip and every ref that keeps its commits.
+
+Where each part runs:
+
+- **History:** `RunStore.pruneOldRuns` archives a settled root with all its workers, in one
+  commit, when no member is live (`isLiveRecord`). The predicate is `RETENTION_RUN_RULE`.
+- **Directory:** `runs/retention.ts` selects every worker of an archived family outside keep-N,
+  and reclaims only a clean checkout, the evidence snapshot first.
+- **Branch:** the branch sweep first runs `delegation/family-end.ts`, which hands each settled
+  worker of an archived family whose directory is gone, and each receipt with no run, to the
+  owned-workspace removal. A branch that removal keeps (C) is no longer `active` in the
+  classification, so the Git view lists it and the sweep deletes it once its work merges.
 
 ## Risks & Impact Review
 

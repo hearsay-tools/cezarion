@@ -888,6 +888,23 @@ describe('the branch classifier (issue 08 §A)', () => {
       expect(result.deleted).toEqual([]);
       expect(await git(root, 'rev-parse', '--verify', workspace.branch)).toBe(base);
     });
+
+    // hearsay-tools/squawk#911: once its family has ended, the receipt no longer keeps the branch in
+    // use, so unlanded work is listed and needs the typed delete; while it has not, it stays active.
+    it('lists an ended worker family branch as not landed and deletes it only with confirmation', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      await commit(workspace.path, 'work.txt', 'unlanded');
+      await git(workspace.path, 'checkout', '-q', '--detach');
+      const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
+      const ended = { ...input(), runs: [{ ...owner, endedWorker: true as const }] };
+      expect((await classesOf({ runs: [runRecord(workerId, 'done', { branch: workspace.branch })] })).cls[workspace.branch]).toBe('active');
+      const { payload } = await classifyBranches(ended);
+      expect(payload.branches.find((row) => row.name === workspace.branch)).toMatchObject({ class: 'not-landed', ahead: 1, runId: workerId });
+      expect((await deleteBranches(ended, [workspace.branch])).deleted).toEqual([]);
+      expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch] });
+    });
   });
 });
 

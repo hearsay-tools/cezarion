@@ -18,7 +18,10 @@ Each delete goes through `deleteBranches`, which reclassifies first. So the swee
 guarantee in ADR 0048: run claims, the worktree mutation lock, rechecks of checkouts and
 owned-workspace receipts, and a ref transaction that verifies the base and the tip. The sweep
 also holds the cockpit's branch switch and pull claim. A receipt-owned worker branch is `active`
-and is never swept; hearsay-tools/cezarion#911 owns its cleanup.
+while its family has not ended. Once its parent is archived, the sweep first hands it to the
+owned-workspace removal, which deletes it only when its commits are on another ref; a branch that
+removal keeps is classified like any task branch (hearsay-tools/squawk#911). The rule is in
+[the retention spec § Family end](../../.ai/specs/2026-07-18-worktree-retention.md#family-end-hearsay-toolssquawk777-hearsay-toolssquawk911-hearsay-toolssquawk2987).
 
 A configured base `origin` resolves to the concrete branch that `refs/remotes/origin/HEAD` names,
 as `git` resolves it when a worktree forks from it. A ref that git reads before the alias, such as
@@ -41,6 +44,6 @@ because a swept branch held no commits that the base or another ref lacks.
 - **Read the newest 500 PRs as the whole history.** Rejected: older squash merges lost their only
   merge evidence.
 
-Implementation: [repo-branch-sweep.ts](../../packages/cezar/src/server/repo-branch-sweep.ts), [repo-branches.ts](../../packages/cezar/src/server/repo-branches.ts), [repo-branch-forge.ts](../../packages/cezar/src/server/repo-branch-forge.ts), [2026-07-18-worktree-retention.md](../../.ai/specs/2026-07-18-worktree-retention.md).
+Implementation: [repo-branch-sweep.ts](../../packages/cezar/src/server/repo-branch-sweep.ts), [family-end.ts](../../packages/cezar/src/delegation/family-end.ts), [repo-branches.ts](../../packages/cezar/src/server/repo-branches.ts), [repo-branch-forge.ts](../../packages/cezar/src/server/repo-branch-forge.ts), [2026-07-18-worktree-retention.md](../../.ai/specs/2026-07-18-worktree-retention.md).
 
-Coverage: [repo-branch-sweep.test.ts](../../packages/cezar/src/server/repo-branch-sweep.test.ts), [repo-branch-lifecycle.test.ts](../../packages/cezar/src/server/repo-branch-lifecycle.test.ts), [repo-branch-forge.test.ts](../../packages/cezar/src/server/repo-branch-forge.test.ts), [run-settlement-branch-sweep.test.ts](../../packages/cezar/src/workflows/run/run-settlement-branch-sweep.test.ts), [retention-rematerialize.test.ts](../../packages/cezar/src/runs/retention-rematerialize.test.ts).
+Coverage: [repo-branch-sweep.test.ts](../../packages/cezar/src/server/repo-branch-sweep.test.ts), [family-end.test.ts](../../packages/cezar/src/delegation/family-end.test.ts), [repo-branch-lifecycle.test.ts](../../packages/cezar/src/server/repo-branch-lifecycle.test.ts), [repo-branch-forge.test.ts](../../packages/cezar/src/server/repo-branch-forge.test.ts), [run-settlement-branch-sweep.test.ts](../../packages/cezar/src/workflows/run/run-settlement-branch-sweep.test.ts), [retention-rematerialize.test.ts](../../packages/cezar/src/runs/retention-rematerialize.test.ts).

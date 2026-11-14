@@ -1,4 +1,4 @@
-import { isReclaimable } from '../../runs/retention.ts';
+import { isReclaimable, workerFamilyEnded } from '../../runs/retention.ts';
 import type { RunModuleContext } from './types.ts';
 
 interface MaintenanceClaimsHost {
@@ -75,7 +75,12 @@ export class MaintenanceClaims {
    * its re-materialization would otherwise recreate the branch from the base under the delete.
    */
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
-    const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.context.store.getRun(id)?.status ?? 'done');
+    const lookup = (id: string) => this.context.store.getRun(id);
+    // A worker at review counts as settled once its family has ended (hearsay-tools/squawk#911).
+    const unfinished = (id: string) => {
+      const run = lookup(id);
+      return !!run && !['done', 'failed', 'cancelled'].includes(run.status) && !(run.status === 'review' && workerFamilyEnded(run, lookup));
+    };
     if (runIds.some((id) => this.has(id) || !!this.host.autosaveCleanupBlocker(id) || this.host.isActive(id) || unfinished(id) || this.context.store.writeRefusal(id))) return null;
     return this.host.holdForMaintenance(runIds);
   }

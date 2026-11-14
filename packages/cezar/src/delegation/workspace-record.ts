@@ -60,6 +60,23 @@ export async function ownedWorkspaceRecordFiles(repoRoot: string): Promise<strin
   if (!await exists(dir)) return [];
   return (await readdir(dir)).filter(name => name.endsWith('.json')).sort().map(name => join(dir, name));
 }
+/** Each readable receipt's workspace, and whether its cleanup checkpoint says the removal completed.
+ *  An unreadable record is skipped: only an explicit destroy acts on it. */
+export async function ownedWorkspaceReceipts(repoRoot: string): Promise<Array<{ workspace: WorkerWorkspace; cleaned: boolean }>> {
+  const receipts: Array<{ workspace: WorkerWorkspace; cleaned: boolean }> = [];
+  for (const path of await ownedWorkspaceRecordFiles(repoRoot)) {
+    if (path.endsWith('.cleanup.json')) continue;
+    try {
+      const receipt = await readReceipt(path);
+      if (!receipt) continue;
+      const checkpoint = path.replace(/\.json$/, '.cleanup.json');
+      const cleaned = await exists(checkpoint) &&
+        cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpoint, RECEIPT_CAP))).phase === 'complete';
+      receipts.push({ workspace: receipt.workspace, cleaned });
+    } catch { /* unreadable */ }
+  }
+  return receipts;
+}
 /** One receipt or cleanup checkpoint, read with the identity-file checks. */
 export function readOwnedWorkspaceRecord(path: string): Promise<string> {
   return readIdentityFile(path, RECEIPT_CAP);
