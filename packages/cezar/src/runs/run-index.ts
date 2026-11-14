@@ -50,36 +50,6 @@ export function searchRunIndexFromDisk(
   });
 }
 
-/**
- * The run that owns a checkout in a cold project, as its list row: the one holding a worktree at
- * one of `worktreePaths`, else the newest that owns `branch`. The database answers through its
- * indexed `worktree_path` and `branch` columns, never a scan; same contract as
- * `readRunIndexFromDisk`, so an unreadable project names no run.
- */
-export function findColdRunByCheckout(
-  dataDir: string,
-  checkout: { worktreePaths: readonly string[]; branch: string | null },
-): RunSummary | undefined {
-  type Owner = { worktreePath: string | null; branch: string | null; createdAt: string };
-  const pick = <T extends Owner>(rows: readonly T[]): T | undefined =>
-    rows.find((row) => row.worktreePath !== null && checkout.worktreePaths.includes(row.worktreePath))
-    ?? rows.filter((row) => checkout.branch !== null && row.branch === checkout.branch)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  return readCold(dataDir, undefined, (db) => {
-    const ids = new Set(checkout.worktreePaths.flatMap((worktreePath) =>
-      db.findResourceHolders({ branch: checkout.branch ?? '', worktreePath })));
-    const row = pick(db.getMany([...ids]));
-    return row ? parseSummary(row.summary) : undefined;
-  }, () => {
-    try {
-      const owner = pick(readLegacyRecords(dataDir).map((run) => ({ run, worktreePath: run.worktreePath ?? null, branch: run.branch ?? null, createdAt: run.createdAt })));
-      return owner ? coldSummary(owner.run) : undefined;
-    } catch {
-      return undefined;
-    }
-  });
-}
-
 /** The source rule both readers share: an imported `runs.db` is the only source, a `runs.db` that
  *  cannot be read contributes `empty`, and before the import the legacy `runs.json` is read. */
 function readCold<T>(dataDir: string, empty: T, fromDatabase: (db: RunDatabase) => T, fromLegacy: () => T): T {
