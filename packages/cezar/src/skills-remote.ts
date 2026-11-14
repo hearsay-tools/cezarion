@@ -1,6 +1,7 @@
 import { productName, logPrefix } from './home/display.ts';
 import type { Home } from './home/home.ts';
 import { execFile } from 'node:child_process';
+import { gitEnv } from './git-command.ts';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
@@ -56,7 +57,7 @@ function git(args: string[], timeoutMs: number, cwd?: string): Promise<GitResult
         killSignal: 'SIGKILL',
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
-        env: { ...process.env, ...GIT_HARDENING_ENV },
+        env: gitEnv(GIT_HARDENING_ENV),
       },
       (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
     );

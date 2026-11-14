@@ -9,10 +9,10 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join as joinPath, resolve as resolvePath } from 'node:path';
-import { execFile } from 'node:child_process';
 import type { BranchClass, BranchPrState, RepoBranchCountsResponse, RepoBranchEntry, RepoBranchesResponse } from '@open-mercato/cezar-contract';
+import { git as runGit, type GitResult } from '../git-command.ts';
 import { isSafeGitRef } from '../git-refs.ts';
-import { withWorktreeMutation } from '../git-worktree-lock.ts';
+import { withWorktreeMutation, type WorktreeGitResult } from '../git-worktree-lock.ts';
 import { ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
 import { loadConfig } from '../config.ts';
 import type { BranchOwner, RunStatus, RunStore } from '../runs/store.ts';
@@ -22,8 +22,6 @@ import { getBranches, getRepoInfo, type LogEntryWithParents } from './git.ts';
 import type { BranchForge, ForgePr } from './repo-branch-forge.ts';
 
 export { __clearPrListCacheForTests, githubBranchForge, type BranchForge, type ForgePr } from './repo-branch-forge.ts';
-
-interface GitResult { ok: boolean; stdout: string; stderr: string }
 
 /** How many `git` processes this module runs at once, across every repository and request. A
  *  repository with thousands of branches otherwise gets one process per branch at the same
@@ -46,11 +44,7 @@ async function gitSlot(): Promise<() => void> {
 async function git(cwd: string, args: string[]): Promise<GitResult> {
   const release = await gitSlot();
   try {
-    return await new Promise((resolve) => {
-      execFile('git', args, { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) =>
-        resolve({ ok: !err, stdout, stderr }),
-      );
-    });
+    return await runGit(cwd, args);
   } finally {
     release();
   }
@@ -305,7 +299,7 @@ async function remoteDefault(root: string, base: string, at: (ref: string) => Pr
 /** A local or remote-tracking ref OUTSIDE `excluded` (full ref names) that also reaches `sha`, with
  *  its own tip — the witness a delete verifies in its transaction — or null when none does. */
 async function retainingRef(
-  run: (args: string[]) => Promise<GitResult>,
+  run: (args: string[]) => Promise<WorktreeGitResult>,
   sha: string,
   excluded: ReadonlySet<string>,
 ): Promise<{ ref: string; sha: string } | null> {

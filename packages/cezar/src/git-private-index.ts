@@ -37,8 +37,7 @@ export async function withPrivateIndex<T, Refusal = never>(
   }
   try {
     const index = join(scratch, 'index');
-    const env = { ...process.env, GIT_INDEX_FILE: index };
-    const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
+    const indexed: IndexGit = (args) => git(worktreePath, args, { env: { GIT_INDEX_FILE: index } });
     let seeded = false;
     if (realIndex) {
       try { await copyGitIndex(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
