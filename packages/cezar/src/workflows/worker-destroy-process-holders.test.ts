@@ -81,7 +81,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       // every materialized worker's next generation, so Continue never worked there.
       Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
       try {
-        expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(/reuse is not proven safe/);
+        expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(`processes ${recorded.pid} still hold the worker's worktree or scratch`);
         recorded.kill('SIGKILL'); await exited;
         expect(store.commitWorkerExecutionStart(w.id)).not.toBe(generation);
       } finally { Object.defineProperty(process, 'platform', platform); }

@@ -12,7 +12,7 @@ export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
-import { WorkerAdmissionRefusal, workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
+import { admissibleExecution, holderRefusal, SPAWN_NEXT, WorkerAdmissionRefusal, workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
@@ -51,7 +51,7 @@ import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { describeProcesses, inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey } from './pull-requests.ts';
@@ -2843,20 +2843,10 @@ export class RunStore extends EventEmitter {
 
   commitWorkerExecutionStart(id: string): string {
     const run = this.peek(id);
-    const spawn = 'spawn a new worker with the instruction';
-    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new WorkerAdmissionRefusal('the worker is being destroyed', spawn);
-    const prior = this.readWorkerExecution(id);
-    if (prior?.abandoned) throw new WorkerAdmissionRefusal('the worker execution was abandoned', spawn);
-    if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
-      throw new WorkerAdmissionRefusal(`the previous execution is not proven finished (checkpoint ${prior?.phase ?? 'missing'})`,
-        `retry the same command after it ends; if this repeats, ${spawn}`);
-    }
+    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new WorkerAdmissionRefusal('the worker is being destroyed', SPAWN_NEXT);
+    const prior = admissibleExecution(this.readWorkerExecution(id));
     const holders = this.workerResourceHolders(id, prior.generation, run.delegation.workspace.resourceId, { admittingQueued: true });
-    if (holders !== 'safe') {
-      throw holders.length
-        ? new WorkerAdmissionRefusal(`processes ${describeProcesses(holders)} still hold the worker's worktree or scratch`, 'end them, then retry the same command')
-        : new WorkerAdmissionRefusal("the worker's worktree or scratch is not proven free of processes", `retry the same command; if this repeats, ${spawn}`);
-    }
+    if (holders !== 'safe') throw holderRefusal(holders);
     const generation = randomUUID();
     // #469: the controller is durable before `starting`, so a crash leaves a provable generation.
     this.writeWorkerProcesses(id, { generation, controller: { pid: process.pid, ...startToken(process.pid) }, processes: [] });

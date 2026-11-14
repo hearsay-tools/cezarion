@@ -1,6 +1,7 @@
 import type { Home } from '../home/home.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
+import { SPAWN_NEXT } from '../runs/worker-execution.ts';
 import { modelConflictsWithRunner } from '../core/model-presets.ts';
 import type { WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
@@ -75,7 +76,7 @@ export function identityRefusal(identity: WorkerStepIdentity | undefined, opts: 
 
 export function workerRefusal(run: RunRecord): ContinuationRefusal | undefined {
   if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) {
-    return { ok: false, error: 'worker cannot continue', next: 'spawn a new worker with the instruction' };
+    return { ok: false, error: 'worker cannot continue', next: SPAWN_NEXT };
   }
 }
 
