@@ -1,3 +1,0 @@
-@echo off
-rem # cezar managed install
-node "/srv/cockpit/versions/current/node_modules/@wjarka/cezarion/dist/index.js" %*

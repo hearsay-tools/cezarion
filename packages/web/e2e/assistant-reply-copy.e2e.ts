@@ -247,6 +247,7 @@ describe('assistant reply copy in header (#927)', () => {
     ).toContain('Copied')
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast, focus).
   it('keeps header copy controls keyboard-reachable and AA readable in light and dark', () => {
     try {
       for (const theme of ['light', 'dark'] as const) {

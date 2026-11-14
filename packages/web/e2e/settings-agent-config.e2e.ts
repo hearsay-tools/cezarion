@@ -77,6 +77,7 @@ describe('settings → agent config: the Pi pane', () => {
 
   // Both viewports × both themes at the default density — the matrix the craft checklist names.
   for (const variant of contrastQaVariants.filter((v) => v.density === 'comfortable')) {
+    // Rule: docs/areas/web-ui.md § Touch and phone rules and § Accessibility rules (contrast).
     it(`${variant.id}: the Pi tab is a 44×44 target and the empty MCP note reads at AA`, () => {
       gotoAgentConfig()
       applyContrastQaVariant(browser, variant)

@@ -4,7 +4,7 @@ import type { AgentInput, RunRecord } from '@open-mercato/cezar-contract';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { makePeerWait, makeRunRecord, makeTimerWait, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { DelegationPolicyError } from '../delegation/policy.ts';
+import { DelegationPolicyError, MessagingOffError } from '../delegation/policy.ts';
 import { delegationWaitRefusal, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget } from './wait-scope.ts';
 
 // The peer wait's pure rules (hearsay-tools/cezarion#1995, spec 2026-10-27-task-communication-protocol § 7).
@@ -82,6 +82,7 @@ describe('cezar_wait kinds worker and request', () => {
     expect(delegationWaitRefusal(policy('capacity_limit'), () => true)).toBe('capacity');
     expect(delegationWaitRefusal(policy('incompatible_state'), () => true)).toBe('root_finish_pending');
     expect(delegationWaitRefusal(policy('incompatible_state'), () => false)).toBe('unavailable');
+    expect(delegationWaitRefusal(new MessagingOffError(), () => true)).toBe('messaging_off');
     expect(() => delegationWaitRefusal(new Error('disk'), () => false)).toThrow('disk');
   });
 });

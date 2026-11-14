@@ -275,6 +275,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
   })
 
   for (const variant of mobileVariants) {
+    // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
     it(`passes text contrast on the tab bar, the More sheet and the New task button, ${variant.theme}`, () => {
       browser.goto(`${base}${scoped('/')}`)
       browser.waitForFunction(`document.querySelector('${FAB}') !== null`)

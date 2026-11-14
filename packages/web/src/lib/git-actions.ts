@@ -1,4 +1,6 @@
-import type { ForgeInfo, RunStatus } from '@open-mercato/cezar-api-client'
+import type { ForgeInfo, RunRecord } from '@open-mercato/cezar-api-client'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 
 /**
  * The git action policy object (spec §"Session git view — Changes & Files tabs (#390)",
@@ -12,7 +14,9 @@ import type { ForgeInfo, RunStatus } from '@open-mercato/cezar-api-client'
  */
 
 export interface GitActionState {
-  status: RunStatus
+  /** The record facts that decide who owns the run: a usage-limit hold is `waiting` with
+   *  `autoResumeAt` (hearsay-tools/squawk#1865). */
+  run: Pick<RunRecord, 'status' | 'autoResumeAt'>
   /** The record names a worktree AND the server can still see it — a 409 "no worktree" from
    *  `/changes` must flip this false even when `worktreePath` is set. */
   hasWorktree: boolean
@@ -56,18 +60,12 @@ export interface GitActionBar {
   menu: GitAction[]
 }
 
-/** "Active" as the engine means it: the session/queue still owns the run. `review` is parked,
- *  not active. It reads the status alone, so unlike the contract's `engineOwnsRun` it counts a
- *  usage-limit hold as active. */
-const isActive = (status: RunStatus): boolean =>
-  status === 'running' || status === 'queued' || status === 'waiting'
-
 const NO_WORKTREE_REASON = 'no worktree — this task ran directly in the repo working tree'
 
 function commitAction(state: GitActionState): GitAction {
   const disabled = (reason: string): GitAction => ({ id: 'commit', label: 'Commit', enabled: false, reason })
   if (!state.hasWorktree) return disabled(`Commit unavailable — ${NO_WORKTREE_REASON}`)
-  if (state.status === 'running') return disabled('Commit unavailable — the agent is still working in this worktree')
+  if (state.run.status === 'running') return disabled('Commit unavailable — the agent is still working in this worktree')
   if (state.changedFiles === undefined) return disabled('Commit unavailable — changes are still loading')
   if (state.changedFiles === 0) return disabled('Commit unavailable — no changes to commit')
   return { id: 'commit', label: 'Commit', enabled: true }
@@ -78,7 +76,7 @@ function pushAction(state: GitActionState): GitAction {
   if (!state.hasWorktree) return disabled(`Push unavailable — ${NO_WORKTREE_REASON}`)
   if (state.remote === undefined) return disabled('Push unavailable — no remote configured')
   if (state.branch === undefined) return disabled('Push unavailable — the run has no branch to push')
-  if (state.status === 'running') return disabled('Push unavailable — the agent is still working in this worktree')
+  if (state.run.status === 'running') return disabled('Push unavailable — the agent is still working in this worktree')
   return { id: 'push', label: 'Push', enabled: true }
 }
 
@@ -98,9 +96,12 @@ function createPrAction(state: GitActionState): GitAction {
   if (!state.forge.available) {
     return disabled(`Create PR unavailable — ${state.forge.reason ?? 'the forge is unreachable'}`)
   }
-  // The server refuses `POST /pr` while the engine owns the run — mirror it honestly here
-  // rather than letting the click discover the 409.
-  if (isActive(state.status)) {
+  // The server refuses `POST /pr` while the engine owns the run and on a usage-limit hold —
+  // mirror both here rather than letting the click discover the 409.
+  if (isUsageLimitHold(state.run)) {
+    return disabled('Create PR unavailable — the run is waiting on a usage-limit hold; choose Don’t resume first')
+  }
+  if (engineOwnsRun(state.run)) {
     return disabled('Create PR unavailable — the run is still active; wait for the review gate')
   }
   return { id: 'create-pr', label: 'Create PR', enabled: true }
@@ -134,7 +135,7 @@ export function gitActionPolicy(state: GitActionState): GitActionBar {
           enabled: false,
           reason: 'Terminal unavailable — no agent session to resume',
         }
-      : isActive(state.status)
+      : engineOwnsRun(state.run)
         ? {
             id: 'open-terminal',
             label: 'Open in terminal',

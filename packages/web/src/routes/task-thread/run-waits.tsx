@@ -23,7 +23,7 @@ const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'w
 
 /** The kinds listed here: CI, timer, worker, process, peer and subagent waits. Streamed records were
  *  only checked for `id`. A human wait shows as Needs you and its question card, through the pill, never
- *  in this list. A worker, peer or subagent wait shows only while open: its result is not owed in a line of its own. */
+ *  in this list. */
 function renderableWaits(value: unknown): ListedWait[] {
   return Array.isArray(value)
     ? value.filter((wait): wait is ListedWait => wait?.kind === 'pr' || wait?.kind === 'timer' || wait?.kind === 'worker' || wait?.kind === 'process' || wait?.kind === 'peer' || wait?.kind === 'subagent')
@@ -38,19 +38,28 @@ function formatInstant(value: string | undefined) {
 }
 
 /** A resolved wait's result is owed to the agent: mid-turn it waits for the turn end, otherwise
- *  for the wake turn to be admitted. */
+ *  for the wake turn to be admitted. A failed run keeps it until Continue delivers it or Stop
+ *  discards it (hearsay-tools/squawk#1238). */
 function owedLabel(prefix: string, run: ApiRun) {
-  return `${prefix} — ${run.status === 'running' ? 'current turn still working' : 'waiting for capacity'}`
+  const owed = run.status === 'failed' ? 'not delivered; Continue delivers it, Stop discards it'
+    : run.status === 'running' ? 'current turn still working' : 'waiting for capacity'
+  return `${prefix} — ${owed}`
 }
 
 
-/** What the details would show, or undefined when there is nothing. The settled observation (or
- *  the retained recovery error) stays beside an open timer, and gives way only to a CI wait of its own. */
+/** A worker, peer or subagent wait shows only while open: its result is not owed in a line of its own. */
+function owesResult(wait: ListedWait) {
+  return wait.kind !== 'worker' && wait.kind !== 'peer' && wait.kind !== 'subagent'
+}
+
+/** What the details would show, or undefined when there is nothing. An in-flight run lists its open
+ *  waits and the resolved ones it owes; a failed run lists the resolved ones it holds undelivered.
+ *  The settled observation (or the retained recovery error) stays beside an open timer, and gives
+ *  way only to a CI wait of its own. */
 function waitView(run: ApiRun) {
   const listed = renderableWaits(run.waits)
-  const open = IN_FLIGHT_STATUSES.includes(run.status)
-    ? listed.filter(wait => wait.kind === 'worker' || wait.kind === 'peer' || wait.kind === 'subagent' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
-    : []
+  const inFlight = IN_FLIGHT_STATUSES.includes(run.status)
+  const open = listed.filter(wait => wait.phase === 'open' ? inFlight : wait.phase === 'resolved' && owesResult(wait) && (inFlight || run.status === 'failed'))
   const ciOpen = open.some(wait => wait.kind === 'pr')
   // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
   const settled = [...renderableWaits(run.lastWaits), ...listed.filter(wait => !open.includes(wait) && wait.phase !== 'open')]

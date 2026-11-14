@@ -262,9 +262,9 @@ The names above describe new installs. Old installs keep their recorded names
 until migration. New installs use `hearsay-squawk[-<slug>].service`, the nginx site
 `hearsay-squawk[-<slug>]` and `/etc/hearsay-squawk/htpasswd[-<slug>]`.
 Uninstall and deploy act on the names an install recorded, so an install made
-before the switch keeps working.
+before v0.18.0 keeps working.
 
-`hsq server-migrate [--dry-run]` exists only with the switch on. It moves every
+`hsq server-migrate [--dry-run]` moves every
 install recorded in one home as one group: it stops them all, stages the new
 home, copies each unit and starts it on the same port. For an install that owns
 its nginx site, it copies the site file with only its name and

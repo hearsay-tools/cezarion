@@ -7,5 +7,5 @@ import { describeWorkflowAutonomousParity } from './workflow-autonomous-parity.t
 
 it('registers every workflow-autonomous case exactly once across its files', () => {
   checkParityRegistration('workflow-autonomous-parity', describeWorkflowAutonomousParity,
-    RUNNER_IDS.flatMap(backend => AUTONOMOUS_CRITERIA.filter(row => runsOn('workflow-autonomous', row.id, backend)).map(row => `${backend} ${row.id}`)), 57);
+    RUNNER_IDS.flatMap(backend => AUTONOMOUS_CRITERIA.filter(row => runsOn('workflow-autonomous', row.id, backend)).map(row => `${backend} ${row.id}`)), 45);
 });

@@ -80,20 +80,6 @@ describe('Cursor scenario wire and native dispatch', () => {
     expect(frames[1].message.content).toEqual([{ type: 'text', text: 'turn 1: Describe the result.' }]);
     expect(frames[2].result).toBe('turn 1: Describe the result.');
   });
-  it('keeps the F3 reasoning in the native read result and the nudge silent', () => {
-    const { frames } = run('mock:silent-tail-again');
-    expect(frames[3].tool_call.readToolCall.result.success.content).toContain('cezar_done');
-    expect(frames.some(frame => frame.message?.content?.some((part: { type: string }) => part.type === 'thinking'))).toBe(false);
-    const resumed = run('Your turn ended without a wait or done.', 'normal', false, frames[0].session_id).frames;
-    expect(resumed.map(frame => frame.type)).toEqual(['system', 'result']);
-    expect(resumed[1].result).toBe('');
-  });
-  it('encodes the shared tool-tail call on the native shell wire', () => {
-    const { frames } = run('mock:tool-tail');
-    expect(frames[2]).toMatchObject({ type: 'tool_call', subtype: 'started', tool_call: { shellToolCall: { args: { command: 'git status --short' } } } });
-    expect(frames[3]).toMatchObject({ subtype: 'completed', tool_call: { shellToolCall: { result: { success: { exitCode: 0, stdout: ' M src/example.ts' } } } } });
-    expect(frames.at(-1).result).toBe('');
-  });
   it('encodes shared read results and reasoning separately from assistant text', () => {
     const { frames } = run('mock:multi-pr-refs');
     expect(frames[1].tool_call.readToolCall.args.path).toBe('other.txt');

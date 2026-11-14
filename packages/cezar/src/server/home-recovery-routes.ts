@@ -3,35 +3,34 @@ import { homeRecoveryActionSchema } from '@open-mercato/cezar-contract/home-reco
 import type { Home } from '../home/home.ts';
 import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, restoreHomeRecovery } from '../home/recovery.ts';
 import { subscribeHomeRecovery } from '../home/recovery-watch.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { jsonZodValidator } from './validators.ts';
 import type { SocketHub, TopicPublisher } from './ws.ts';
 
 export const HOME_RECOVERY_TOPIC = 'home:recovery';
 
 /** Watching and inspection live in HomeStore's recovery service, only while demand exists. */
-export function createHomeRecoveryPublisher(home: Home, legacyCanary = REBRAND_SWITCH): TopicPublisher {
+export function createHomeRecoveryPublisher(home: Home): TopicPublisher {
   return {
-    snapshot: async () => getHomeRecovery(home, legacyCanary),
+    snapshot: async () => getHomeRecovery(home),
     start(publish) {
-      let previous = JSON.stringify(getHomeRecovery(home, legacyCanary));
+      let previous = JSON.stringify(getHomeRecovery(home));
       return subscribeHomeRecovery(home, () => {
-        const snapshot = getHomeRecovery(home, legacyCanary);
+        const snapshot = getHomeRecovery(home);
         const serialized = JSON.stringify(snapshot);
         if (serialized === previous) return;
         previous = serialized;
         publish(snapshot);
-      }, legacyCanary);
+      });
     },
   };
 }
 
 /** Chained once into the workspace API, behind its existing request-origin guard. */
-export function createHomeRecoveryRoutes({ home, socketHub, localHandoff, legacyCanary = REBRAND_SWITCH }: {
-  home: Home; socketHub?: SocketHub | undefined; localHandoff: () => boolean; legacyCanary?: boolean | undefined;
+export function createHomeRecoveryRoutes({ home, socketHub, localHandoff }: {
+  home: Home; socketHub?: SocketHub | undefined; localHandoff: () => boolean;
 }) {
-  const snapshot = () => getHomeRecovery(home, legacyCanary);
-  socketHub?.registerTopic(HOME_RECOVERY_TOPIC, createHomeRecoveryPublisher(home, legacyCanary), { loopbackReadable: false });
+  const snapshot = () => getHomeRecovery(home);
+  socketHub?.registerTopic(HOME_RECOVERY_TOPIC, createHomeRecoveryPublisher(home), { loopbackReadable: false });
   return new Hono()
     .get('/home/recovery', (c) => c.json(snapshot(), 200))
     .use('/home/recovery/*', async (c, next) => {
@@ -48,9 +47,9 @@ export function createHomeRecoveryRoutes({ home, socketHub, localHandoff, legacy
     .post('/home/recovery/restore', jsonZodValidator(homeRecoveryActionSchema), (c) =>
       respondRecovery(c, snapshot, () => restoreHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt)))
     .post('/home/recovery/import', jsonZodValidator(homeRecoveryActionSchema), (c) =>
-      respondRecovery(c, snapshot, () => importHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt, legacyCanary)))
+      respondRecovery(c, snapshot, () => importHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt)))
     .post('/home/recovery/accept', jsonZodValidator(homeRecoveryActionSchema), (c) =>
-      respondRecovery(c, snapshot, () => acceptHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt, legacyCanary)));
+      respondRecovery(c, snapshot, () => acceptHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt)));
 }
 
 async function respondRecovery(c: Context, snapshot: () => ReturnType<typeof getHomeRecovery>, action: () => void | Promise<void>) {

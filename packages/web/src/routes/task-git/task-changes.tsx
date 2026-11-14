@@ -105,7 +105,7 @@ function ChangesView({ run }: { run: ApiRun }) {
   const changesRefused = changes.isError && changes.error instanceof ApiError && changes.error.status === 409
 
   const bar = gitActionPolicy({
-    status: run.status,
+    run,
     hasWorktree: Boolean(run.worktreePath) && !changesRefused,
     branch: run.branch,
     changedFiles: changes.data?.stat.files,

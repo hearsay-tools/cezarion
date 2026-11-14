@@ -80,7 +80,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
-import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MESSAGING_OFF, requireWorkersAllowed } from './policy.ts';
+import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MessagingOffError, requireWorkersAllowed } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
 
 export type DelegationManager = Pick<RunManager,
@@ -244,7 +244,7 @@ async function acceptSpawnedWorker(args: {
 /** Messaging off refuses new peer sends (hearsay-tools/cezarion#2784). Called after an exact retry of
  *  an accepted message has returned; a reply to a request accepted earlier still passes. */
 function assertNewPeerSend(pair: ConversationPair, request: ConversationSendRequest): void {
-  if (pair.relationship === 'peer' && request.kind !== 'reply' && !messagingAllowed(pair.sender)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
+  if (pair.relationship === 'peer' && request.kind !== 'reply' && !messagingAllowed(pair.sender)) throw new MessagingOffError();
 }
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */

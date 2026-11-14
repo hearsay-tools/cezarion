@@ -8,7 +8,6 @@ import * as migration from './migrate.ts';
 import { prepareMigrationHome } from './migration-boot.ts';
 import { json, migrationFixture } from './migration.testkit.ts';
 import { cleanStoreRoots } from './store.testkit.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 
 const restoreModes: Array<() => void> = [];
 afterEach(() => {
@@ -21,10 +20,6 @@ function errno(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`${code}: injected`), { code });
 }
 
-it('runs with the release switch on', () => {
-  expect(REBRAND_SWITCH).toBe(true);
-});
-
 describe('a committed custom home launched with only HSQ_HOME', () => {
   it('keeps the recorded source instead of the default legacy home the env now names', () => {
     const f = migrationFixture();
@@ -33,8 +28,8 @@ describe('a committed custom home launched with only HSQ_HOME', () => {
     const envLegacy = Home.sandbox(join(f.directory, 'default-legacy'), { layout: 'legacy' });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(prepareMigrationHome(f.target, f.env, { enabled: true, legacy: envLegacy })).toEqual({ kind: 'ready' });
-    expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: envLegacy })).toBe(f.target);
+    expect(prepareMigrationHome(f.target, f.env, { legacy: envLegacy })).toEqual({ kind: 'ready' });
+    expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: envLegacy })).toBe(f.target);
 
     expect(readInstallMarker(f.target.config)).toMatchObject({ state: 'committed', migratedFrom: f.legacy.root });
     expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(true);
@@ -43,13 +38,13 @@ describe('a committed custom home launched with only HSQ_HOME', () => {
   });
 });
 
-describe('a first switch-on boot that cannot write a home', () => {
+describe('a first boot that cannot write a home', () => {
   it.each(['EROFS', 'EACCES', 'EPERM'])('serves the legacy home on %s before the commit', code => {
     const f = migrationFixture();
     vi.spyOn(migration, 'migrateLegacyHome').mockImplementation(() => { throw errno(code); });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.legacy);
+    expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.legacy);
     expect(json(f.legacy.workspaceConfig).saved).toBe('original');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`serving ${f.legacy.root} until both homes are writable`));
   });
@@ -60,14 +55,14 @@ describe('a first switch-on boot that cannot write a home', () => {
     vi.spyOn(migration, 'migrateLegacyHome').mockImplementation(() => { throw errno('EROFS'); });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.target);
+    expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.target);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('serving the migrated home'));
   });
 
   it('still fails on an error that is not about write access', () => {
     const f = migrationFixture();
     vi.spyOn(migration, 'migrateLegacyHome').mockImplementation(() => { throw errno('EIO'); });
-    expect(() => prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toThrow('EIO: injected');
+    expect(() => prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toThrow('EIO: injected');
   });
 
   // Permission bits do not stop root or Windows writers, so the real read-only case runs elsewhere only.
@@ -77,7 +72,7 @@ describe('a first switch-on boot that cannot write a home', () => {
     restoreModes.push(() => chmodSync(f.legacy.root, 0o755));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(prepareOperatorHome(f.target, 'serve', f.env, { enabled: true, legacy: f.legacy })).toBe(f.legacy);
+    expect(prepareOperatorHome(f.target, 'serve', f.env, { legacy: f.legacy })).toBe(f.legacy);
     expect(json(f.legacy.workspaceConfig).saved).toBe('original');
     expect(readInstallMarker(f.target.config)?.state).not.toBe('committed');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('until both homes are writable'));

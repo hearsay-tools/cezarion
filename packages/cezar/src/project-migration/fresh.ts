@@ -1,14 +1,13 @@
 import { lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { canStartFreshProject, pathPresent, projectMovedMarker, projectMoveMarked } from '../project-paths.ts';
 import { replaceAtomically, settle } from './durable.ts';
 
 /** Pin a fresh project's new write root before its first write. Any legacy path, including an
  * empty directory, symlink or unreadable entry, keeps the existing migration rules. Reads of
  * projectPaths stay pure. The marker uses the same private Git location as a completed move. */
-export function markFreshProject(root: string, enabled = REBRAND_SWITCH): void {
-  if (!enabled || !canStartFreshProject(root) || projectMoveMarked(root)) return;
+export function markFreshProject(root: string): void {
+  if (!canStartFreshProject(root) || projectMoveMarked(root)) return;
   const marker = projectMovedMarker(root);
   // Non-Git callers still use the fresh path; there is no Git marker location to write.
   if (!marker) return;

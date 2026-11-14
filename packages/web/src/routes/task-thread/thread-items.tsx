@@ -607,7 +607,7 @@ export function InlineDiffPreview({ diffs }: { diffs: FileDiff[] }) {
     <>
       {diffs.map((diff, index) => (
         <div key={`${diff.path}:${index}`} data-slot="diff-preview" className="min-w-0">
-          <div className="border-b border-border/50 px-4 py-1.5 font-mono text-[11px] text-soft-foreground">
+          <div className="border-b border-border/50 px-4 py-1.5 font-mono text-[11px] wrap-anywhere text-muted-foreground">
             {diff.path}
           </div>
           <pre className="overflow-x-auto py-2 font-mono text-xs leading-[1.7] whitespace-pre">
@@ -731,7 +731,7 @@ function ToolCardBody({
         <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{command}</pre>
       ) : null}
       {item.error !== undefined && item.error !== '' ? (
-        <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
+        <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap wrap-anywhere text-signal-word-red">
           {item.error}
         </div>
       ) : null}

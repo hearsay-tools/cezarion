@@ -191,6 +191,7 @@ describe('New project', () => {
   })
 
   for (const variant of comfortable(360)) {
+    // Rule: docs/areas/web-ui.md § Accessibility rules (contrast) and § Touch and phone rules.
     it(`fits a 360x640 screen from the Tools page, ${variant.theme}`, () => {
       browser.goto(`${baseUrl}/tools`)
       applyContrastQaVariant(browser, variant)

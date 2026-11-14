@@ -115,6 +115,7 @@ describe('settings → skills against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/settings-skills.png`)
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast, focus).
   it('keeps selected and hovered skill descriptions AA-readable with visible keyboard focus', () => {
     // Its own session with a hover-capable pointer: the spec's session reports `(hover: none)`,
     // where the row's `hover:` wash never applies.
@@ -168,6 +169,7 @@ describe('settings → skills against the live dry-run server', () => {
     }
   })
 
+  // Rule: docs/areas/web-ui.md § Touch and phone rules.
   it('every row has its own switch with a 44 px target at 360×640, light and dark (#1408)', () => {
     // The seeded project skills show their locked "always enabled" switch; a live team-skill
     // switch shares the same component and hit area.

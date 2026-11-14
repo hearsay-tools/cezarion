@@ -588,6 +588,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     expect(browser.waitForValue(locationJs, (value) => String(value).startsWith(`${scoped('/github/prs')}`))).toContain('/github/prs')
   }, 90_000)
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (focus).
   it('is keyboard operable: Tab reaches a row with a visible focus ring and Enter opens its filter', () => {
     openIndex()
     expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
@@ -617,6 +618,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     expect(browser.waitForValue(currentJs(SIDEBAR), sameJson(['has-task']))).toEqual(['has-task'])
   }, 90_000)
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (reduced motion).
   it('runs no animation or transition on the filter index under reduced motion', () => {
     const calm = session('reduced', PHONE)
     route(calm)

@@ -113,8 +113,6 @@ export interface ProjectContextDeps {
   createRunner: RunnerFactory;
   /** Builds each project's manager. A caller that omits it cannot build a context (hearsay-tools/cezarion#3373). */
   createManager?: RunManagerFactory | undefined;
-  /** Test seam for the release switch of the automatic project move; production uses `REBRAND_SWITCH`. */
-  rebrand?: boolean | undefined;
 }
 
 /** Data dirs this process has swept: the sweep cleans up after a crashed Squawk, never this one. */
@@ -479,7 +477,7 @@ export class ProjectContexts {
 
     // An unfinished migration finishes first, before any read; this build then keeps the claim it took.
     // With the release switch, an idle legacy project then moves before its first read or task start.
-    await prepareProject(project.root, { ownership: this.deps.ownership, homes: [this.deps.home], rebrand: this.deps.rebrand, keep: true });
+    await prepareProject(project.root, { ownership: this.deps.ownership, homes: [this.deps.home], keep: true });
     if (stale()) throw new ProjectContextsClosedError();
     noticeLegacyProject(project.root);
     // Asked after the move: a moved project's write root is `.ai/squawk/`.

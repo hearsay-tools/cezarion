@@ -58,8 +58,7 @@ export type { ManifestLike, ReleaseManifests } from './manifests.ts';
  *  dependencies get a **caret** range (`^0.1.6`), not an exact pin. A stable `cezarion` should
  *  follow compatible releases of the implementation package, and a stable service should follow
  *  compatible releases of the api-client; a snapshot must pin the one exact build it was cut
- *  from. Everything else — which manifests exist, which sections carry the pin, what the alias
- *  inherits — lives in `manifests.ts` so the two channels cannot drift apart. */
+ *  from. Everything else — which manifests exist, which sections carry the pin — lives in `manifests.ts` so the two channels cannot drift apart. */
 export function stampStableManifests(
   manifests: ReleaseManifestSet,
   version: string,

@@ -122,7 +122,7 @@ function nativeText(parts, id, streamed = false, threadId = 'th_mock_1', scope =
 }
 
 function nativeCommand(call, status, name, threadId = 'th_mock_1') {
-  const silent = name === 'silent-tail' || name === 'tool-tail';
+  const silent = name === 'silent-tail';
   const steering = name === 'steer-tool';
   const child = threadId !== 'th_mock_1';
   if (silent && status === 'inProgress') return;
@@ -214,7 +214,7 @@ function scenarioEncoder(msg, prompt, scenario, alreadyOpened = false) {
       if (name === 'turn-messages' && messages.length) emitChannelMessages(messages, prompt.includes('mock:channel-missing'), prompt.includes('mock:channel-refresh'));
       if (['hold-cezar-done', 'hold-cezar-ask', 'cezar-done', 'hold-gated', 'hold'].includes(name)) nativeUsage();
       if (name === 'steer-tool' || name === 'steer-late') return completeSteerTurn('turn_mock_1');
-      const scoped = ['autonomous', 'silent-tail', 'tool-tail', 'subagent-after-park'].includes(name);
+      const scoped = ['autonomous', 'silent-tail', 'subagent-after-park'].includes(name);
       emit({ method: 'turn/completed', params: { ...(scoped ? { threadId: 'th_mock_1' } : {}), turn: { id: 'turn_mock_1', status: 'completed' } } });
     },
   };
@@ -261,7 +261,7 @@ const messageReplies = [
   [msg => msg.method === 'turn/start', handleTurnStart],
 ];
 const turnReplies = [
-  'autonomous', 'silent-tail', 'tool-tail',
+  'autonomous', 'silent-tail',
   [turnText => turnText.includes('mock:hook-after-park'), replyWithParkedHook],
   'subagent-after-park',
   [turnText => turnText.includes('mock:subagent-background'), async turnText => (await import('./mock-codex-subagents.mjs')).replyWithBackgroundSubagents(turnText, { emit, afterParityPark })],
@@ -703,7 +703,7 @@ async function handleTurnStart(msg) {
     return play(deferred, encoder);
   }
   if (!crash) {
-    const early = scenarios.get('autonomous') ?? scenarios.get('silent-tail') ?? scenarios.get('tool-tail');
+    const early = scenarios.get('autonomous') ?? scenarios.get('silent-tail');
     if (early) return play(early, scenarioEncoder(msg, turnText, early));
   }
   const opening = scenarioEncoder(msg, turnText).open({ kind: 'open' });

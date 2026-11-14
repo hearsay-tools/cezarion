@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import '../core/claude-runner.testkit.ts';
 import { answerAsParent } from '../core/workflow-parity-core.testkit.ts';
-import { grantSteer, eventCheckpoint, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, store, until, waitOf, worker, work } from './worker-wait-claude.testkit.ts';
+import { grantSteer, eventCheckpoint, timeline, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, store, until, waitOf, worker, work } from './worker-wait-claude.testkit.ts';
 import { setRunStatus, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
@@ -87,7 +87,9 @@ for (const role of ['root', 'worker'] as const) {
       expect(store.getRun(target.id)?.status).not.toBe('failed');
       expect(store.getRun(w.id)?.status).not.toBe('cancelled');
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
-      await until(() => wire.received() === 2);
+      // A miss names the count, each wire's start and stdin lines, and the target's timeline
+      // with event times (hearsay-tools/squawk#2535).
+      await until(() => wire.received() === 2, () => `${wire.received()} human answers reached the wire; wire processes:\n${wire.inputs()}\n${timeline(target.id)}`);
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       writeFileSync(replyGate, 'release');
       await until(() => store.readEvents(target.id).some(event => event.type === 'human-input-delivered'));

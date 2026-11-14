@@ -4,7 +4,6 @@ import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
 import { productEnv } from './core/product-env.ts';
 import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
-import { REBRAND_SWITCH } from './home/switch.ts';
 import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
 import { getRepoInfo } from './server/git.ts';
@@ -29,13 +28,13 @@ export type CliDeps = typeof defaultCliDeps & {
   initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
 };
 
-function cliHelp(rebrand: boolean): string {
-  return `${productName('cezar', rebrand)} — local cockpit for AI agent tasks in your repo
+function cliHelp(): string {
+  return `${productName('cezar')} — local cockpit for AI agent tasks in your repo
 
 Usage:
   cez                       start the cockpit (server + GUI) for the current repo
   cez run "<task>"          run a task headless in the terminal
-  cez init                  scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/ (example workflow + skill)
+  cez init                  scaffold .ai/squawk/ (example workflow + skill)
   cez projects              list the projects this cockpit serves
                             (also: projects add [<dir>] · projects remove|rm <id> ·
                              projects tag <id> [<tag>…])
@@ -49,10 +48,13 @@ Usage:
   cez webhook               list and send to the project webhooks open to agents (see: webhook --help)
   cez artifact publish <path> publish a local task artifact (see: artifact --help)
   cez job start <name> -- <cmd> run a long command that outlives the agent session (see: job --help)
-  cez server-install        interactive wizard to host ${productName('cezar', rebrand)} on a server
+  cez server-install        interactive wizard to host ${productName('cezar')} on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
-${rebrand ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}${rebrand ? '  hsq migrate-project [--dry-run] move this project\'s state from .ai/cezar/ to .ai/squawk/, offline\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
+  hsq migrate [--dry-run]  migrate the legacy home into the split layout
+  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first
+  hsq migrate-project [--dry-run] move this project's state from .ai/cezar/ to .ai/squawk/, offline
+  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
 
 Options:
   -p, --port <n>              cockpit port (default 4321; server-install: this
@@ -60,7 +62,7 @@ Options:
       --repo <dir>            repo to operate on (default: cwd)
       --workflow <name>       workflow for \`run\` (default: quick-task)
       --model <model>         model override for \`run\`
-      --no-workers            \`run\`: the task cannot start or resume ${productName('Cezar', rebrand)} workers
+      --no-workers            \`run\`: the task cannot start or resume ${productName('Cezar')} workers
       --no-messaging          \`run\`: no new peer-task messages; worker messages and replies stay
       --no-open               don't open the browser
       --platform <id>         server-install target (ubuntu-vps | macosx-ngrok)
@@ -74,7 +76,7 @@ Options:
       --bind-host <host>      host the cockpit binds (default 127.0.0.1). Use with
                               --external-proxy when the proxy runs in a container and
                               cannot reach loopback (e.g. docker bridge 172.17.0.1).
-                              ${productName('cezar', rebrand)} has NO built-in auth — never expose this publicly.
+                              ${productName('cezar')} has NO built-in auth — never expose this publicly.
       --yes                   server-install: accept safe defaults (never auto-sudo)
       --reconfigure <ids>     server-install: force re-run of step id(s), comma-separated
       --reinstall             server-install: force re-run of every step (full reinstall)
@@ -82,14 +84,9 @@ Options:
   -h, --help                  show this help
 
 Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
-${projectFilesHelp(rebrand)}`;
-}
-
-function projectFilesHelp(rebrand: boolean): string {
-  const dir = rebrand ? '.ai/squawk' : '.ai/cezar';
-  return `Skills live in .ai/skills/, ${dir}/skills/ and your team skills repos
-(team skills come from "skillsRepos" in ${dir}/config.json, which the Skills page edits; none by default);
-workflows in ${dir}/workflows/.${rebrand ? ' A project also reads .ai/cezar/, the old folder name.' : ''}`;
+Skills live in .ai/skills/, .ai/squawk/skills/ and your team skills repos
+(team skills come from "skillsRepos" in .ai/squawk/config.json, which the Skills page edits; none by default);
+workflows in .ai/squawk/workflows/. A project also reads .ai/cezar/, the old folder name.`;
 }
 
 /** Project commands finish an unfinished migration journal, then refuse a project under a
@@ -109,10 +106,10 @@ function commandHomeEntry(command: string, task: string): string {
   return command === 'run' && !task ? 'run-usage' : command;
 }
 
-export async function main(deps: CliDeps, rebrand = REBRAND_SWITCH): Promise<void> {
-  const notice = oldCommandNotice(deps.process.argv[1], rebrand);
+export async function main(deps: CliDeps): Promise<void> {
+  const notice = oldCommandNotice(deps.process.argv[1]);
   if (notice) deps.console.error(notice);
-  return dispatch(deps, rebrand);
+  return dispatch(deps);
 }
 
 /** Metadata exits before project admission or home preparation. */
@@ -129,9 +126,9 @@ function printCliMetadata(deps: CliDeps, values: { version?: boolean; help?: boo
   return false;
 }
 
-async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
+async function dispatch(deps: CliDeps): Promise<void> {
   // Help reads resolved paths only. Task commands and version output never need a Home.
-  const help = () => commandText(cliHelp(rebrand), deps.process.argv[1], rebrand);
+  const help = () => commandText(cliHelp(), deps.process.argv[1]);
   let resolvedHome: Home | undefined;
   let homeEntry = deps.operatorHomeEntry(deps.process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.

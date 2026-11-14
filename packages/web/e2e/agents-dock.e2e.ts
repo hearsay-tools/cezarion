@@ -219,6 +219,7 @@ describe('the Agents dock against a replayed fan-out', () => {
     expect(browser.evaluate(`document.querySelector('${DOCK}') !== null`)).toBe(true)
   }, 120_000)
 
+  // Rule: .ai/specs/2026-07-21-shared-session-renderer.md (scroll ownership).
   it('the long agent panel scrolls, detaches from follow-tail, and exposes the jump pill', () => {
     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
     revealSubagentSection()

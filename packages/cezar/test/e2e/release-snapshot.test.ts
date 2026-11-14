@@ -74,21 +74,9 @@ async function makeFixture(): Promise<string> {
     )}\n`,
   );
 
-  await mkdir(join(root, 'alias-cezarion'));
-  await writeFile(
-    join(root, 'alias-cezarion', 'package.json'),
-    `${JSON.stringify(
-      {
-        name: 'fake-alias',
-        version: '0.9.9',
-        files: ['bin.js'],
-        dependencies: { '@scope/fake-root': '^0.9.9' },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  await writeFile(join(root, 'alias-cezarion', 'bin.js'), '#!/usr/bin/env node\n');
+  // The compatibility packages copy the built cockpit from the service.
+  await mkdir(join(root, 'packages', 'cezar', 'web', 'dist'), { recursive: true });
+  await writeFile(join(root, 'packages', 'cezar', 'web', 'dist', 'index.html'), 'cockpit\n');
   return root;
 }
 
@@ -118,7 +106,7 @@ function runScript(fixtureRoot: string, extraEnv: Record<string, string>, args: 
     GITHUB_RUN_ATTEMPT: '1',
     ...extraEnv,
   };
-  return execFile(process.execPath, ['--import', new URL('../fixtures/release-switch-off.mjs', import.meta.url).href, script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
+  return execFile(process.execPath, [script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
 }
 
 test('dry-run publish stamps every manifest, pins each sibling exact, and emits the result JSON', { timeout: 120_000 }, async () => {
@@ -141,12 +129,9 @@ test('dry-run publish stamps every manifest, pins each sibling exact, and emits 
     const clientPkg = await readPkg(root, 'packages', 'api-client');
     const squawkPkg = await readPkg(root, 'packages', 'cezar');
     const webPkg = await readPkg(root, 'packages', 'web');
-    const aliasPkg = await readPkg(root, 'alias-cezarion');
     assert.equal(clientPkg.version, '0.9.9-pr77.5');
     assert.equal(squawkPkg.version, '0.9.9-pr77.5');
     assert.equal(webPkg.version, '0.9.9-pr77.5');
-    assert.equal(aliasPkg.version, '0.9.9-pr77.5');
-    assert.deepEqual(aliasPkg.dependencies, { '@scope/fake-root': '0.9.9-pr77.5' });
     assert.deepEqual(squawkPkg.devDependencies, { '@scope/fake-client': '0.9.9-pr77.5' });
     assert.deepEqual(webPkg.dependencies, { '@scope/fake-client': '0.9.9-pr77.5' });
     assert.deepEqual(webPkg.devDependencies, { '@scope/fake-root': '0.9.9-pr77.5' });
@@ -164,8 +149,8 @@ test('dry-run publish stamps every manifest, pins each sibling exact, and emits 
     };
     assert.equal(result.distTag, 'pr-77');
     assert.ok(
-      result.installLines.some((line) => line.includes('npx fake-alias@0.9.9-pr77.5')),
-      'install lines should use the actual alias name and exact version',
+      result.installLines.some((line) => line.includes('npx -p @hearsay-tools/squawk@0.9.9-pr77.5 hsq')),
+      'install lines should use the published package name and exact version',
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -228,9 +213,9 @@ test('the nightly channel stamps a dated version and publishes under the nightly
       ['--dry-run'],
     );
 
-    const aliasPkg = await readPkg(root, 'alias-cezarion');
-    assert.equal(aliasPkg.version, '0.9.9-nightly.20260813.12');
-    assert.deepEqual(aliasPkg.dependencies, { '@scope/fake-root': '0.9.9-nightly.20260813.12' });
+    const webPkg = await readPkg(root, 'packages', 'web');
+    assert.equal(webPkg.version, '0.9.9-nightly.20260813.12');
+    assert.deepEqual(webPkg.devDependencies, { '@scope/fake-root': '0.9.9-nightly.20260813.12' });
     const output = await readFile(join(root, 'github-output.txt'), 'utf8');
     assert.match(output, /^attempted=true$/m);
     assert.match(output, /"distTag":"nightly"/);
@@ -261,9 +246,9 @@ test('a nightly re-run stamps the attempt onto the version so it cannot collide'
       ['--dry-run'],
     );
 
-    const aliasPkg = await readPkg(root, 'alias-cezarion');
-    assert.equal(aliasPkg.version, '0.9.9-nightly.20260813.12.2');
-    assert.deepEqual(aliasPkg.dependencies, { '@scope/fake-root': '0.9.9-nightly.20260813.12.2' });
+    const webPkg = await readPkg(root, 'packages', 'web');
+    assert.equal(webPkg.version, '0.9.9-nightly.20260813.12.2');
+    assert.deepEqual(webPkg.devDependencies, { '@scope/fake-root': '0.9.9-nightly.20260813.12.2' });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -316,7 +301,7 @@ test('a non-publishable event exits 0 without touching the manifests', { timeout
       GITHUB_EVENT_NAME: 'pull_request_target', PR_NUMBER: '77',
       PR_HEAD_REPO: 'o/n', GITHUB_REPOSITORY: 'o/n', GITHUB_RUN_NUMBER: '5',
     }, ['--pack-only']);
-    for (const key of ['apiClient', 'cezar', 'alias']) {
+    for (const key of ['apiClient', 'cezar', 'legacyScoped', 'legacyAlias']) {
       const file = join(root, 'snapshot-artifacts', `${key}.tgz`);
       const { stdout } = await execFile('tar', ['-xOf', file, 'package/package.json']);
       assert.equal(JSON.parse(stdout).version, '0.9.9-pr77.5');

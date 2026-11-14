@@ -259,10 +259,11 @@ describe('ProjectRail expand toggle (#711)', () => {
     expect(toggle()!.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('animates only the width, and not under reduced motion', () => {
+  it('does not animate the width under reduced motion', () => {
     setViewport(1440)
     renderRail()
-    expect(nav().className).toContain('transition-[width]')
+    // Tailwind compiles `motion-reduce:` into a prefers-reduced-motion query, so this class is
+    // the whole proof (docs/areas/web-ui.md § Accessibility rules).
     expect(nav().className).toContain('motion-reduce:transition-none')
   })
 })

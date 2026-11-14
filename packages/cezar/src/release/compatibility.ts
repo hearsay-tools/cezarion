@@ -14,8 +14,8 @@ export const COMPATIBILITY_ENTRIES = ['dist/index.js', 'dist/hsq.js', 'dist/cez.
   'bin.js', 'cezarion.js', 'cez.js', 'hsq.js'] as const;
 
 /** Matching old-name releases retain deterministic updates during the deprecation window. */
-export function compatibilityManifests(runtime: ManifestLike, rebrand = productIdentity().rebrand): Record<string, ManifestLike> {
-  if (!rebrand || runtime.private === true) return {};
+export function compatibilityManifests(runtime: ManifestLike): Record<string, ManifestLike> {
+  if (runtime.private === true) return {};
   const old = productIdentity(false), active = productIdentity(true);
   const shared = {
     version: runtime.version, type: 'module', license: runtime.license,
@@ -37,9 +37,8 @@ export function compatibilityManifests(runtime: ManifestLike, rebrand = productI
 
 /** Disposable pack trees only. The dispatcher owns the notice; these imports add none. */
 export function withCompatibilityPackages<T>(source: string, runtime: ManifestLike,
-  action: (packages: Record<string, { dir: string; manifest: ManifestLike }>) => T,
-  rebrand = productIdentity().rebrand): T {
-  const manifests = compatibilityManifests(runtime, rebrand);
+  action: (packages: Record<string, { dir: string; manifest: ManifestLike }>) => T): T {
+  const manifests = compatibilityManifests(runtime);
   if (!Object.keys(manifests).length) return action({});
   const root = mkdtempSync(join(tmpdir(), 'release-compatibility-'));
   try {

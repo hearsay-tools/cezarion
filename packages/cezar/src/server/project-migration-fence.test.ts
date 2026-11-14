@@ -66,7 +66,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, rebrand: false,
+  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
@@ -455,29 +455,6 @@ describe('health while fenced', () => {
     expect((await healthConfig(root, testHome())).maxParallel).toBe(3);
     fence.release();
     expect((await healthConfig(root, testHome())).maxParallel).toBe(5);
-  });
-});
-
-describe('with the release switch off', () => {
-  it('offers no migration command and a normal project build writes no fence or journal', async () => {
-    vi.resetModules();
-    vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));
-    try {
-      const { SUBCOMMAND_NAMES: names, loadSubcommand: load } = await import('../subcommands.ts');
-      const { ProjectContexts: SwitchOffContexts } = await import('./project-context.ts');
-      const { createRunManager: switchOffManager } = await import('./run-manager.testkit.ts');
-      expect(names.includes('migrate-project')).toBe(false);
-      expect(await load('migrate-project', undefined, false)).toBeUndefined();
-      const { ai, root } = project();
-      const contexts = new SwitchOffContexts({ createRunner, createManager: switchOffManager, home: testHome(), ownership: owner(), rebrand: false,
-        listProjects: async () => [{ id: 'p', root, status: 'not-git' as const }] });
-      disposers.push(() => contexts.disposeAll());
-      await contexts.context('p');
-      expect(readdirSync(ai)).toEqual(['cezar']);
-    } finally {
-      vi.doUnmock('../home/switch.ts');
-      vi.resetModules();
-    }
   });
 });
 

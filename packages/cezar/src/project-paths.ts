@@ -1,5 +1,4 @@
 import { productIdentity } from './home/identity.ts';
-import { REBRAND_SWITCH } from './home/switch.ts';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, isAbsolute, relative, resolve } from 'node:path';
@@ -71,16 +70,15 @@ export function canStartFreshProject(root: string): boolean {
 }
 
 /**
- * The one rule for a project's write root. With the release switch on, a moved project writes
- * `.ai/squawk/` and reads `.ai/cezar/` as its fallback. A fresh project (no legacy path) does
- * the same from its first use when the destination is absent or a real directory; every existing legacy project, and every project
- * with the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. With the
- * switch on: marker and legacy-path checks; none with it off. Reads never create a marker.
+ * The one rule for a project's write root. A moved project writes `.ai/squawk/` and reads
+ * `.ai/cezar/` as its fallback. A fresh project (no legacy path) does the same from its first use
+ * when the destination is absent or a real directory; every existing legacy project writes
+ * `.ai/cezar/` and reads `.ai/squawk/` as its fallback. Reads never create a marker.
  */
 export function projectPaths(repoRoot: string) {
   const legacy = join(repoRoot, '.ai', 'cezar');
   const moved = join(repoRoot, '.ai', 'squawk');
-  const write = REBRAND_SWITCH && (projectMoveMarked(repoRoot) || canStartFreshProject(repoRoot)) ? moved : legacy;
+  const write = projectMoveMarked(repoRoot) || canStartFreshProject(repoRoot) ? moved : legacy;
   return { write, reads: [write, write === legacy ? moved : legacy] as readonly string[] };
 }
 
@@ -126,12 +124,12 @@ export function isFallbackProjectPath(repoRoot: string, path: string): boolean {
 /**
  * Existing fallback checkouts and state stay read only: a path inside the fallback directory of
  * the project that holds it, as `projectPaths` of that project decides. An absent recorded
- * project root is not fallback state with the switch on: missing-checkout callers keep their normal fallback.
+ * project root is not fallback state: missing-checkout callers keep their normal fallback.
  */
 export function fallbackProjectWriteError(path: string): string | undefined {
   for (const match of path.matchAll(/(?:^|[\\/])\.ai[\\/](cezar|squawk)(?=[\\/]|$)/g)) {
     const root = path.slice(0, match.index) || '.';
-    if (REBRAND_SWITCH && !pathPresent(root)) continue;
+    if (!pathPresent(root)) continue;
     if (basename(projectPaths(root).reads[1]!) !== match[1]) continue;
     // A kept task's own items stay in `.ai/cezar/` after the move, and stay writable.
     if (match[1] === 'cezar' && legacyRunItem(root, path)) continue;
@@ -159,12 +157,11 @@ export function movedProjectPath(path: string): string | undefined {
 }
 
 const noticedProjects = new Set<string>();
-/** Internal release seam; dual reads themselves do not depend on this flag. */
-export function noticeLegacyProject(repoRoot: string, options: { releaseEnabled?: boolean; reason?: string; warn?: (message: string) => void } = {}): void {
+export function noticeLegacyProject(repoRoot: string, options: { reason?: string; warn?: (message: string) => void } = {}): void {
   const legacy = join(repoRoot, '.ai', 'cezar');
-  if (!(options.releaseEnabled ?? REBRAND_SWITCH) || (noticedProjects.has(repoRoot) && !options.reason) || projectPaths(repoRoot).write !== legacy || !pathPresent(legacy)) return;
+  if ((noticedProjects.has(repoRoot) && !options.reason) || projectPaths(repoRoot).write !== legacy || !pathPresent(legacy)) return;
   noticedProjects.add(repoRoot);
-  const prefix = productIdentity(options.releaseEnabled ?? REBRAND_SWITCH).command;
+  const prefix = productIdentity().command;
   const message = options.reason
     ? `Project ${repoRoot} keeps its state in .ai/cezar/ for now: ${options.reason}. It is served from both folders; the move runs again at the next start.`
     : `Legacy project directory ${legacy} is still in use; both project directories remain readable.`;

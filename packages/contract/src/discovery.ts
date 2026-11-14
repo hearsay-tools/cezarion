@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { runStatusSchema } from './run-status.ts';
 import { runnerSchema } from './runner.ts';
 import { modelDiscoveryRunnerSchema, providerStatusSchema, runnerModelCatalogResponseSchema } from './workspace.ts';
 
@@ -21,7 +22,7 @@ export type DiscoveredRunners = z.infer<typeof discoveredRunnersSchema>;
 export const discoveredTasksSchema = z.object({
   tasks: z.array(z.object({
     id: z.string(), title: z.string(), runner: runnerSchema.optional(),
-    status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+    status: runStatusSchema,
     attention: z.enum(['permission', 'error', 'waiting', 'running', 'unseen', 'none']),
     attentionLabel: z.string(), accepts: z.boolean(), reason: z.string().optional(),
   })).max(32),

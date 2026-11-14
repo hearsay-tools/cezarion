@@ -27,17 +27,13 @@ async function firstReady(read, owner, repo, number) {
   if (!Number.isFinite(timestamp(nodes[0]?.createdAt))) throw new Error('First ready timestamp unavailable');
   return nodes[0].createdAt;
 }
-async function readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber, head, now = Date.now,
+// The caller re-reads the queue entry and the PR, draft state included, after this.
+async function readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber, head, now = Date.now, sleep,
   deadline = now() + 60000, ...options }) {
-  const read = reader(github, owner, repo, deadline, now);
-  const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, now, deadline, ...options });
+  const read = reader(github, owner, repo, deadline, now, sleep);
+  const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, now, sleep, deadline, ...options });
   const exempt = admission.exception || admission.providerState === 'no-files';
   const ready = exempt ? null : await firstReady(read, owner, repo, pullNumber);
-  const pr = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
-  if (pr?.number !== pullNumber || pr.state !== 'open' || pr.head?.sha !== head || pr.base?.ref !== 'main'
-    || pr.base.repo?.full_name !== `${owner}/${repo}`) throw new Error('Queue PR identity changed');
-  const blocked = reason => ({ ...admission, admitted: false, reason });
-  if (pr.draft !== false) return blocked('PR is draft');
   // Keep the established verified exceptions; they do not require a model run.
   if (exempt) return admission;
   // An open, non-draft PR with no ready event was opened ready. No ready

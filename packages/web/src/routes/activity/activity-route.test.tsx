@@ -39,6 +39,7 @@ const clockText = () => /\d{2}:\d{2}:\d{2}/.exec(document.querySelector('[data-s
 const chip = (label: string) => document.querySelector(`[data-chip="${label}"]`)?.textContent
 
 describe('ProjectActivityRoute', () => {
+  // Rule: docs/areas/web-ui.md § Activity view (live region).
   it('reads the project snapshot over HTTP and renders the header, chips and cards', async () => {
     const tasks = [
       run({ runId: 'a', title: 'Porting upstream SSE', status: RUN_STATUS.waiting, rung: 'waiting-on-workers', wait: { kind: ACTIVITY_WAIT_KIND.workers, since: iso(-1_000), detail: { owed: 1, total: 1, settled: 0, replies: true, recipientRunIds: ['b'] } } }),

@@ -2,18 +2,21 @@ import { readFileSync } from 'node:fs';
 import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 import type { Cdp, CdpConnection } from './cdp.ts';
-import { ChromiumError, launchChromium, resolveChromium } from './chromium.ts';
+import { ChromiumError, launchChromium, resolveChromium, stopChromium } from './chromium.ts';
 
 /** A task's Chromium as the preview host launches it (hearsay-tools/cezarion#781): resolve, launch, attach to its page. Split out of `host.ts`. */
 
-const PROFILE_RELEASE_WAIT_MS = 5_000;
-/** How long a closed Chromium may take to exit before it gets SIGKILL. */
+/** How long a closed Chromium and its helpers may take to exit before they get SIGKILL. */
 const BROWSER_KILL_GRACE_MS = 5_000;
+/** The release wait covers the grace, the SIGKILL and `stopGroup`'s 1 s wait for the group to
+ *  end, so a browser that needed SIGKILL is gone before its profile is deleted. */
+const PROFILE_RELEASE_WAIT_MS = BROWSER_KILL_GRACE_MS + 2_000;
 const STDERR_TAIL_CHARS = 4096;
 
 export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };
 /** A launched Chromium: its page's CDP session, and the browser connection the agent's proxy
- *  opens its own sessions on (hearsay-tools/cezarion#784). `exited` settles when the process is gone. */
+ *  opens its own sessions on (hearsay-tools/cezarion#784). `exited` settles when the process and
+ *  every helper it forked are gone. */
 export type BrowserHandle = { cdp: Cdp; connection: CdpConnection; pageTargetId?: string | undefined; exited: Promise<BrowserExit>; close(): void };
 
 /** No Chromium anywhere `resolveChromium` looks: the pane offers the download or the OS command. */
@@ -38,8 +41,12 @@ export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv, 
   proc.stderr?.on('data', (chunk: Buffer) => {
     tail = (tail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
   });
+  // Helpers still write the profile for a moment after the main process exits: end them first.
   const exited = new Promise<BrowserExit>(resolve =>
-    proc.once('exit', (code, signal) => resolve({ ...(signal ? { signal } : code !== null ? { exitCode: code } : {}), stderrTail: tail })),
+    proc.once('exit', (code, signal) => {
+      const exit = { ...(signal ? { signal } : code !== null ? { exitCode: code } : {}), stderrTail: tail };
+      void stopChromium(proc).then(() => resolve(exit), () => resolve(exit));
+    }),
   );
   try {
     const root = connection.session(undefined);
@@ -52,15 +59,12 @@ export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv, 
     // browser outlives its run (idle close, run deletion, a stale or failed launch).
     const close = () => {
       connection.close();
-      proc.kill();
-      const kill = setTimeout(() => { proc.kill('SIGKILL'); }, BROWSER_KILL_GRACE_MS);
-      kill.unref?.();
-      void exited.then(() => { clearTimeout(kill); });
+      void stopChromium(proc, BROWSER_KILL_GRACE_MS);
     };
     return { cdp, connection, pageTargetId: page.targetId, exited, close };
   } catch (error) {
     connection.close();
-    proc.kill('SIGKILL');
+    void stopChromium(proc);
     throw error;
   }
 }

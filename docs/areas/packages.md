@@ -19,8 +19,7 @@ Four pnpm workspaces (npm script metadata retained) under a `private` root that 
 
 Rules that follow from that:
 
-- npm release identities come from `home/identity.ts`. With the rebrand switch
-  enabled, publication projects the new scoped name into a disposable pack copy;
+- npm release identities come from `home/identity.ts`. Publication projects the new scoped name into a disposable pack copy;
   source workspace names remain unchanged so builds and version-only bump PRs
   still work. See [publishing](../publishing.md#package-identity).
 

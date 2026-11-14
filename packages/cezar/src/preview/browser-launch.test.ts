@@ -2,7 +2,7 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChromiumError, launchChromium, resolveChromium } from './chromium.ts';
+import { ChromiumError, launchChromium, resolveChromium, stopChromium } from './chromium.ts';
 import { ChromiumMissingError, launchBrowser, readOsRelease, waitForExit, type BrowserHandle } from './browser-launch.ts';
 import { fakeConnection } from './preview.testkit.ts';
 
@@ -10,6 +10,7 @@ vi.mock('./chromium.ts', async importOriginal => ({
   ...await importOriginal<typeof import('./chromium.ts')>(),
   resolveChromium: vi.fn(),
   launchChromium: vi.fn(),
+  stopChromium: vi.fn(),
 }));
 vi.mock('node:fs', async importOriginal => ({
   ...await importOriginal<typeof import('node:fs')>(),
@@ -17,13 +18,14 @@ vi.mock('node:fs', async importOriginal => ({
 }));
 
 function browserFixture(targetInfos: unknown = [{ type: 'worker', targetId: 'worker' }, { type: 'page', targetId: 'page' }]) {
-  const proc = Object.assign(new EventEmitter(), { stderr: new EventEmitter(), kill: vi.fn() });
+  const proc = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
   const { connection } = fakeConnection();
   const root = connection.session(undefined);
   vi.mocked(root.send).mockImplementation(async method => method === 'Target.getTargets' ? { targetInfos } : { sessionId: 'attached' });
   vi.spyOn(connection, 'session');
   vi.spyOn(connection, 'close');
   vi.mocked(resolveChromium).mockReturnValue('/fake/chrome');
+  vi.mocked(stopChromium).mockResolvedValue(undefined);
   vi.mocked(launchChromium).mockResolvedValue({ proc, browser: connection } as unknown as Awaited<ReturnType<typeof launchChromium>>);
   return { proc, connection, root };
 }
@@ -46,27 +48,23 @@ describe('preview browser launch', () => {
     expect(handle).toMatchObject({ connection, cdp: connection.session('attached'), pageTargetId: 'page' });
     handle.close();
     expect(connection.close).toHaveBeenCalledOnce();
-    expect(proc.kill).toHaveBeenCalledExactlyOnceWith();
-    expect(vi.mocked(connection.close).mock.invocationCallOrder[0]).toBeLessThan(proc.kill.mock.invocationCallOrder[0]!);
+    // The whole process group gets SIGTERM, and SIGKILL for whatever outlives the 5 s grace.
+    expect(stopChromium).toHaveBeenCalledExactlyOnceWith(proc, 5_000);
+    expect(vi.mocked(connection.close).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(stopChromium).mock.invocationCallOrder[0]!);
   });
 
-  it('kills a closed browser that has not exited after the grace, and only then', async () => {
-    vi.useFakeTimers();
+  it('settles exited only once the helpers are stopped too (hearsay-tools/squawk#2458)', async () => {
     const { proc } = browserFixture();
-    const stubborn = await launchBrowser('/profile', {}, testHome({}));
-    stubborn.close();
-    await vi.advanceTimersByTimeAsync(4999);
-    expect(proc.kill.mock.calls).toEqual([[]]);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(proc.kill.mock.calls).toEqual([[], ['SIGKILL']]);
-    const second = browserFixture();
-    const polite = await launchBrowser('/profile', {}, testHome({}));
-    polite.close();
-    second.proc.emit('exit', 0, null);
-    await polite.exited;
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(second.proc.kill.mock.calls).toEqual([[]]);
-    expect(vi.getTimerCount()).toBe(0);
+    let helpersGone = false;
+    vi.mocked(stopChromium).mockImplementation(async () => {
+      await new Promise(resolve => setImmediate(resolve));
+      helpersGone = true;
+    });
+    const handle = await launchBrowser('/profile', {}, testHome({}));
+    proc.emit('exit', 0, null);
+    await handle.exited;
+    expect(helpersGone).toBe(true);
+    expect(stopChromium).toHaveBeenCalledExactlyOnceWith(proc);
   });
 
   it('throws the missing-browser error before launching', async () => {
@@ -95,7 +93,7 @@ describe('preview browser launch', () => {
     await expect(result).rejects.toBeInstanceOf(ChromiumError);
     await expect(result).rejects.toMatchObject({ kind: 'exited', message: 'Chromium opened no page', stderrTail: 'no page stderr' });
     expect(connection.close).toHaveBeenCalledOnce();
-    expect(proc.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
+    expect(stopChromium).toHaveBeenCalledExactlyOnceWith(proc);
   });
 
   it.each(['targets', 'attachment', 'transport'])('cleans up after an invalid %s reply', async kind => {
@@ -110,7 +108,7 @@ describe('preview browser launch', () => {
     if (kind === 'transport') await expect(result).rejects.toBe(error);
     else await expect(result).rejects.toMatchObject({ name: 'ZodError' });
     expect(connection.close).toHaveBeenCalledOnce();
-    expect(proc.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
+    expect(stopChromium).toHaveBeenCalledExactlyOnceWith(proc);
   });
 
   it.each([
@@ -150,11 +148,12 @@ describe('preview browser launch', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('bounds profile release at exactly five seconds when the browser never exits', async () => {
+  it('bounds profile release at exactly seven seconds when the browser never exits', async () => {
     vi.useFakeTimers();
     const done = vi.fn();
     const waiting = waitForExit({ exited: new Promise(() => {}) } as BrowserHandle).then(done);
-    await vi.advanceTimersByTimeAsync(4999);
+    // The 5 s kill grace, then SIGKILL and up to 1 s for the group to end, then 1 s of margin.
+    await vi.advanceTimersByTimeAsync(6999);
     expect(done).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await waiting;

@@ -129,17 +129,6 @@ describe('HookCard (#961)', () => {
     expect(entry.textContent).toBe('SQUEAL · registered at revision 0\nKnown failures: 0')
   })
 
-  it('source path and raw-output toggle use the AA muted token on card-2', () => {
-    render(<HookCard item={hook({ source: '/plugins/squeal/hooks/stop.sh', stdout: '{}', exitCode: 0 })} />)
-    fireEvent.click(screen.getByRole('button', { name: /Hook/ }))
-    // `text-soft-foreground` on bg-card-2 is 4.37:1 in light, below AA for 11–12 px text.
-    for (const slot of ['hook-source', 'hook-raw-toggle']) {
-      const element = document.querySelector(`[data-slot="${slot}"]`)!
-      expect(element.className, slot).toContain('text-muted-foreground')
-      expect(element.className, slot).not.toContain('text-soft-foreground')
-    }
-  })
-
   it('shows failed + exit pill and danger border for failed/blocked', () => {
     for (const status of ['failed', 'blocked'] as const) {
       render(<HookCard item={hook({ status, exitCode: 2, entries: [{ kind: 'error', text: 'boom' }] })} />)
@@ -169,6 +158,7 @@ describe('HookCard (#961)', () => {
     expect(screen.getByText('/home/u/.codex/plugins/squeal/hooks.json')).toBeTruthy()
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (focus).
   it('trigger is keyboard-operable', () => {
     // A native, enabled <button>: Enter and Space activate it in every browser, and it
     // takes Tab focus — jsdom does not synthesize the click, so assert the contract.
@@ -877,6 +867,7 @@ describe('peer message color tokens (hearsay-tools/cezarion#1992)', () => {
     return (hi! + 0.05) / (lo! + 0.05)
   }
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
   it('keeps AA contrast for the label and body text on the peer surface in both themes', () => {
     // Dark: the accent label sits on the raised surface. Light: on the tinted card.
     expect(ratio(value(rootBlock, 'message-peer-accent'), value(rootBlock, 'surface-raised'))).toBeGreaterThanOrEqual(4.5)

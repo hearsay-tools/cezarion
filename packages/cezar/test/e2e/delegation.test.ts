@@ -1,5 +1,4 @@
 import { projectPaths } from '../../src/project-paths.ts';
-import { REBRAND_SWITCH } from '../../src/home/switch.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { once } from 'node:events';
@@ -194,7 +193,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     const command = async (args: string[], discard = false) => {
       const quoted = args.map(arg => `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
       const env: NodeJS.ProcessEnv = { ...process.env, ...environments.get(parent.id), PATH: '' };
-      if (REBRAND_SWITCH) for (const name of Object.keys(env)) {
+      for (const name of Object.keys(env)) {
         if (!name.startsWith('CEZ_')) continue;
         env['HSQ_' + name.slice(4)] = env[name];
         delete env[name];
@@ -202,7 +201,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
       const result = await execFile('/bin/sh', ['-c', `${invocation} ${quoted}`], {
         cwd: consumer, env, timeout: 45_000,
       });
-      assert.equal(result.stderr, REBRAND_SWITCH ? "[cez] 'cez' is deprecated; use 'hsq' instead.\n" : '');
+      assert.equal(result.stderr, "[cez] 'cez' is deprecated; use 'hsq' instead.\n");
       return discard ? undefined : JSON.parse(result.stdout);
     };
     const request = randomUUID(); const spawn = ['spawn', '--baseline', 'parent-head', '--request-id', request, 'package worker'];
@@ -261,7 +260,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
       await once(holder.stdout, 'data');
       await assert.rejects(command(['destroy', workerId]), error => {
         const failure = error as Error & { code: number; stdout: string; stderr: string };
-        assert.equal(failure.code, 1); assert.equal(failure.stderr, REBRAND_SWITCH ? "[cez] 'cez' is deprecated; use 'hsq' instead.\n" : '');
+        assert.equal(failure.code, 1); assert.equal(failure.stderr, "[cez] 'cez' is deprecated; use 'hsq' instead.\n");
         const result = JSON.parse(failure.stdout);
         assert.equal(result.workerId, workerId); assert.equal(result.state, 'incomplete');
         assert.deepEqual(result.remaining, ['worktree', 'branch']); assert.deepEqual(result.deleted, []);

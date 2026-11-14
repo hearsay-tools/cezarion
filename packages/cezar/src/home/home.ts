@@ -1,6 +1,5 @@
 import { join, posix, win32 } from 'node:path';
 import { nativePathPlatform, oneRootKinds, type HomeLayout, type HomeRoots } from './kind-roots.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 import { createInstallMarker, readInstallMarker } from './install-marker.ts';
 import { assertTestHomeOutsideAccountHome } from './protected-roots.ts';
@@ -69,7 +68,7 @@ export function kindHomePaths(roots: HomeRoots, layout: HomeLayout, platform: No
 
 /** Test homes contain every cockpit path, including caches, below the supplied directory. */
 export const Home = Object.freeze({
-  sandbox(dir: string, { layout = REBRAND_SWITCH ? 'split' : 'legacy' }: { layout?: HomeLayout } = {}): Home {
+  sandbox(dir: string, { layout = 'split' }: { layout?: HomeLayout } = {}): Home {
     assertTestHomeOutsideAccountHome(dir);
     assertSquawkHomeWriteIsSandboxed(dir);
     const home = layout === 'split'

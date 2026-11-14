@@ -65,10 +65,10 @@ function baseAvailable(log: VersionLog, flag: OutsideWrite): boolean {
   }
 }
 
-export function getLegacyRecovery(home: Home, enabled: boolean): HomeRecoveryFile[] {
+export function getLegacyRecovery(home: Home): HomeRecoveryFile[] {
   const files: HomeRecoveryFile[] = [];
   try {
-    const record = legacyMigration(home, enabled);
+    const record = legacyMigration(home);
     if (!record) return files;
     const store = new HomeStore(home);
     for (const entry of legacyEntries(record)) {
@@ -105,16 +105,12 @@ function recordSource(home: Home, record: MigrationRecord, source: LegacySource)
 }
 
 /** Both roots remain locked through the merge and baseline publication; no await under a lock. */
-export function resolveLegacyRecovery(home: Home, file: string, detectedAt: string | undefined, action: 'import' | 'ignore', enabled: boolean): void {
+export function resolveLegacyRecovery(home: Home, file: string, detectedAt: string | undefined, action: 'import' | 'ignore'): void {
   homeFileSchema.parse(file);
-  if (!enabled) {
-    if (action === 'import') throw new Error('Legacy home import is not enabled.');
-    return;
-  }
   const store = new HomeStore(home, { requireBackup: true });
   const path = homeFileLocation(home, file).path;
   store.transaction(() => {
-    const record = legacyMigration(home, enabled);
+    const record = legacyMigration(home);
     const entry = record && legacyEntries(record).find(entry => entry.path === file);
     if (!record || !entry) return;
     const source = readLegacySource(record, entry);

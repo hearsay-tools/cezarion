@@ -18,7 +18,7 @@ import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 // hearsay-tools/cezarion#1620: an earlier workflow step completes only on an accepted completion
 // signal, on every runner's native wire. Its last agent step signals done; a check step ends the chain.
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "markers": [
+  "no-done": [
     "claude C1",
     "cursor C1",
     "omp C1"

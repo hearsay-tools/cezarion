@@ -5,14 +5,13 @@
 // lower a long function but never grow one. A function the change does not touch is never
 // read. The head is read as Git objects only, so CI can run this from trusted base code.
 // CRAP joins the gate once CI publishes coverage (hearsay-tools/cezarion#1780).
-import { extname, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { scanChanges, thresholds } from './changed-functions.mjs';
 
 const OWNER_NOTE = 'For an owner-approved increase, the owner adds the baseline-growth label, then re-runs the failed complexity-gate job.';
 const APPROVED_NOTE = 'Complexity growth approved by the baseline-growth label; owner merge required.';
-const MAX_POINTS = 40;
 const MAX_HINTS = 10;
 // Two functions that share this fraction of their body lines can be one function moved and edited.
 const MIN_SIMILARITY = 0.5;
@@ -108,24 +107,8 @@ const WAS = {
 const headline = ({ fn, from }, limit) =>
   `${fn.file}:${fn.line} ${fn.name}: complexity ${fn.complexity} (${from ? WAS[from.kind](from) : 'new function'}; limit ${limit})`;
 
-const shellWord = text => `'${text.replaceAll("'", "'\\''")}'`;
-
-/** The commands that print each complexity: the head's, and the merge base's when a counterpart exists. */
-function reproduce({ fn, from }, { root, base }) {
-  const metrics = relative(root, fileURLToPath(new URL('./metrics.mjs', import.meta.url)));
-  // Line and column are where the function starts, which no other function shares. A name or a line alone
-  // also matches a function nested on the same line, and the innermost one would be measured instead.
-  const select = ({ name, line, column }) => `${isNamed(name) ? `--function ${shellWord(name)} ` : ''}--line ${line} --column ${column}`;
-  const head = `node ${metrics} ${shellWord(fn.file)} ${select(fn)} --breakdown`;
-  if (!from) return [`head: ${head}`];
-  const copy = `"\${TMPDIR:-/tmp}/complexity-base${extname(from.file)}"`;
-  return [`head: ${head}`, `base: git show ${shellWord(`${base}:${from.file}`)} > ${copy} && node ${metrics} ${copy} ${select(from)}`];
-}
-
 function pointLines(fn) {
-  const shown = fn.points.slice(0, MAX_POINTS).map(point => `      ${point.line} ${point.kind}`);
-  const hidden = fn.points.length - shown.length;
-  return ['    decision points at head:', ...shown, ...(hidden > 0 ? [`      ... ${hidden} more (the head command lists all)`] : [])];
+  return ['    decision points at head:', ...fn.points.map(point => `      ${point.line} ${point.kind}`)];
 }
 
 function lostLines({ growth, lost, limit }) {
@@ -134,11 +117,11 @@ function lostLines({ growth, lost, limit }) {
     ...lost.slice(0, MAX_HINTS).map(item => `  ${item.file}:${item.line} ${item.name} (complexity ${item.complexity})`)];
 }
 
-export function growthReport(result, context) {
+export function growthReport(result) {
   const { growth, limit } = result;
   return [
     `${growth.length} changed ${growth.length === 1 ? 'function is' : 'functions are'} over the complexity limit of ${limit} and new or more complex than at the merge base:`,
-    ...growth.flatMap(item => ['', headline(item, limit), ...reproduce(item, context).map(line => `  ${line}`), ...pointLines(item.fn)]),
+    ...growth.flatMap(item => ['', headline(item, limit), ...pointLines(item.fn)]),
     ...lostLines(result),
   ];
 }
@@ -180,7 +163,7 @@ export function runComplexityGate(args, { cwd = process.cwd(), stdout = process.
       stdout.write(passReport(result, (performance.now() - started) / 1000).join('\n') + '\n');
       return 0;
     }
-    const lines = [...growthReport(result, { root: scan.root, base: scan.base }), '', allowed ? APPROVED_NOTE : OWNER_NOTE];
+    const lines = [...growthReport(result), '', allowed ? APPROVED_NOTE : OWNER_NOTE];
     if (env.GITHUB_ACTIONS === 'true') lines.push(...result.growth.map(item => annotation(allowed ? 'warning' : 'error', item, result.limit)));
     stdout.write(lines.join('\n') + '\n');
     return allowed ? 0 : 1;

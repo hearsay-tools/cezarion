@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Home } from './home.ts';
+import { prepareOperatorHome } from './entry.ts';
+import { Home, kindHomePaths } from './home.ts';
+import { nativePathPlatform, oneRootKinds } from './kind-roots.ts';
 import { createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { accountProtectedRoots, insideRoot, protectedRootsFor } from './protected-roots.ts';
 
@@ -76,23 +78,15 @@ it('keeps live and dev marker creation at an account root unchanged outside test
   expect(createInstallMarker(dev, 'dev').kind).toBe('dev');
 });
 
-it('switch-on migration from a legacy test marker to an absent target writes a live marker in a plain process', async () => {
-  vi.resetModules();
-  vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: true }));
-  try {
-    const { prepareOperatorHome } = await import('./entry.ts');
-    const switched = await import('./home.ts');
-    const { nativePathPlatform, oneRootKinds } = await import('./kind-roots.ts');
-    const markers = await import('./install-marker.ts');
-    const legacy = switched.Home.sandbox(join(fixture, 'legacy'), { layout: 'legacy' });
-    switched.Home.seed(legacy, legacy.workspaceConfig, { projects: [] });
-    const targetRoot = join(fixture, 'new');
-    const target = switched.kindHomePaths(oneRootKinds(targetRoot, nativePathPlatform), 'split', nativePathPlatform, targetRoot);
-    expect(markers.readInstallMarker(legacy.root)?.kind).toBe('test');
-    expect(existsSync(targetRoot)).toBe(false);
-    expect(prepareOperatorHome(target, 'projects', { HOME: fixture, SHELL: '/bin/bash' }, { legacy })).toBe(target);
-    expect(markers.readInstallMarker(target.config)).toMatchObject({ kind: 'live', state: 'committed' });
-  } finally { vi.doUnmock('./switch.ts'); vi.resetModules(); }
+it('migration from a legacy test marker to an absent target writes a live marker in a plain process', () => {
+  const legacy = Home.sandbox(join(fixture, 'legacy'), { layout: 'legacy' });
+  Home.seed(legacy, legacy.workspaceConfig, { projects: [] });
+  const targetRoot = join(fixture, 'new');
+  const target = kindHomePaths(oneRootKinds(targetRoot, nativePathPlatform), 'split', nativePathPlatform, targetRoot);
+  expect(readInstallMarker(legacy.root)?.kind).toBe('test');
+  expect(existsSync(targetRoot)).toBe(false);
+  expect(prepareOperatorHome(target, 'projects', { HOME: fixture, SHELL: '/bin/bash' }, { legacy })).toBe(target);
+  expect(readInstallMarker(target.config)).toMatchObject({ kind: 'live', state: 'committed' });
 });
 
 it('the before-build marker script keeps the same account roots as the product guard', async () => {

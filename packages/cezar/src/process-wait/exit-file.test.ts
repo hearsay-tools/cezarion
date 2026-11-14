@@ -41,6 +41,8 @@ describe('readExitCode', () => {
 
   it('reads an integer first line and nothing else', () => {
     expect(readExitCode(join(tmpDir, 'none.exit'), { worktree, tmpDir })).toEqual({ present: false });
+    // A shell creates the file before it writes the code: empty is not written yet.
+    expect(readExitCode(at('empty.exit', ''), { worktree, tmpDir })).toEqual({ present: false });
     expect(readExitCode(at('ok.exit', '0\n'), { worktree, tmpDir })).toEqual({ present: true, exitCode: 0 });
     expect(readExitCode(at('kill.exit', '137'), { worktree, tmpDir })).toEqual({ present: true, exitCode: 137 });
     expect(readExitCode(at('neg.exit', ' -1 \nmore'), { worktree, tmpDir })).toEqual({ present: true, exitCode: -1 });
@@ -50,7 +52,6 @@ describe('readExitCode', () => {
     expect(readExitCode(at('text.exit', 'hello\n'), { worktree, tmpDir })).toEqual({ present: true });
     expect(readExitCode(at('big.exit', '9'.repeat(10 * 1024 * 1024)), { worktree, tmpDir })).toEqual({ present: true });
     expect(readExitCode(at('wide.exit', '99999999999\n'), { worktree, tmpDir })).toEqual({ present: true });
-    expect(readExitCode(at('empty.exit', ''), { worktree, tmpDir })).toEqual({ present: true });
   });
 
   // A FIFO with no writer blocks a plain open, and the reader runs on the server's event loop.

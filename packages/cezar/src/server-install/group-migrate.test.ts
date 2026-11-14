@@ -83,7 +83,7 @@ describe('server-migrate group', () => {
       if (seen.length || readInstallMarker(f.target.config)?.state !== 'pending') return;
       let write = 'accepted';
       try { new HomeStore(f.target).writeJson(f.target.workspaceConfig, { lost: true }); } catch (error) { write = (error as Error).message; }
-      seen.push({ write, readOnlyBoot: prepareMigrationHome(f.target, f.env, { enabled: true, legacy: f.legacy }).kind === 'staged' });
+      seen.push({ write, readOnlyBoot: prepareMigrationHome(f.target, f.env, { legacy: f.legacy }).kind === 'staged' });
     };
     await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
     expect(seen).toEqual([{ write: expect.stringMatching(/pending migration home/), readOnlyBoot: true }]);

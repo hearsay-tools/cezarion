@@ -50,22 +50,23 @@ let usageWrites: {
 
 /** Accounting state has one writer; every public property is a live read view. */
 export class UsageGroup {
-  #reportedClaudeCost: Map<string, number> | undefined;
+  #cumulativeSessionCost: Map<string, number> | undefined;
   #costView: ReadonlyMapView<string, number> | undefined;
   #usageInvocation: UsageInvocation | undefined;
   constructor() { Object.freeze(this); }
-  /** Last cumulative Claude report per provider session during this process. */
-  get reportedClaudeCost(): ReadonlyMap<string, number> | undefined { return this.#costView; }
+  /** Last cumulative cost report per provider session during this process, for every runner
+   *  whose declared `costReport` is `cumulative`. */
+  get cumulativeSessionCost(): ReadonlyMap<string, number> | undefined { return this.#costView; }
   get usageInvocation(): UsageInvocation | undefined { return this.#usageInvocation; }
   static {
     usageWrites = {
       begin(group, stepId, epoch) { group.#usageInvocation = new UsageInvocation(stepId, epoch); },
       costs(group) {
-        if (!group.#reportedClaudeCost) {
-          group.#reportedClaudeCost = new Map();
-          group.#costView = new ReadonlyMapView(group.#reportedClaudeCost);
+        if (!group.#cumulativeSessionCost) {
+          group.#cumulativeSessionCost = new Map();
+          group.#costView = new ReadonlyMapView(group.#cumulativeSessionCost);
         }
-        return group.#reportedClaudeCost;
+        return group.#cumulativeSessionCost;
       },
     };
   }

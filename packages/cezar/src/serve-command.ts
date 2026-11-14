@@ -129,7 +129,7 @@ export async function serveCommand(
   // registry answers and /api/v1/health reports it as `latestVersion`.
   const pkgName = deps.readOwnName();
   const update: { latest?: string } = {};
-  void deps.checkForUpdate(pkgName, version).then((latest) => {
+  void deps.checkForUpdate(version).then((latest) => {
     if (!latest) return;
     update.latest = latest;
     deps.console.log(`\n  ⬆ ${productName('cezar')} ${latest} is available (running ${version}) — restart with: ${restartCommand(pkgName)}\n`);

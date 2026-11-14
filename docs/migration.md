@@ -1,9 +1,8 @@
 # Move from Cezarion to Squawk
 
 Squawk uses the `hsq` command and the npm package `@hearsay-tools/squawk`.
-This guide describes the release with `REBRAND_SWITCH` enabled. It does not
-instruct you to change that internal switch. Release operators must follow the
-[publishing runbook](publishing.md).
+This guide describes the rebrand release (v0.18.0) and later. Release operators
+must follow the [publishing runbook](publishing.md).
 
 ## Release notes
 
@@ -46,7 +45,7 @@ names and the `CEZ_*` fallbacks go, except `CEZ_HOME`. Boot still logs any
 
 ### Release steps for the owner
 
-The switch PR merges first. Then the owner:
+The rebrand release PR merges first. Then the owner:
 
 1. before the stable release, runs `hsq server-migrate --dry-run` on a Mac that
    has a `macosx-ngrok` server install and checks the plan (the macOS path is

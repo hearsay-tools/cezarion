@@ -52,14 +52,14 @@ for (const [name, mutate] of Object.entries({
 function archiveFixture(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-snapshot-'));
   const artifacts = path.join(dir, 'artifacts'); fs.mkdirSync(artifacts);
-  const manifests = { cezar: { name: '@scope/service' }, alias: { name: 'alias' } };
+  const manifests = { cezar: { name: '@scope/service' }, peer: { name: 'peer' } };
   const plan = { pr: 7, runNumber: 15, attempt: 1 };
   function pack(key, patch = {}) {
     const root = path.join(dir, key); fs.mkdirSync(path.join(root, 'package'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'package/package.json'), JSON.stringify({ name: manifests[key].name, version: '1.2.3-pr7.15', ...(key === 'alias' ? { dependencies: { '@scope/service': '1.2.3-pr7.15' } } : {}), ...patch }));
+    fs.writeFileSync(path.join(root, 'package/package.json'), JSON.stringify({ name: manifests[key].name, version: '1.2.3-pr7.15', ...(key === 'peer' ? { dependencies: { '@scope/service': '1.2.3-pr7.15' } } : {}), ...patch }));
     execFileSync('tar', ['-czf', path.join(artifacts, `${key}.tgz`), '-C', root, 'package']);
   }
-  try { pack('cezar'); pack('alias'); fn({ artifacts, manifests, plan, pack, dir }); }
+  try { pack('cezar'); pack('peer'); fn({ artifacts, manifests, plan, pack, dir }); }
   finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('publishes validated archives only, with lifecycle scripts disabled and fixed registry/tag', () => archiveFixture(f => {
@@ -77,9 +77,9 @@ test('publishes validated archives only, with lifecycle scripts disabled and fix
     assert.notEqual(call.options.cwd, f.artifacts);
   }
 }));
-for (const [name, patch] of Object.entries({ wrongName: { name: 'unrelated' }, stable: { version: '1.2.3' }, wrongPr: { version: '1.2.3-pr8.15' }, wrongRun: { version: '1.2.3-pr7.14' }, registry: { publishConfig: { registry: 'https://evil.invalid' } }, tag: { publishConfig: { tag: 'latest' } }, missingPin: { dependencies: {} } })) {
+for (const [name, patch] of Object.entries({ wrongName: { name: 'unrelated' }, stable: { version: '1.2.3' }, wrongPr: { version: '1.2.3-pr8.15' }, wrongRun: { version: '1.2.3-pr7.14' }, registry: { publishConfig: { registry: 'https://evil.invalid' } }, tag: { publishConfig: { tag: 'latest' } }, rangePin: { dependencies: { '@scope/service': '^1.2.3-pr7.15' } } })) {
   test(`archives reject ${name}`, () => archiveFixture(f => {
-    f.pack('alias', patch);
+    f.pack('peer', patch);
     assert.throws(() => validateArchives(f));
   }));
 }
@@ -87,7 +87,7 @@ test('archives reject extra or missing packages', () => archiveFixture(f => {
   fs.writeFileSync(path.join(f.artifacts, 'extra.tgz'), 'x');
   assert.throws(() => validateArchives(f));
   fs.unlinkSync(path.join(f.artifacts, 'extra.tgz'));
-  fs.unlinkSync(path.join(f.artifacts, 'alias.tgz'));
+  fs.unlinkSync(path.join(f.artifacts, 'peer.tgz'));
   assert.throws(() => validateArchives(f));
 }));
 
@@ -116,7 +116,7 @@ test('real npm dry-run accepts the archives and never runs hostile lifecycle scr
   let count = 0;
   publishArchives({ entries, plan: f.plan, dryRun: true, execute: (cmd, args, options) => {
     const result = execFileSync(cmd, args, { ...options, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 });
-    assert.match(result, /\+ (@scope\/service|alias)@1\.2\.3-pr7\.15/);
+    assert.match(result, /\+ (@scope\/service|peer)@1\.2\.3-pr7\.15/);
     count++;
   } });
   assert.equal(count, 2);
@@ -172,10 +172,8 @@ test('publisher supplies npm only a freshly repacked archive, never the untruste
   } });
 }));
 
-test('the preview comment runs the alias, or the scoped package when npm has no alias', () => {
+test('the preview comment runs the scoped package: npm has no `hsq` alias', () => {
   const version = '1.2.3-pr7.9';
-  assert.deepEqual(previewCommand([{ key: 'cezar', pkg: { name: '@wjarka/cezarion', version } },
-    { key: 'alias', pkg: { name: 'cezarion', version } }], 7), { version, run: `npx cezarion@${version}`, tag: 'cezarion@pr-7' });
   assert.deepEqual(previewCommand([{ key: 'cezar', pkg: { name: '@hearsay-tools/squawk', version } },
     { key: 'legacyAlias', pkg: { name: 'cezarion', version } }], 7),
   { version, run: `npx -p @hearsay-tools/squawk@${version} hsq`, tag: '@hearsay-tools/squawk@pr-7' });

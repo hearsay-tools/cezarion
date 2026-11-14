@@ -74,9 +74,45 @@ function runNpm(args, { quiet = false, timeout } = {}) {
   });
 }
 
+// npm's own wording, without its `npm error` prefix: a progress line must not read as the
+// failure to .github/scripts/failure-diagnostics.cjs, which files the first such line.
 function reason(error) {
   const line = `${error.stderr ?? ''}`.split(/\r?\n/).find(text => /\S/.test(text) && !text.startsWith('npm error code '));
-  return (line ?? error.message.split('\n')[0]).trim();
+  return quoted(line ?? describe(error));
+}
+
+// The CI failure filer (.github/scripts/failure-diagnostics.cjs) strips ANSI codes, then files
+// the first `FAIL <test file>`, `<Name>Error:`, `npm error `/`npm ERR! ` or `##[error]` line.
+const ANSI = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g;
+
+// Child output the smoke logs, written so that none of those selectors matches it anywhere in
+// the line: npm's leading level prefixes dropped, and each remaining trigger defused.
+function quoted(text) {
+  return `${text}`.replace(ANSI, '').trim()
+    .replace(/^(?:npm (?:error|ERR!|warn|notice) +)+/, '')
+    .replace(/npm (error|ERR!) /g, 'npm $1: ')
+    .replace(/\b(\w*Error):/g, '$1 -')
+    .replace(/##\[/g, '## [')
+    .replace(/\bFAIL\b/g, 'Fail');
+}
+
+function relay(output, log) {
+  for (const line of `${output ?? ''}`.split(/\r?\n/)) if (/\S/.test(line)) log(`release-smoke: npm: ${quoted(line)}`);
+}
+
+// A child process error from execFileSync reads `Command failed: <command>`, which the filer
+// skips as a wrapper line; name the command and how it ended instead.
+function describe(error) {
+  const first = error.message.split('\n')[0];
+  const command = /^Command failed: (.+)$/.exec(first)?.[1];
+  if (!command) return first;
+  if (error.signal) return `${command} ended with signal ${error.signal}`;
+  return Number.isInteger(error.status) ? `${command} ended with code ${error.status}` : `${command} did not complete`;
+}
+
+// The line a failed smoke ends on, in the `Error:` form the CI failure filer reads as the cause.
+export function failureLine(error) {
+  return `release-smoke: Error: ${describe(error)}`;
 }
 
 // Each attempt may run for what is left of `waitMs`, and at least one poll interval, so a
@@ -105,8 +141,16 @@ export async function registryInstall(prefix, spec, { exec = runNpm, now = Date.
     if (shown !== version) throw new Error(`npm view printed "${shown}"`);
   }, PUBLISH_WAIT_MS, clock);
   log(`release-smoke: the registry serves ${spec}.`);
-  await untilDeadline(`${spec} did not install`, (timeout) => exec(
-    ['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { timeout }), INSTALL_WAIT_MS, clock);
+  // npm's own output goes through `relay`, so a failed attempt cannot become the filed cause.
+  await untilDeadline(`${spec} did not install`, (timeout) => {
+    try {
+      relay(exec(['install', '--prefer-online', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', spec], { quiet: true, timeout }), log);
+    } catch (error) {
+      relay(error.stdout, log);
+      relay(error.stderr, log);
+      throw error;
+    }
+  }, INSTALL_WAIT_MS, clock);
 }
 
 function binary(prefix, name) {
@@ -244,7 +288,7 @@ export async function run({ name, version, upgradeFrom }, { install = registryIn
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   run(parseArgs(process.argv.slice(2))).catch(error => {
-    console.error(`release-smoke: ${error.message}`);
+    console.error(failureLine(error));
     process.exitCode = 1;
   });
 }

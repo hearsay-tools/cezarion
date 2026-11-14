@@ -61,6 +61,7 @@ import { HandoffAction, useHandoffActionVisible } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
 import { archiveInComposer, resumeHint, runActionFlags } from './run-actions'
+import { useWorkersLive } from './run-relationships'
 import { CompactParentTaskLink, ParentTaskLink } from './parent-task-link'
 
 /**
@@ -183,10 +184,11 @@ function WorkerParentLink({ run, compact = false }: { run: ApiRun; compact?: boo
  *  thumb's reach, which this header is not on a phone, where it scrolls away by
  *  design. The three git tabs have no composer, so the header carries it there, and
  *  exactly one surface offers it on any given screen. Stop takes the composer's slot on a
- *  failed run holding wait results (hearsay-tools/cezarion#1233), so the header carries
+ *  failed run holding wait results (hearsay-tools/cezarion#1233) or live workers
+ *  (hearsay-tools/squawk#3360), so the header carries
  *  Archive on the Session tab too. */
-function headerArchiveButton(run: ApiRun, flags: ReturnType<typeof runActionFlags>, tab: RunTab) {
-  return !run.archiveBlocker && flags.archive && (tab !== 'session' || !archiveInComposer(run))
+function headerArchiveButton(run: ApiRun, flags: ReturnType<typeof runActionFlags>, tab: RunTab, workersLive: boolean) {
+  return !run.archiveBlocker && flags.archive && (tab !== 'session' || !archiveInComposer(run, workersLive))
     ? <ArchiveButton run={run} />
     : null
 }
@@ -318,6 +320,7 @@ export function RunHeader({
 }) {
   const attention = deriveAttention(run)
   const flags = runActionFlags(run)
+  const workersLive = useWorkersLive(run)
   const [notesOpen, setNotesOpen] = useState(false)
   const [openChooser, setOpenChooser] = useState(false)
   const actions = useRunActions(run, onMarkedUnread)
@@ -362,7 +365,7 @@ export function RunHeader({
     />
   )
 
-  const archiveButton = headerArchiveButton(run, flags, tab)
+  const archiveButton = headerArchiveButton(run, flags, tab, workersLive)
 
   return (
     <ReferenceStatusProvider projectId={referenceProjectId} repoBase={repoBase} requests={referenceRequests}>

@@ -1,4 +1,3 @@
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { homeRecoverySchema, type HomeRecovery } from '@open-mercato/cezar-contract/home-recovery';
 import { Home } from '../home/home.ts';
@@ -38,8 +37,8 @@ it('reads the cached metadata and sends restore and accept through the shared re
     expect(homeRecoverySchema.parse(await response.json())).toEqual({ files: [] });
   }
   expect(restoreHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
-  expect(acceptHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z', REBRAND_SWITCH);
-  expect(importHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z', REBRAND_SWITCH);
+  expect(acceptHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
+  expect(importHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
 });
 
 it('rejects path input before the service and surfaces recovery failures as conflicts', async () => {

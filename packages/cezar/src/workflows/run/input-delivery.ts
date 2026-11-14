@@ -244,7 +244,7 @@ export class InputDelivery {
   }
 
   sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean {
-    const delivered = this.deliverMessage(runId, content, true, messageId);
+    const delivered = this.deliverMessage(runId, content, messageId);
     if (delivered) {
       const state = this.host.active.get(runId);
       if (state) transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'monitoring-reset', session: state.liveSession.session });
@@ -546,7 +546,8 @@ export class InputDelivery {
     // A wake beside a pending question (`admitsAgentInput`) is not its answer: the question stays Squawk's and its card stays answerable, because only a human delivery settles it. The provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
     try { acknowledgement = state.inputState.writeInput(() => session.sendAgentMessage(content, inputIds)); }
     catch (error) { refund(); fail(error, false); state.inputState.clearFlight(); return false; }
-    if (!acknowledgement) { refund(); state.inputState.clearFlight(); return false; }
+    // A refused submission drops its flight, and its reservation with it.
+    if (!acknowledgement) { state.inputState.clearFlight(); return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
     flightWrites.settle(flight, acknowledgement.then(() => {
       // A positive command ACK can precede a provider-close frame in the same read batch. Closing the transport afterwards does not revoke that ACK; explicit stop/disposal/replacement still revoke authority via current().
@@ -697,67 +698,60 @@ export class InputDelivery {
     }
   }
 
-  /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
-   * bookkeeping without masquerading as user-authored transcript messages. */
-  deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean, messageId?: string): boolean {
+  /** A human message into the live session. */
+  private deliverMessage(runId: string, content: PastedContent[], messageId?: string): boolean {
     const state = this.host.active.get(runId);
     if (!state?.liveSession.session?.open || state.liveSession.cancelled || state.liveSession.pendingPermissions?.size) return false;
     const run = this.context.store.getRun(runId);
     if (!canProceedWithRun(run, () => this.host.workerExecutionStopped(runId), run => this.host.executionBlockedByRootFinish(run))) return false;
 
     // Squawk's fallback question on a worker never holds what the plain park it replaced let
-    // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301),
-    // and so does a human message, as a Continue does (hearsay-tools/cezarion#2410). A question the
-    // worker asked itself belongs to its parent, and a human message is refused.
+    // through: a human message supersedes it, as a Continue does (hearsay-tools/cezarion#2410). A
+    // question the worker asked itself belongs to its parent, and a human message is refused.
     this.host.workerQuestions.supersedeWorkerFallback(runId);
-    if (userAuthored && this.host.workerQuestions.answeredElsewhere(runId)) {
+    if (this.host.workerQuestions.answeredElsewhere(runId)) {
       this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: this.routedQuestionRefusal });
       return false;
     }
-    const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
+    const prepared = this.prepareMessageContent(runId, state, content);
     const { blocks, expanded, deliverable } = prepared;
     const session = state.liveSession.session;
-    const delivered = userAuthored ? state.inputState.writeInput(() => session.sendMessage(deliverable)) : this.host.submitAgentInput(runId, state, deliverable);
+    const delivered = state.inputState.writeInput(() => session.sendMessage(deliverable));
     if (delivered && expanded !== blocks) this.host.runSkills.provisionLiveSlashSkill(runId, state, blocks);
-    if (delivered) {
-      if (userAuthored) this.applyHumanMessageDelivery(runId, state, prepared, messageId);
-      else this.resumeParkedRun(runId, state);
-    }
+    if (delivered) this.applyHumanMessageDelivery(runId, state, prepared, messageId);
     return delivered;
   }
 
-  private prepareMessageContent(runId: string, state: ActiveRun, content: PastedContent[], userAuthored: boolean) {
+  private prepareMessageContent(runId: string, state: ActiveRun, content: PastedContent[]) {
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
     // Persist human attachments before the user-message event so the thread can render them.
-    const persisted = userAuthored ? this.host.attachments.persistPastedAttachments(runId, content) : [];
+    const persisted = this.host.attachments.persistPastedAttachments(runId, content);
     const images = persisted.map((saved) => saved.url);
-    if (userAuthored) {
-      this.context.store.appendEvent(runId, {
-        type: 'user-message',
-        stepId: state.liveSession.currentStepId,
-        text,
-        imageCount: content.filter((b) => b.type === 'image').length,
-        images,
-      });
-    }
+    this.context.store.appendEvent(runId, {
+      type: 'user-message',
+      stepId: state.liveSession.currentStepId,
+      text,
+      imageCount: content.filter((b) => b.type === 'image').length,
+      images,
+    });
 
     // Send paths beside image blocks: backends that drop images still receive usable files.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, this.host.runSkills.enabledSkills(state, undefined, 'live-input')) : blocks;
+    const expanded = expandRegistrySlashSkill(blocks, this.host.runSkills.enabledSkills(state, undefined, 'live-input'));
     const attached: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
-    const answeringAskSeq = userAuthored ? pendingHumanAskSeq(this.context.store, runId) : undefined;
+    const answeringAskSeq = pendingHumanAskSeq(this.context.store, runId);
     // An answer opening a turn carries held conversation messages after the answer.
-    const bundle = userAuthored && answeringAskSeq !== undefined && state.boundary.atTurnBoundary === state.liveSession.session
+    const bundle = answeringAskSeq !== undefined && state.boundary.atTurnBoundary === state.liveSession.session
       ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id))) : undefined;
     // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
-    const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => !WAIT_KINDS[wait.kind].userAnswers)) : undefined;
-    const deliverable = userAuthored ? [...attached, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
-      ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])] : attached;
+    const footer = openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => !WAIT_KINDS[wait.kind].userAnswers));
+    const deliverable = [...attached, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
+      ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])];
     return { blocks, expanded, deliverable, answeringAskSeq, bundle };
   }
 

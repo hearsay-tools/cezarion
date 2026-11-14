@@ -129,10 +129,10 @@ utils:
     any:
       - all:
           - { kind: member_expression }
-          - { has: { field: property, regex: ^(reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)$ } }
+          - { has: { field: property, regex: ^(cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)$ } }
       - all:
           - { kind: subscript_expression }
-          - has: { field: index, regex: "^[\"'](reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)[\"']$" }
+          - has: { field: index, regex: "^[\"'](cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)[\"']$" }
       - all:
           - { kind: member_expression }
           - { has: { field: property, regex: ^usage$ } }
@@ -164,7 +164,7 @@ utils:
       - inside:
           kind: program
           stopBy: end
-          regex: \.(usage|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)\b|\[\s*["'](usage|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)["']|\b(UsageGroup|UsageInvocation|ReadonlyMapView|ReadonlySetView|createUsageGroup|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)\b|[,{]\s*usage\b
+          regex: \.(usage|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)\b|\[\s*["'](usage|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)["']|\b(UsageGroup|UsageInvocation|ReadonlyMapView|ReadonlySetView|createUsageGroup|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)\b|[,{]\s*usage\b
       - { pattern: $GROUP_BOUND_REF }
       - inside:
           stopBy: { any: [ { kind: statement_block }, { kind: program } ] }
@@ -180,7 +180,7 @@ utils:
       - inside:
           kind: program
           stopBy: end
-          regex: \.(usage|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)\b|\[\s*["'](usage|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)["']|\b(UsageGroup|UsageInvocation|ReadonlyMapView|ReadonlySetView|createUsageGroup|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)\b|[,{]\s*usage\b
+          regex: \.(usage|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)\b|\[\s*["'](usage|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)["']|\b(UsageGroup|UsageInvocation|ReadonlyMapView|ReadonlySetView|createUsageGroup|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)\b|[,{]\s*usage\b
       - { pattern: $DESTRUCTURED_REF }
       - inside:
           stopBy: { any: [ { kind: statement_block }, { kind: program } ] }
@@ -194,12 +194,12 @@ utils:
                 any:
                   - all:
                       - { kind: pair_pattern }
-                      - { has: { field: key, regex: ^(usage|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)$ } }
+                      - { has: { field: key, regex: ^(usage|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)$ } }
                       - { has: { field: value, pattern: $DESTRUCTURED_REF } }
                   - all:
                       - { kind: shorthand_property_identifier_pattern }
                       - { pattern: $DESTRUCTURED_REF }
-                      - { regex: ^(usage|reportedClaudeCost|usageInvocation|startedTurns|recordedTurns)$ }
+                      - { regex: ^(usage|cumulativeSessionCost|usageInvocation|startedTurns|recordedTurns)$ }
             all: [ { has: { field: value, any: [ { matches: group-base-reference }, { matches: container-reference } ] } } ]
           any: [ { kind: statement_block }, { kind: program } ]
   group-reference:
@@ -227,11 +227,11 @@ utils:
           - kind: member_expression
             has:
               field: property
-              regex: ^(usage|reportedClaudeCost|usageInvocation|observed|epoch|stepId|startedTurns|recordedTurns|size)$
+              regex: ^(usage|cumulativeSessionCost|usageInvocation|observed|epoch|stepId|startedTurns|recordedTurns|size)$
           - kind: subscript_expression
             has:
               field: index
-              regex: ^["'](usage|reportedClaudeCost|usageInvocation|observed|epoch|stepId|startedTurns|recordedTurns|size)["']$
+              regex: ^["'](usage|cumulativeSessionCost|usageInvocation|observed|epoch|stepId|startedTurns|recordedTurns|size)["']$
       - { not: { has: { field: property, kind: private_property_identifier } } }
       - { not: { has: { stopBy: end, kind: private_property_identifier } } }
       - any:

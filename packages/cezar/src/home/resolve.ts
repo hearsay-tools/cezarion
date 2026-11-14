@@ -3,7 +3,6 @@ import { posix, win32 } from 'node:path';
 import { legacyHomeEnv, preferredHomeEnv } from '../core/product-env.ts';
 import { kindHomePaths, type Home } from './home.ts';
 import { HOME_LAYOUT_ENV, oneRootKinds, platformKindRoots, type HomeLayout } from './kind-roots.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 
 export interface ResolveHomeOptions {
   purpose: 'cli' | 'server';
@@ -13,7 +12,7 @@ export interface ResolveHomeOptions {
 }
 
 /** Resolve paths only. No filesystem reads, writes, markers or migrations. See ADR 0059. */
-export function resolveHome({ env = process.env, layout = REBRAND_SWITCH ? 'split' : 'legacy',
+export function resolveHome({ env = process.env, layout = 'split',
   platform = process.platform }: ResolveHomeOptions): Home {
   const legacyHome = legacyHomeEnv(env);
   const preferredHome = preferredHomeEnv(env);

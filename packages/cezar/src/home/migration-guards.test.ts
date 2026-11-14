@@ -4,14 +4,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { HomeStore } from './store.ts';
 import { migrateLegacyHome } from './migrate.ts';
 import { prepareOperatorHome } from './entry.ts';
-import { prepareMigrationHome } from './migration-boot.ts';
 import { readInstallMarker } from './install-marker.ts';
 import { readMigrationRecord } from './migration-record.ts';
 import { runMigrationCommand } from './migration-cli.ts';
-import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { migrationFixture, rawJson, json } from './migration.testkit.ts';
 import { cleanStoreRoots } from './store.testkit.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 import * as writeLock from './write-lock.ts';
 import { migrationFiles } from './migration-files.ts';
 import { Home } from './home.ts';
@@ -69,24 +66,10 @@ it('nested writes reuse the fast migration stat and still check each locked muta
   expect(json(legacy.workspaceConfig).saved).toBe('second');
 });
 
-it('with the default switch off, boot leaves legacy unchanged, migrates nothing, and does not register migrate', async () => {
-  const { legacy, target, env } = migrationFixture();
-  expect(REBRAND_SWITCH).toBe(false);
-  const bytes = readFileSync(legacy.workspaceConfig);
-  expect(prepareMigrationHome(target, env, { legacy })).toEqual({ kind: 'ready' });
-  prepareOperatorHome(legacy, 'serve', env);
-  expect(readFileSync(legacy.workspaceConfig)).toEqual(bytes);
-  expect(readMigrationRecord(target)).toBeUndefined();
-  expect(existsSync(target.workspaceConfig)).toBe(false);
-  expect(SUBCOMMAND_NAMES).not.toContain('migrate');
-  expect(await loadSubcommand('migrate')).toBeUndefined();
-  expect(await loadSubcommand('migrate', () => target, true)).toBeTypeOf('function');
-});
-
 it('a cockpit refuses to start on .migrating before registry preparation', () => {
   const { legacy, target, env } = migrationFixture();
   rawJson(join(legacy.root, '.migrating'), { pid: process.pid });
-  expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toThrow(/migration in progress/);
+  expect(() => prepareOperatorHome(target, 'serve', env, { legacy })).toThrow(/migration in progress/);
   expect(readInstallMarker(target.config)?.state).toBeUndefined();
   expect(existsSync(target.workspaceConfig)).toBe(false);
 });
@@ -96,7 +79,7 @@ it('D2: boot reclaims a dead migration holder and rebuilds its crashed pending c
   migrateLegacyHome(legacy, target, { commit: false });
   rawJson(target.workspaceConfig, { crashed: true });
   rawJson(join(legacy.root, '.migrating'), { pid: process.pid, startToken: 'dead-process-incarnation' });
-  prepareOperatorHome(target, 'serve', env, { enabled: true, legacy });
+  prepareOperatorHome(target, 'serve', env, { legacy });
   expect(readInstallMarker(target.config)?.state).toBe('committed');
   expect(json(target.workspaceConfig).saved).toBe('original');
   expect(existsSync(join(legacy.root, '.migrating'))).toBe(false);
@@ -162,7 +145,7 @@ it('D3: a normal read rechecks pending under its lock without probing .migrating
 it('boot refuses a migration error and never seeds a fresh home over nonempty legacy data', () => {
   const { legacy, target, env } = migrationFixture();
   rawJson(legacy.workspaceConfig, { outside: true });
-  expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toThrow(/Resolve home recovery/);
+  expect(() => prepareOperatorHome(target, 'serve', env, { legacy })).toThrow(/Resolve home recovery/);
   expect(existsSync(target.workspaceConfig)).toBe(false);
 });
 
@@ -178,7 +161,7 @@ it.each(['recovery', 'copy', 'recheck'] as const)('D6: a handled %s failure is n
   expect(existsSync(join(legacy.root, '.migrating'))).toBe(false);
   if (failure === 'recovery') acceptHomeRecovery(legacy, 'config.json');
   if (failure === 'copy') rawJson(invalid, { fixed: true });
-  expect(prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toBe(target);
+  expect(prepareOperatorHome(target, 'serve', env, { legacy })).toBe(target);
   expect(readInstallMarker(target.config)?.state).toBe('committed');
   expect(readMigrationRecord(target)?.stagedAt).toBeUndefined();
   expect(existsSync(join(legacy.root, 'MOVED.json'))).toBe(true);
@@ -190,7 +173,7 @@ it('boot serves a pending home read-only without running migration or seeding mi
   const head = join(target.config, '.versions/config.json/HEAD');
   rmSync(head);
   rawJson(legacy.workspaceConfig, { changedWhilePending: true });
-  prepareOperatorHome(target, 'serve', env, { enabled: true, legacy });
+  prepareOperatorHome(target, 'serve', env, { legacy });
   expect(new HomeStore(target).outsideWrite(target.workspaceConfig)).toBeUndefined();
   expect(existsSync(head)).toBe(false);
   expect(json(target.workspaceConfig).saved).toBe('original');
@@ -219,6 +202,3 @@ it('the migration command provides help without resolving homes and reports inva
   expect(await runMigrationCommand(['--bad-flag'], {})).toBe(1);
   expect(error).toHaveBeenCalledWith(expect.stringContaining('migration failed'));
 });
-
-// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
-vi.mock('./switch.ts', () => ({ REBRAND_SWITCH: false }));

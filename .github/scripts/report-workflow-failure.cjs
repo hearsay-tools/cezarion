@@ -93,6 +93,11 @@ function failedStepsFor(job) {
   if(!steps.length) steps.push({number:0,name:'Job failed before a step was recorded',started_at:job.started_at,completed_at:job.completed_at});
   return steps;
 }
+// A gate step ("Require every verification job") fails when a job it needs failed, and
+// that job carries the cause. A gate job reports only when no other job failed, or when
+// an earlier reporter recorded it, so a replay keeps its summary.
+const isGate=job=>failedStepsFor(job).every(step=>/^Require every\b/.test(step.name));
+const mirrorsOthers=(job,failed)=>isGate(job) && failed.some(other=>!isGate(other));
 async function reportFailedJobs({github,base,fetchImpl,run,writer,failed,log}) {
   let reported=0;
   const reports=[];
@@ -105,7 +110,7 @@ async function reportFailedJobs({github,base,fetchImpl,run,writer,failed,log}) {
     for(const step of steps) {
       if(!Number.isSafeInteger(step.number) || step.number<0) throw new Error('Invalid failed step');
       const causes=causesForStep({run,job,step,log:jobLog});
-      const results=await writer.reportStep({run,job,step,causes});
+      const results=await writer.reportStep({run,job,step,causes,onlyRecorded:mirrorsOthers(job,failed)});
       reported+=results.filter(result=>result.reported).length;
       reports.push(...results.map(result=>result.issue));
     }
@@ -133,7 +138,7 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
   const writer=await createFailureWriter({github,owner,repo,log,since:run.created_at});
   const {reported,reports}=await reportFailedJobs({github,base,fetchImpl,run,writer,failed,log});
   if(!reports.length) {
-    log(`Run ${run.id} attempt ${run.run_attempt} failed only for transient causes; nothing to report.`);
+    log(`Run ${run.id} attempt ${run.run_attempt} failed only for transient causes or refusals; nothing to report.`);
   } else if(run.name==='CI') {
     await routeMainCiSummary({github,owner,repo,run,issues:writer.issues,reports});
   }

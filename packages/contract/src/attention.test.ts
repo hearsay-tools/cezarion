@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, attentionOfRung, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, workersWaitingLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
+import { runStatusSchema } from './run-status.ts';
 import type { RunStatus } from './runs.ts';
 import {
   makePeerWait,
@@ -32,7 +33,7 @@ const humanWait = (shown = false) => ({
 }) as unknown as NonNullable<AttentionInput['waits']>[number];
 
 /** Every `RunStatus`, spelled out: a new status must get an explicit answer, not the chain's last `return`. */
-const ALL_STATUSES: readonly RunStatus[] = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'];
+const ALL_STATUSES: readonly RunStatus[] = runStatusSchema.options;
 
 describe('ATTENTION_RANK', () => {
   it('is the spec ladder: permission > error > waiting > running > unseen > none', () => {

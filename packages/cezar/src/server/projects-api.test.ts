@@ -353,6 +353,20 @@ describe('workspace projects API', () => {
       expect((await getProjects()).projects).toEqual([]);
     });
 
+    it('on Windows, takes a drive-letter path as absolute (hearsay-tools/squawk#3493)', async () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+      try {
+        // This Linux host has no such folder, so the request passes the absolute-path check and
+        // stops at the existence check.
+        const { status, body } = await post({ root: 'C:\\Users\\dev\\repo' });
+        expect(status).toBe(400);
+        expect(body.error).toBe('no such folder: C:\\Users\\dev\\repo');
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+    });
+
     it('refuses $HOME itself — the dialog starts there and could otherwise add it', async () => {
       const { status, body } = await post({ root: '~' });
       expect(status).toBe(400);

@@ -15,7 +15,7 @@ const REQUIRED_MOCKS = new Set(Object.values(RUNNER_MOCKS).map(name => `packages
 
 const SHARED = ['agent-echo', 'autonomous', 'cezar-ask', 'cezar-done', 'cezar-tool', 'ci-wait',
   'crash-stderr', 'deferred-turn-start', 'hold', 'multi-pr-refs', 'no-progress', 'gate-prompt-ack',
-  'silent-tail', 'tool-tail', 'turn-messages', 'ack-only', 'busy-progress', 'provider-error',
+  'silent-tail', 'turn-messages', 'ack-only', 'busy-progress', 'provider-error',
   'resume-cezar-done', 'steer-tool', 'steer-late', 'subagent-after-park', 'cezar-wait'];
 const TOKEN = /mock:([a-z0-9-]+)/g;
 const NATIVE_TOKENS = new Set([

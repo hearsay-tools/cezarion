@@ -13,6 +13,7 @@ import { runnersUnderTest } from '../core/runners-under-test.testkit.ts';
  * The helpers that need no fixture live in `worker-wait-timeline.testkit.ts`; this module re-exports them.
  */
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
+import { ABSENT_PROCESS_PID } from '../delegation/process-enumeration.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -170,23 +171,30 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
   }, 30_000);
 }
 /** `replay` echoes each consumed line as the real CLI's `--replay-user-messages` does, so a human
- *  follow-up stops counting as held once its turn reads it. */
+ *  follow-up stops counting as held once its turn reads it. `inputs()` lists when each wire process
+ *  started and each stdin line it read, for a wait's explanation: it tells a session that started
+ *  late from one that never read its input (hearsay-tools/squawk#2535). */
 const MOCK_CI_TOOL = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'mock-ci-tool.mjs')).href;
 export function controlledWire(options: { firstResultGate?: string; humanAnswerGate?: string; replay?: boolean } = {}) {
   const wire = join(root, 'controlled-claude.cjs'); const received = join(root, 'human-answer-received.ndjson'); const initial = join(root, 'first-input-received');
+  const inputLog = join(root, 'wire-inputs.ndjson');
   writeFileSync(wire, String.raw`#!/usr/bin/env node
 const fs = require('node:fs'); const rl = require('node:readline').createInterface({ input: process.stdin });
 const emit = value => console.log(JSON.stringify(value)); let first = true; let queue = Promise.resolve();
 const options = ${JSON.stringify(options)}; const received = ${JSON.stringify(received)};
+const log = (event, text = '') => fs.appendFileSync(${JSON.stringify(inputLog)}, JSON.stringify({ at: new Date().toISOString(), pid: process.pid, task: process.env.HSQ_TASK_ID ?? process.env.CEZ_TASK_ID, event, text: text.replace(/\s+/g, ' ').slice(-80) }) + '\n');
+log('start');
 const wait = async path => { while (path && !fs.existsSync(path)) await new Promise(resolve => setTimeout(resolve, 5)); };
 const args = process.argv.slice(2); const sessionIndex = args.indexOf('--session-id');
 emit({ type: 'system', subtype: 'init', session_id: sessionIndex >= 0 ? args[sessionIndex + 1] : 'controlled-session' });
-rl.on('line', line => { queue = queue.then(async () => {
+rl.on('line', line => {
 const message = JSON.parse(line); const content = message.message?.content ?? [];
 const text = typeof content === 'string' ? content : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+// Logged on arrival, before the queue: a line that waits behind a gated one is still listed as read.
+const humanAnswer = text.includes('human answer mock:hold'); log(humanAnswer ? 'human-answer' : 'line', text);
+queue = queue.then(async () => {
 if (options.replay && message.uuid) emit({ type: 'user', isReplay: true, uuid: message.uuid, message: message.message });
 if (first) { first = false; fs.writeFileSync(${JSON.stringify(initial)}, 'received'); await wait(options.firstResultGate); }
-const humanAnswer = text.includes('human answer mock:hold');
 if (humanAnswer && options.humanAnswerGate) { fs.appendFileSync(received, JSON.stringify({ text }) + '\n'); await wait(options.humanAnswerGate); }
 // hearsay-tools/cezarion#2397: the lifecycle scenarios call the Squawk tool through the session's
 // MCP config with the native mocks' own client, then end the turn.
@@ -202,7 +210,11 @@ emit({ type: 'result', subtype: 'success', result: reply, usage: { input_tokens:
 rl.on('close', () => process.exit(0));
 `); chmodSync(wire, 0o755);
   process.env.CEZ_DRY_RUN = '0'; process.env.CEZ_CLAUDE_BIN = wire;
-  return { initialReceived: () => existsSync(initial), received: () => existsSync(received) ? readFileSync(received, 'utf8').trim().split('\n').length : 0 };
+  return { initialReceived: () => existsSync(initial), received: () => existsSync(received) ? readFileSync(received, 'utf8').trim().split('\n').length : 0,
+    inputs: () => existsSync(inputLog) ? readFileSync(inputLog, 'utf8').trim().split('\n').map(line => {
+      const entry = JSON.parse(line) as { at: string; pid: number; task?: string; event: string; text: string };
+      return `  ${entry.at.slice(11, 23)} pid=${entry.pid} task=${entry.task ?? '-'} ${entry.event}${entry.text ? ` …${JSON.stringify(entry.text)}` : ''}`;
+    }).join('\n') : '  (no wire process started)' };
 }
 
 async function startParent(task: string, runner: RunnerId, permissions: WorkerOperation[]) {
@@ -273,24 +285,39 @@ export function spendWorkerBudget(id: string) {
 export function register(parentId: string, ids: string[], seconds = 600) {
   return manager.registerWorkerWait(parentId, workerWaitRequestSchema.parse({ workerIds: ids, timeoutSeconds: seconds }));
 }
-/** Event logs as they stand now: `restart` writes them back, so nothing its own shutdown
- * appended survives, as after a real crash. */
+function runFiles(suffix: string): Map<string, string> {
+  const dir = join(root, '.ai/cezar/runs');
+  return new Map(readdirSync(dir).filter(name => name.endsWith(suffix)).map(name => [join(dir, name), readFileSync(join(dir, name), 'utf8')]));
+}
+/** Event logs (`<id>.ndjson`) as they stand now, for `restart`'s `events`. */
 export function eventCheckpoint(): Map<string, string> {
   store.flush();
-  const dir = join(root, '.ai/cezar/runs');
-  return new Map(readdirSync(dir).filter(name => name.endsWith('.ndjson')).map(name => [join(dir, name), readFileSync(join(dir, name), 'utf8')]));
+  return runFiles('.ndjson');
 }
-/** Stop everything, put the persisted runs back to `diskCheckpoint` (or to what they were when
- * this was called), and recover in a fresh store, as after a real crash. */
-export async function restart(fakeClock = false, diskCheckpoint?: readonly unknown[], events?: Map<string, string>) {
+/** Stop everything and recover in a fresh store, as after `serve` stopped. The stop cancels every run;
+ * `restart` then puts back:
+ * - the persisted runs, to `diskCheckpoint` or to what they were when this was called;
+ * - each worker's execution record (`runs/<id>.execution.json`), to what it was when this was called;
+ * - each worker's process record (`runs/<id>.processes.json`), to what it was when this was called,
+ *   with an absent controller PID: the stopped `serve` process is gone. With `liveController`, the
+ *   record keeps this process as its controller, so recovery treats the execution as its own;
+ * - each file in `events` (usually from `eventCheckpoint`), to its given content.
+ * Every other file stays as the stop wrote it, the event logs too when `events` is not given. */
+export async function restart(fakeClock = false, diskCheckpoint?: readonly unknown[], events?: Map<string, string>, { liveController = false } = {}) {
   checkpoint('restart-stop-start');
   store.flush(); const disk = diskCheckpoint ?? readPersistedRuns(join(root, '.ai/cezar'));
+  const workerRecords = [...runFiles('.execution.json'), ...[...runFiles('.processes.json')].map(([path, content]) => {
+    if (liveController) return [path, content] as const;
+    const record = JSON.parse(content) as { controller: object };
+    return [path, JSON.stringify({ ...record, controller: { ...record.controller, pid: ABSENT_PROCESS_PID } })] as const;
+  })];
   for (const id of store.listRunIds()) manager.cancel(id);
   await until(() => store.listRunIds().every(id => !manager.isActive(id)));
   await Promise.all(executions.splice(0));
   await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.close(); checkpoint('restart-stopped');
   seedRuns(join(root, '.ai/cezar'), disk);
-  for (const [path, content] of events ?? []) writeFileSync(path, content);
+  // The store reads a worker record only when no other user can read or write it.
+  for (const [path, content] of [...workerRecords, ...events ?? []]) writeFileSync(path, content, { mode: 0o600 });
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   manager = new RunManager(store, root, { acquireCiResources: ciResources, createRunner: fixtureRunners, home: testHome(), semaphore, work }); track(); checkpoint('restart-recover-start');

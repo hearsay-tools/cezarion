@@ -34,11 +34,27 @@ test('different tests in one step remain distinct and repeated identical FAIL li
   assert.equal(causes.length,2);
   assert.notEqual(causes[0].signature, causes[1].signature);
 });
-test('missing or unrecognizable logs isolate uncertain failures by occurrence', () => {
-  const a = release(); a.log = '';
+// Each run of one unrecognized failure once filed its own issue (hearsay-tools/squawk#1447).
+test('an unrecognized failure keeps one signature per workflow, job and step across runs and shards', () => {
+  const a = release(); a.log = ''; a.job = {...a.job, name: 'Vitest shard 4/8'};
   const one = causesForStep(a)[0];
   assert.match(one.excerpt, /unavailable|recognizable/i);
-  assert.notEqual(one.signature, causesForStep({...a,run:{...a.run,id:999}})[0].signature);
+  assert.equal(one.signature, causesForStep({...a,run:{...a.run,id:999,run_attempt:2},job:{...a.job,id:7,name:'Vitest shard 2/8'},log:'exit 1'})[0].signature);
+  for (const other of [{step:{...a.step,name:'Run unit tests'}}, {job:{...a.job,name:'Dependency audit'}}, {run:{...a.run,name:'Nightly'}}]) {
+    assert.notEqual(one.signature, causesForStep({...a,...other})[0].signature);
+  }
+});
+// hearsay-tools/squawk#3335 filed the 24-hour limit of release-plan.cjs as a setup failure.
+test('a release-plan refusal in the Release workflow is no cause; other lines and workflows still are', () => {
+  const a = release();
+  a.step = {...a.step, name:'Plan the release', started_at:'2026-09-10T11:50:00Z', completed_at:'2026-09-10T11:50:01Z'};
+  const at = line => ({...a, log: `${fixture.log}\n2026-09-10T11:50:00Z ${line}`});
+  for (const line of ['Error: Release refused: the last stable release was published 2026-11-11T18:15:31.289Z.', 'Error: Release refused:', 'Error: Promotion refused:', 'Error: Staging refused: the candidate commit publishes x']) {
+    assert.deepEqual(causesForStep(at(line)), [], line);
+  }
+  assert.deepEqual(causesForStep(at('##[error]API rate limit exceeded for installation.\nError: Release refused:')), []);
+  assert.equal(causesForStep(at('Error: connect: connection refused'))[0].failureIdentity, 'Error: connect: connection refused');
+  assert.match(causesForStep({...at('Error: Release refused:'), run: {...a.run, name: 'Nightly'}})[0].failureIdentity, /Release refused/);
 });
 test('publishing error differs from verification and ignores unrelated timestamped steps', () => {
   const a = release(); a.step = {...a.step, name:'Publish nightly',started_at:'2026-09-10T12:00:00Z',completed_at:'2026-09-10T12:01:00Z'};

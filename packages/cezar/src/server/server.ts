@@ -29,6 +29,7 @@ import { commitQuerySchema } from '@open-mercato/cezar-contract/query-requests';
 import { imageMimeType } from '@open-mercato/cezar-contract/image-path';
 import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provider';
 import { defined } from '../core/defined.ts';
+import { isAbsoluteHostPath } from '../core/host-path.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
 import type {
   ProjectsResponse,
@@ -300,8 +301,6 @@ import {
 } from './static-ui.ts';
 export interface ServerDeps extends ActivityServerDeps {
   home: Home;
-  /** Explicit fixture seam; production defaults to the disabled rebrand release switch. */
-  legacyCanary?: boolean | undefined;
   /** Per-repository forge injection for embedded servers and tests. */
   forgeFactory?: ForgeFactory;
   /** CLI lifetime ownership, shared with secondary project contexts. */
@@ -2406,7 +2405,7 @@ export function createApp(deps: ServerDeps) {
     // dialog hands back absolute paths, but a hand-written body (curl, a
     // future CLI) spells home the way a shell does.
     const requested = expandTilde(spelled);
-    if (!requested.startsWith('/')) {
+    if (!isAbsoluteHostPath(requested)) {
       return {
         status: 400,
         body: { error: `not a folder: ${spelled} is not an absolute path` },
@@ -2610,9 +2609,7 @@ export function createApp(deps: ServerDeps) {
         // exist; checkout roots use `mkdir -p`. Both get a real write probe.
         // Any failure → 400 and NO change persisted.
         const expanded = expandTilde(configuredRoot);
-        if (!expanded.startsWith('/')) {
-          return c.json({ error: `not writable: ${configuredRoot} is not an absolute path` }, 400);
-        }
+        if (!isAbsoluteHostPath(expanded)) return c.json({ error: `not writable: ${configuredRoot} is not an absolute path` }, 400);
         if (!create) {
           try {
             if (!(await stat(expanded)).isDirectory()) {
@@ -4817,7 +4814,7 @@ export function createApp(deps: ServerDeps) {
       .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
       .map((project) => project.root)));
     // An unfinished migration finishes first. No folder or a fence: no runs. `not-git` still has an `.ai/cezar` worth indexing.
-    return (await prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })).filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
+    return (await prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home] })).filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
       const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
       // A cold project's repository identity only: asking for an owned one starts a discovery
       // nothing reads.

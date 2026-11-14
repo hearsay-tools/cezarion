@@ -1,4 +1,3 @@
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { expect, it } from 'vitest';
 import { legacyEnvNames, legacyHomeEnv, preferredHomeEnv, productEnv, shellProductEnv } from './product-env.ts';
 import { resolveHome } from '../home/resolve.ts'; // test-home-read: pure resolver tests use injected env objects; no IO.
@@ -25,7 +24,7 @@ it('keeps the migration source separate from the destination and the switch-off 
   expect(legacyHomeEnv(env)).toBe('/legacy');
   expect(preferredHomeEnv(env)).toBe('/new');
   expect(legacyHomeEnv({ HSQ_HOME: '/new' })).toBeUndefined();
-  expect(resolveHome({ purpose: 'cli', env }).root).toBe(REBRAND_SWITCH ? '/new/config' : '/legacy'); // test-home-read: pure resolution from an injected env object; no filesystem access.
+  expect(resolveHome({ purpose: 'cli', env }).root).toBe('/new/config'); // test-home-read: pure resolution from an injected env object; no filesystem access.
   expect(resolveHome({ purpose: 'cli', env, layout: 'legacy' }).root).toBe('/legacy'); // test-home-read: pure resolution from an injected env object; no filesystem access.
   expect(resolveHome({ purpose: 'cli', env, layout: 'split' }).config).toBe('/new/config'); // test-home-read: pure resolution from an injected env object; no filesystem access.
   expect(resolveHome({ purpose: 'cli', env: { CEZ_HOME: '/legacy' }, layout: 'split' }).config).toBe('/legacy/config'); // test-home-read: pure resolution from an injected env object; no filesystem access.

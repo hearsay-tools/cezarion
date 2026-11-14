@@ -1,12 +1,12 @@
 import { productIdentity } from './identity.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 
-/** Preserve each shipped spelling until the release switches the display name. */
-export function productName(legacy: 'cezar' | 'Cezar' | 'Cezarion', rebrand = REBRAND_SWITCH): string {
-  return rebrand ? productIdentity(rebrand).displayName : legacy;
+/** The product's display name. The argument is ignored: it keeps the call sites' old spelling until
+ *  hearsay-tools/squawk#3509 rewrites them as literals. */
+export function productName(_legacy: 'cezar' | 'Cezar' | 'Cezarion'): string {
+  return productIdentity().displayName;
 }
 
-/** The tag that opens a product log line: `[cez]` before the release switch, `[hsq]` after it. */
-export function logPrefix(rebrand = REBRAND_SWITCH): string {
-  return `[${productIdentity(rebrand).command}]`;
+/** The tag that opens a product log line: `[hsq]`. */
+export function logPrefix(): string {
+  return `[${productIdentity().command}]`;
 }

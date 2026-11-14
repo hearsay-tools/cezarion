@@ -2,22 +2,16 @@
 
 // Shared shape for bot-authored release/v* version-bump PRs. Keep the path
 // allowlist identical to release-finalization.cjs staging (packages/*/package.json,
-// the active alias package.json when the identity has one, pnpm-lock.yaml). Callers must pass the live PR
+// pnpm-lock.yaml). Callers must pass the live PR
 // file list — author + branch alone is not enough after a human push.
 
 const { execFileSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
-const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 
-function releaseBumpFilePattern(rebrand) {
-  const alias = productIdentity(rebrand).npmAliasDirectory;
-  return new RegExp(`^(packages/[^/]+/package\\.json|${alias === null ? '' : `${alias}/package\\.json|`}pnpm-lock\\.yaml)$`);
-}
-const RELEASE_BUMP_FILE_RE = releaseBumpFilePattern();
+const RELEASE_BUMP_FILE_RE = /^(packages\/[^/]+\/package\.json|pnpm-lock\.yaml)$/;
 
-function releaseBumpPaths(rebrand) {
-  const alias = productIdentity(rebrand).npmAliasDirectory;
-  return ['packages/*/package.json', ...(alias === null ? [] : [`${alias}/package.json`]), 'pnpm-lock.yaml'];
+function releaseBumpPaths() {
+  return ['packages/*/package.json', 'pnpm-lock.yaml'];
 }
 
 function isReleaseBumpFile(file) {
@@ -289,7 +283,6 @@ if (require.main === module) {
 
 module.exports = {
   RELEASE_BUMP_FILE_RE,
-  releaseBumpFilePattern,
   releaseBumpPaths,
   isReleaseBumpFile,
   isManifestOnlyFiles,
