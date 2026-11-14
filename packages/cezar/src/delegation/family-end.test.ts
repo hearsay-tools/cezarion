@@ -12,7 +12,8 @@ import { durableRun, fixture, git, WORKSPACE_TEST_TIMEOUT_MS } from './workspace
 /** The branch step of the family-end rule (hearsay-tools/squawk#911): after retention reclaimed a
  *  worker's directory, its branch goes only once the family has ended and no work would be lost. */
 describe('releasing the branches of ended worker families', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
-  const claim = () => () => undefined;
+  function release(): void { /* nothing is held */ }
+  function claim(): () => void { return release; }
 
   async function reclaimedWorker(commit: boolean) {
     const { root, first } = await fixture();
