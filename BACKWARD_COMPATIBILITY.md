@@ -114,3 +114,11 @@ banners use the new preferred names.
 script that relied on the old default passes `--notify`, or runs `hsq task notify <id>`
 after start. `--no-notify` stays accepted and sends an explicit off. The run API, the
 cockpit form and the notify flag on existing runs keep their behavior.
+
+The project config key `worktreeTeardown` is optional and additive: it takes the shape of
+`worktreeSetup`, and a config without it destroys workers as before. Worker destroy no
+longer stops a test app it finds through `.ai/qa/test-env.json` and
+`.ai/qa/test-env-lease.sqlite`; a project that relied on that lists its own stop command in
+`worktreeTeardown`. Stop on an owned worker that already settled keeps its `review`, `done`
+or `failed` status and the result its parent collects, instead of recording `cancelled`
+(hearsay-tools/squawk#1907).

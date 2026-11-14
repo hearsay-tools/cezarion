@@ -229,6 +229,13 @@ sharing the runner; `check-stop-kill.test.ts` stays green unchanged.
 - `.env.example`: `CEZ_PROJECT_ROOT`.
 - AGENTS.md: the Git/worktree routing row names `src/worktree-setup.ts`.
 
+## 2026-11-13 note: worktreeTeardown
+
+`worktreeTeardown` (hearsay-tools/squawk#3515) reuses this key's schema, resolver and command
+runner. Worker destroy runs it in the proven-owned worker worktree before the holder scans, with
+no record, note or Settings field of its own; a failure is one lifecycle event on the worker.
+ADR 0032 holds the destroy order.
+
 ## Out of scope
 
 Reusing installs across worktrees (copy, hardlink, shared store), lockfile

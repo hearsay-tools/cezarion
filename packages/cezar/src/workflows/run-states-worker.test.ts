@@ -23,16 +23,16 @@ describe('run states of an owned worker', { timeout: 45_000 }, () => {
     expect(RUN_TRIGGERS.find((row) => row.id === 'plain.worker-idle')?.to).toEqual(['done']);
   });
 
-  // The cockpit's Stop calls cancel() on any run. For an owned worker it commits cancelled first,
-  // whatever the status, so a settled worker's done is replaced.
-  it('Stop on a worker that settled done records it cancelled', async () => {
+  // The cockpit's Stop calls cancel() on any run. A settled owned worker keeps its status, so the
+  // result its parent collects stays the one it settled with (hearsay-tools/squawk#1907).
+  it('Stop on a worker that settled done keeps done', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:cezar-done');
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'done' && !manager.isActive(w.id));
     expect(manager.cancel(w.id)).toBe(false);
-    expect(store.getRun(w.id)?.status).toBe('cancelled');
-    expect(RUN_TRIGGERS.find((row) => row.id === 'worker.stop-settled')?.to).toEqual(['cancelled']);
+    expect(store.getRun(w.id)?.status).toBe('done');
+    expect(RUN_TRIGGERS.find((row) => row.id === 'worker.stop')?.states).not.toContain('done');
   });
 });

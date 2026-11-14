@@ -1532,7 +1532,8 @@ JSON:
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable
   "plannerModel": "sonnet",  // model the "Plan first" button uses to draft chains
   "baseBranch": "develop",   // branch worktrees fork from + PRs target (also settable in the Git view)
-  "worktreeSetup": { "commands": ["npm ci"] } // prepare each new worktree before the agent starts (below)
+  "worktreeSetup": { "commands": ["npm ci"] }, // prepare each new worktree before the agent starts (below)
+  "worktreeTeardown": { "commands": ["docker compose down"] } // stop a worker worktree's own services before destroy (below)
 }
 ```
 
@@ -1625,6 +1626,28 @@ Without the key nothing runs, exactly as before. Examples:
 | Go | `["go mod download"]` |
 | Rust | `["cargo fetch"]` |
 | Copy local env | `["cp \"$CEZ_PROJECT_ROOT/.env\" .env"]` |
+
+### Stopping a worker worktree's services before destroy
+
+A worker's worktree can start things that keep running after the worker settles: a test
+server, a file watcher, a container. Worker destroy refuses while a process still works in
+the worktree, and names each one by its pid and executable name, never its arguments. Give the project a
+`worktreeTeardown` and destroy runs those commands in the worker's worktree first:
+
+```jsonc
+// .ai/squawk/config.json (.ai/cezar/config.json before the project moves)
+"worktreeTeardown": {
+  "commands": ["command -v my-watcher >/dev/null 2>&1 && my-watcher stop . || true"],
+  "timeoutSeconds": 120 // optional, per command; default 900, max 7200
+}
+```
+
+The key has the shape, the limits and the environment of `worktreeSetup`. The commands run
+only in a worktree whose ownership destroy has proven, before it looks for holders. A failed
+command or a timeout is recorded in the worker's events, and destroy goes on: a process that
+still holds the worktree is named in the refusal and never signalled, and the next retry runs
+the teardown again. The key is edited in the config file only; Settings does not show it.
+Without the key nothing runs, exactly as before.
 
 ### Editing the agents' own config (Settings → Agent config)
 
