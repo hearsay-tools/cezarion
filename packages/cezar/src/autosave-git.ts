@@ -106,7 +106,10 @@ export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, 
       if (blockedWarnings < BLOCKED_WARNINGS) save.warn(label, message);
       else if (blockedWarnings === BLOCKED_WARNINGS) save.warn(label, 'further cleanup changes suppressed until cleanup is confirmed; worktree reuse stays blocked');
       blockedWarnings++;
-      try { options.onBlocked?.(message, { ...proof, ...(save.since ? { since: save.since } : {}) }); } catch { /* Retain cleanup if the caller cannot take its own hold. */ }
+      // Every proof names the holders earlier commands left: one that moved out of the worktree
+      // is invisible to the restart-time cwd scan.
+      const processes = [...new Map([...save.holders.diagnostics().processes, ...proof.processes].map(entry => [entry.pid, entry])).values()];
+      try { options.onBlocked?.(message, { ...proof, processes, ...(save.since ? { since: save.since } : {}) }); } catch { /* Retain cleanup if the caller cannot take its own hold. */ }
     },
   };
   if (process.platform !== 'win32') {
@@ -145,11 +148,11 @@ function settleHolders(save: AutosaveSave): Promise<boolean> {
   let timedOut = save.stopping;
   let named = { pids: '', text: '' };
   const report = () => {
-    const { pids, processes, inspectionFailed } = save.holders.diagnostics();
+    const { pids, inspectionFailed } = save.holders.diagnostics();
     // Names cost one read per holder: read them again only when the holders change.
     if (named.pids !== pids.join()) named = { pids: pids.join(), text: describeProcesses(pids) };
     save.report('autosave', `termination not confirmed; Git process groups exited; ${inspectionFailed ? 'cwd inspection failed; ' : ''}` +
-      `retained cwd holder PIDs: ${named.text || 'none'}; worktree reuse blocked until cleanup is confirmed`, { processes, groups: [], uncertain: false });
+      `retained cwd holder PIDs: ${named.text || 'none'}; worktree reuse blocked until cleanup is confirmed`, { processes: [], groups: [], uncertain: false });
   };
   return new Promise(resolve => {
     let pollTimer: NodeJS.Timeout | undefined;

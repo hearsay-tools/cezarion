@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { autosaveGit, withAutosaveGit } from './autosave-git.ts';
+import * as holders from './autosave-holders.ts';
 import { autosaveCommit } from './autosave-commit.ts';
 import { killFromPidFile, readPids, requirePid, writePidSource } from './pid-file.testkit.ts';
 
@@ -255,6 +256,34 @@ setTimeout(() => process.exit(0), 50);
     await until(() => settled || proofs().at(-1)?.processes.some(entry => entry.pid === holder) === true, 'a blocked proof naming the descendant');
     expect(settled).toBe(false);
     writeFileSync(release, '');
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
+  // CodeRabbit on hearsay-tools/squawk#3545: a holder an earlier command left may have moved out
+  // of the worktree, where the restart-time cwd scan cannot find it, so every proof names it.
+  it('names the holders earlier commands left in a later command\'s blocked proof', async () => {
+    writeFileSync(join(bin, 'git'), '#!/bin/sh\nfor a; do [ "$a" = stall ] && exec sleep 30; done\nexit 0\n', { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    let held = true;
+    const left = { pid: 4242, startToken: 'left-by-the-first-command' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [left.pid] : [], processes: held ? [left] : [], inspectionFailed: false }) }));
+    // The stalled command's group stays unproven until the case lifts this.
+    let obscure = true;
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid < 0 && signal === 0 && obscure) throw Object.assign(new Error('unreadable'), { code: 'EPERM' });
+      return kill(pid, signal);
+    });
+    const blocked = vi.fn();
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['first']);
+      return (await git(['stall'])).ok ? 'saved' : 'unsuccessful';
+    });
+    jobs.push(job);
+    await until(() => blocked.mock.calls.length > 0, 'the stalled command to report blocked');
+    expect(blocked.mock.calls[0]![1]).toMatchObject({ processes: expect.arrayContaining([left]), groups: [expect.any(Number)] });
+    obscure = false; held = false;
     expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
   });
 
