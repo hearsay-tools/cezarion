@@ -250,7 +250,8 @@ describe('durable scratch cleanup evidence', () => {
       retained = await nonDumpableHolder(scratch);
       const reader = await readableHolder(scratch);
       try {
-        expect(() => store.commitWorkerExecutionStart(run.id)).toThrow(/resources may still be held/);
+        // hearsay-tools/squawk#867: the refusal names the holder.
+        expect(() => store.commitWorkerExecutionStart(run.id)).toThrow(new RegExp(`^processes ${reader.pid} \\(python[\\d.]*\\) still hold the worker's worktree or scratch$`));
         expect(store.readWorkerExecution(run.id)?.generation).toBe(generation);
         await reader.write();
       } finally { await reader.close(); }

@@ -2,6 +2,7 @@ import { legacyRunsBeside, runDataDir } from '../legacy-runs.ts';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { describeProcesses } from '../delegation/process-liveness.ts';
 
 /** Terminal task intent survives loss/quarantine of the public run index. Starting a new
  * generation replaces this entire checkpoint, so an old cleanup cannot authorize reuse. */
@@ -37,4 +38,35 @@ function evidenceIdsIn(dir: string): string[] | undefined {
       return match && z.string().uuid().safeParse(match[1]).success ? [match[1]!] : [];
     });
   } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : undefined; }
+}
+
+/** Why a worker execution may not start, and the command that gets past it (hearsay-tools/squawk#867). */
+export class WorkerAdmissionRefusal extends Error {
+  constructor(cause: string, readonly next: string) { super(cause); }
+}
+
+export const SPAWN_NEXT = 'spawn a new worker with the instruction';
+
+/** The previous execution when it lets a new one start: complete, or queued and never started. */
+export function admissibleExecution(prior: WorkerExecution | undefined): WorkerExecution {
+  if (prior?.abandoned) throw new WorkerAdmissionRefusal('the worker execution was abandoned', SPAWN_NEXT);
+  if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
+    throw new WorkerAdmissionRefusal(`the previous execution is not proven finished (checkpoint ${prior?.phase ?? 'missing'})`,
+      `retry the same command after it ends; if this repeats, ${SPAWN_NEXT}`);
+  }
+  return prior;
+}
+
+/** The refusal for live holders of the worker's paths; no PID means the holder proof was unreadable. */
+export function holderRefusal(holders: readonly number[]): WorkerAdmissionRefusal {
+  return holders.length
+    ? new WorkerAdmissionRefusal(`processes ${describeProcesses(holders)} still hold the worker's worktree or scratch`, 'end them, then retry the same command')
+    : new WorkerAdmissionRefusal("the worker's worktree or scratch is not proven free of processes", `retry the same command; if this repeats, ${SPAWN_NEXT}`);
+}
+
+/** The refusal a failed admission returns: its own cause and next step. Only an error without
+ *  a message falls back to `fallback`. */
+export function admissionRefusal(error: unknown, fallback: string): { ok: false; error: string; next?: string } {
+  if (error instanceof WorkerAdmissionRefusal) return { ok: false, error: error.message, next: error.next };
+  return { ok: false, error: error instanceof Error && error.message ? error.message : fallback };
 }

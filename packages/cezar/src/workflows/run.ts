@@ -14,7 +14,7 @@ import * as completionGateReads from './run/completion-gate.ts';
 import { squawkToolHandlers } from './run/squawk-tools.ts';
 import type { DelegationExecutionSettings, StartRunInput, Execution, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 export type { DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
-import type { ContinueRunOptions } from './continuation-admission.ts';
+import type { ContinuationResult, ContinueRunOptions } from './continuation-admission.ts';
 import { type SquawkDoneAnswer, type SquawkDoneRequest, type SquawkWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
@@ -587,7 +587,7 @@ export class RunManager {
      *  continuations are queued; an explicit user Continue remains immediate. */
     deferForCapacity = false,
     conversation?: Parameters<RunStore['commitWorkerContinuation']>[4],
-  ): { ok: boolean; error?: string } {
+  ): ContinuationResult {
     const record = this.#store.getRun(runId);
     // A migration fence refuses new work only. An automatic resume or a wait wake continues a run
     // that is already live, which the fence lists and waits for; it is never refused here.

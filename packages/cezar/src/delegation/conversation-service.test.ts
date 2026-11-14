@@ -10,8 +10,10 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { rmSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { admissionRefusal } from '../runs/worker-execution.ts';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
@@ -223,6 +225,46 @@ describe('durable conversations', () => {
     rmSync(delegation.workspace.path, { recursive: true, force: true });
     expect(await f.service.send(f.caller, request)).toMatchObject({ effect: 'unchanged', message: { id: sent.message.id, resumed: true } });
   });
+  // hearsay-tools/squawk#867: the refusal names what holds the worker and the command that gets past it.
+  it.runIf(process.platform !== 'win32')('refuses --resume while a process holds the worker worktree, naming it; the exact retry is accepted after it ends', async () => {
+    const w = await completedWorker('done');
+    await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
+    const delegation = f.store.getRun(w.id)!.delegation;
+    if (delegation?.role !== 'worker') throw new Error('expected a worker');
+    const holder = spawn('sleep', ['60'], { cwd: delegation.workspace.path, stdio: 'ignore' });
+    const exited = once(holder, 'exit');
+    try {
+      const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Finish the parser change', timeoutSeconds: 600, resume: true };
+      await expect(f.service.send(f.caller, request)).rejects.toMatchObject({ code: 'incompatible_state',
+        message: `Worker was not resumed: processes ${holder.pid} (sleep) still hold the worker's worktree or scratch. No message was accepted; end them, then retry the same command` });
+      holder.kill(); await exited;
+      expect(await f.service.send(f.caller, request)).toMatchObject({ message: { state: 'accepted', resumed: true } });
+    } finally { holder.kill(); }
+  });
+  // hearsay-tools/squawk#867: each store refusal carries its own cause and next step.
+  const spawnNext = 'spawn a new worker with the instruction';
+  it.each([
+    ['an unfinished checkpoint', (id: string) => { f.store.commitWorkerExecutionStart(id); },
+      'the previous execution is not proven finished (checkpoint starting)', `retry the same command after it ends; if this repeats, ${spawnNext}`],
+    ['an abandoned execution', (id: string) => {
+      const path = join(f.root, '.ai/cezar/runs', `${id}.execution.json`);
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), abandoned: true }), { mode: 0o600 });
+    }, 'the worker execution was abandoned', spawnNext],
+    ['a destroy request', (id: string) => {
+      const run = f.store.getRun(id)!;
+      f.store.commitDelegation([{ id, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['branch'] } } as never }]);
+    }, 'the worker is being destroyed', spawnNext],
+  ])('refuses a new execution after %s with its cause and next step', async (_, arrange, cause, next) => {
+    const w = await completedWorker();
+    arrange(w.id);
+    let thrown: unknown;
+    try { f.store.commitWorkerExecutionStart(w.id); } catch (error) { thrown = error; }
+    expect(admissionRefusal(thrown, 'fallback')).toEqual({ ok: false, error: cause, next });
+  });
+  it('keeps the fallback text only for an admission error without a message', () => {
+    expect(admissionRefusal(new Error(''), 'fallback')).toEqual({ ok: false, error: 'fallback' });
+    expect(admissionRefusal(new Error('disk full'), 'fallback')).toEqual({ ok: false, error: 'disk full' });
+  });
   it('refuses --resume of a cancelled worker whose branch ref is gone, accepting nothing', async () => {
     const w = await completedWorker('cancelled');
     await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
@@ -350,7 +392,8 @@ describe('durable conversations', () => {
     const w = await completedWorker();
     const before = structuredClone(f.store.getRun(w.id));
     vi.spyOn(runPersistence(f.store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
-    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Retry work', timeoutSeconds: 600, resume: true })).rejects.toThrow(/checkpoint/);
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Retry work', timeoutSeconds: 600, resume: true }))
+      .rejects.toThrow('Worker was not resumed: the resume could not be saved (disk unavailable). No message was accepted; retry the same command');
     expect(f.store.getRun(w.id)).toEqual(before);
     expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
   });

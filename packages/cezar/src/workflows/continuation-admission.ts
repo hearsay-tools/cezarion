@@ -1,6 +1,7 @@
 import type { Home } from '../home/home.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
+import { SPAWN_NEXT } from '../runs/worker-execution.ts';
 import { modelConflictsWithRunner } from '../core/model-presets.ts';
 import type { WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
@@ -36,7 +37,9 @@ export type ContinueRunOptions = {
   providerRetry?: true;
 };
 
-export type ContinuationRefusal = { ok: false; error: string };
+/** `next` names the command that gets past a refusal, when retrying the same one is not it. */
+export type ContinuationRefusal = { ok: false; error: string; next?: string };
+export type ContinuationResult = { ok: boolean; error?: string; next?: string };
 export type ContinuationConversation = Parameters<RunStore['commitWorkerContinuation']>[4];
 
 export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions, home: Home): ContinuationRefusal | undefined {
@@ -72,9 +75,8 @@ export function identityRefusal(identity: WorkerStepIdentity | undefined, opts: 
 }
 
 export function workerRefusal(run: RunRecord): ContinuationRefusal | undefined {
-  if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) {
-    return { ok: false, error: 'worker cannot continue' };
-  }
+  if (run.delegation?.role === 'invalid') return { ok: false, error: 'the worker record is invalid', next: SPAWN_NEXT };
+  if (run.delegation?.role === 'worker' && run.delegation.destroy) return { ok: false, error: 'the worker is being destroyed', next: SPAWN_NEXT };
 }
 
 export function answerRefusal(run: RunRecord, opts: ContinueRunOptions, defer: boolean,

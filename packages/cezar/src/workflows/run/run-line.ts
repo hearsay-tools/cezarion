@@ -10,6 +10,7 @@ import { executionBlockedByRootFinish, historyDeletionPending } from './run-guar
 import type { RunModuleContext } from './types.ts';
 import type { WorkflowDef } from '../types.ts';
 import type { PendingContinuation, StartRunInput } from './types.ts';
+import { admissionRefusal } from '../../runs/worker-execution.ts';
 
 export type PendingJob = { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined };
 
@@ -24,7 +25,7 @@ interface RunLineHost {
   recovering(): boolean | undefined; recoveringRun(run: RunRecord): boolean; reconcileAutoResumes(): void;
   cancel(id: string): boolean;
   move(id: string, patch: { error: string }): unknown;
-  beginWorkerExecution(id: string): void; admissionError(error: unknown, fallback: string): string;
+  beginWorkerExecution(id: string): void;
   admitQueuedWaitWake(id: string): 'none' | 'handled' | 'deferred';
   launchQueuedRun(id: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void;
   reviveQueuedRun(run: RunRecord, reason: string): Promise<void>; pump(): Promise<void>; busySlots(): number;
@@ -306,7 +307,7 @@ export class RunLine {
       try { this.host.beginWorkerExecution(candidate); }
       catch (error) {
         this.takeAt(next); this.takePending(candidate);
-        this.host.move(candidate, { error: this.host.admissionError(error, 'worker execution checkpoint unavailable') });
+        this.host.move(candidate, { error: admissionRefusal(error, 'worker execution checkpoint unavailable').error });
         return false;
       }
     }

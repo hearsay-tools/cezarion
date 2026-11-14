@@ -474,7 +474,7 @@ export class DelegationService {
       const result = project.manager.continueRun(recipient.id, {
         text: `Your parent resumed this worker with a new instruction.\n${fresh}Agent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
       }, true, { rootId: root.id, state: next, input });
-      if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; resolve this condition and retry the same command`);
+      if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; ${result.next ?? 'resolve this condition and retry the same command'}`);
     } else commitAccepted(project.store, root.id, next, enqueue ? input : undefined, peer && !recipient.delegation);
   }
   async followUp(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {

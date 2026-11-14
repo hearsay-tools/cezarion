@@ -6,7 +6,6 @@ import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, NO_WAIT_NUDGE_REPLY_MS, COMPL
 import { isSyntheticContinuation } from './workflow-position.ts';
 import { repositoryRootLockDisabled } from './repo-root-lease.ts';
 import { isUntouchedCancelledRun } from './run-guards.ts';
-import { WorkerOrphanAliveError, admissionError } from './worker-orphans.ts';
 import { ContinuationSession } from './continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './step-loop.ts';
 import { RunRecovery } from './run-recovery.ts';
@@ -247,7 +246,6 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     recovering: () => modules.recovery.recovering, recoveringRun: run => modules.recovery.recoveringRun(run),
     reconcileAutoResumes: () => modules.autoResumeScheduler.reconcileAutoResumes(), cancel: id => host.cancel(id),
     move: (id, patch) => host.move(id, 'fail-start', patch), beginWorkerExecution: id => modules.workerExecutions.beginWorkerExecution(id),
-    admissionError: (error, fallback) => admissionError(error, fallback),
     admitQueuedWaitWake: id => modules.wakeAdmission.admitQueuedWaitWake(id),
     launchQueuedRun: (id, job, continuation) => modules.runStart.launchQueuedRun(id, job, continuation),
     reviveQueuedRun: (run, reason) => host.reviveQueuedRun(run, reason), pump: () => modules.line.pump(),
@@ -349,7 +347,6 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   );
   modules.workerExecutions = new WorkerExecutions(context, modules.orphans,
     { maintenance: id => modules.claims.has(id) || !!host.autosaveCleanupBlocker(id),
-      admissionError: message => new WorkerOrphanAliveError(message),
       settleOrphanedWorkerExecution: (id, opts) => host.settleOrphanedWorkerExecution(id, opts),
       reapTerminalScratch: id => modules.runSettlement.reapTerminalScratch(id), queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id),
       retryWaitAdmission: id => modules.retries.retryWaitAdmission(id), releaseSlot: () => modules.line.releaseSlot() },
@@ -452,7 +449,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     finishWorkerExecution: id => modules.workerExecutions.finishWorkerExecution(id), clearWakeBackoff: id => modules.retries.clearWakeBackoff(id),
     dropActive: id => host.dropActive(id), pump: () => modules.line.pump(),
     runContinuation: (...args) => host.runContinuation(...args), workerStep: (id, step) => launchContext.workerStep(context, id, step),
-    isUntouchedCancelledRun: run => isUntouchedCancelledRun(run), admissionError: (error, fallback) => admissionError(error, fallback),
+    isUntouchedCancelledRun: run => isUntouchedCancelledRun(run),
     isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
   }, modules.claims, modules.line, modules.workerExecutions, modules.queuedInput, modules.autoResumeScheduler,
   modules.worktreeAutosave, modules.workerQuestions, ROUTED_QUESTION_REFUSAL, RESTART_CONTINUATION_PROMPT);

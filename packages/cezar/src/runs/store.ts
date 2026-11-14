@@ -12,7 +12,7 @@ export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
-import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
+import { admissibleExecution, holderRefusal, SPAWN_NEXT, WorkerAdmissionRefusal, workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
@@ -2792,8 +2792,8 @@ export class RunStore extends EventEmitter {
 
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
    * Synchronous, fresh and generation/resource fenced; callers hold admission off across awaits. */
-  workerResourcesSafe(id: string, generation: string, resourceId: string, admittingQueued = false): boolean {
-    return this.workerResourceHolders(id, generation, resourceId, { admittingQueued }) === 'safe';
+  workerResourcesSafe(id: string, generation: string, resourceId: string): boolean {
+    return this.workerResourceHolders(id, generation, resourceId) === 'safe';
   }
 
   /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
@@ -2843,15 +2843,10 @@ export class RunStore extends EventEmitter {
 
   commitWorkerExecutionStart(id: string): string {
     const run = this.peek(id);
-    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
-    const prior = this.readWorkerExecution(id);
-    if (prior?.abandoned) throw new Error('Worker execution was abandoned; spawn a new worker instead of resuming it');
-    if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
-      throw new Error('Worker execution checkpoint does not prove safe admission');
-    }
-    if (!this.workerResourcesSafe(id, prior.generation, run.delegation.workspace.resourceId, true)) {
-      throw new Error('Worker resources may still be held by a process; reuse is not proven safe');
-    }
+    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new WorkerAdmissionRefusal('the worker is being destroyed', SPAWN_NEXT);
+    const prior = admissibleExecution(this.readWorkerExecution(id));
+    const holders = this.workerResourceHolders(id, prior.generation, run.delegation.workspace.resourceId, { admittingQueued: true });
+    if (holders !== 'safe') throw holderRefusal(holders);
     const generation = randomUUID();
     // #469: the controller is durable before `starting`, so a crash leaves a provable generation.
     this.writeWorkerProcesses(id, { generation, controller: { pid: process.pid, ...startToken(process.pid) }, processes: [] });

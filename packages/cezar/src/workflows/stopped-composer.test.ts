@@ -88,7 +88,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     manager.cancel(run.id);
     vi.spyOn(store, 'commitWorkerExecutionStart').mockImplementationOnce(() => { throw new Error('checkpoint failed'); });
     expect(manager.continueRun(run.id, { text: 'must remain draft' })).toEqual({
-      ok: false, error: 'original execution checkpoint unavailable',
+      ok: false, error: 'checkpoint failed',
     });
     expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.cancelled });
     expect(store.getRun(run.id)?.queuedMessages).toBeUndefined();

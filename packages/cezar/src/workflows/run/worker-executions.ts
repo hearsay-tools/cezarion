@@ -3,10 +3,10 @@ import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import { sessionGroupOf } from '../../core/session-process.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WorkerOrphans } from './worker-orphans.ts';
+import { WorkerAdmissionRefusal } from '../../runs/worker-execution.ts';
 
 interface WorkerExecutionsHost {
   maintenance(id: string): boolean;
-  admissionError(message: string): Error;
   settleOrphanedWorkerExecution(id: string, opts?: { admitting?: boolean; fresh?: boolean }): boolean;
   reapTerminalScratch(id: string): void;
   queueWaitWake(id: string): void;
@@ -23,19 +23,19 @@ export class WorkerExecutions {
 
   beginWorkerExecution(runId: string, admitted = true): void {
     if (this.context.store.getRun(runId)?.delegation?.role !== 'worker') return;
-    if (this.host.maintenance(runId)) throw new Error('Worker resources are being cleaned up');
+    if (this.host.maintenance(runId)) throw new WorkerAdmissionRefusal('Worker resources are being cleaned up', 'retry the same command after the cleanup ends');
     // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
     // Fresh: admission is one-shot, so a cached "alive" must not refuse an orphan that has since died.
     if (!this.executions.has(runId)) this.host.settleOrphanedWorkerExecution(runId, { admitting: true, fresh: true });
     const refusal = this.executions.has(runId) ? undefined : this.orphans.orphanAdmissionRefusal(runId);
-    if (refusal) throw this.host.admissionError(refusal);
+    if (refusal) throw refusal;
     const existing = this.executions.get(runId);
     if (existing) {
       const proof = this.context.store.readWorkerExecution(runId);
       if (!existing.admitted && admitted && proof?.generation === existing.generation && proof.phase === 'starting') {
         existing.admitted = true; return;
       }
-      throw new Error('Worker execution is still finalizing');
+      throw new WorkerAdmissionRefusal("the worker's previous execution is still finishing", 'retry the same command in a few seconds');
     }
     const generation = this.context.store.commitWorkerExecutionStart(runId);
     let resolve!: () => void;

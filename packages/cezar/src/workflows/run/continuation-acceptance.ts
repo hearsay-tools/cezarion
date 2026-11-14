@@ -18,6 +18,8 @@ import type { AutoResumeScheduler } from './auto-resume.ts';
 import type { WorktreeAutosave } from './worktree-autosave.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
 import { historyDeletionPending } from './run-guards.ts';
+import { admissionRefusal } from '../../runs/worker-execution.ts';
+import { logPrefix } from '../../home/display.ts';
 import * as workflowPosition from './workflow-position.ts';
 import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
 
@@ -33,7 +35,6 @@ interface ContinuationAcceptanceHost {
   runContinuation(runId: string, stepId: string, sessionId: string | undefined, backend: RunnerId, prompt: string, images: PastedContent[]): Promise<void>;
   workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined;
   isUntouchedCancelledRun(run: RunRecord): boolean;
-  admissionError(error: unknown, fallback: string): string;
   isSyntheticContinuation(run: RunRecord, step: StepState): boolean;
 }
 
@@ -62,7 +63,7 @@ export class ContinuationAcceptance {
     opts: ContinueRunOptions,
     deferForCapacity: boolean,
     conversation: continuation.ContinuationConversation,
-  ): { ok: boolean; error?: string } {
+  ): continuation.ContinuationResult {
     const admitted = new continuation.ContinuationChecks(runId, this.context.repoRoot, opts, deferForCapacity, conversation, {
       active: () => this.host.isActive(runId),
       autosaveBlocker: () => this.worktreeAutosave.autosaveCleanupBlocker(runId),
@@ -87,7 +88,7 @@ export class ContinuationAcceptance {
 
   /** Overrides still persist before the execution checkpoint, even if that checkpoint refuses. */
   private acceptContinuation(runId: string, opts: ContinueRunOptions, deferForCapacity: boolean,
-    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): { ok: boolean; error?: string } {
+    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): continuation.ContinuationResult {
     if (admitted.identity === undefined && continuation.hasOverrides(opts)) {
       const refusal = continuation.modelRefusal(opts, admitted.targetRunner);
       if (refusal) return refusal;
@@ -97,7 +98,7 @@ export class ContinuationAcceptance {
     return this.acceptResumedContinuation(runId, opts, deferForCapacity, conversation, admitted);
   }
 
-  private acceptUntouchedContinuation(runId: string, opts: ContinueRunOptions, supersedes: boolean): { ok: boolean; error?: string } {
+  private acceptUntouchedContinuation(runId: string, opts: ContinueRunOptions, supersedes: boolean): continuation.ContinuationResult {
     const current = this.context.store.getRun(runId)!;
     let job: { workflow: WorkflowDef; input: StartRunInput };
     try {
@@ -106,7 +107,7 @@ export class ContinuationAcceptance {
         ? this.host.ownedJob({ ...current, status: 'queued' })
         : { workflow: atContinue.storedWorkflow(current)!, input: atTaskHead.recoveryInput(current) };
       this.workerExecutions.beginWorkerExecution(runId, false);
-    } catch (error) { return { ok: false, error: this.host.admissionError(error, 'original execution checkpoint unavailable') }; }
+    } catch (error) { return admissionRefusal(error, 'original execution checkpoint unavailable'); }
     if (supersedes) this.workerQuestions.supersedeWorkerFallback(runId);
     const content = continuation.content(opts);
     const message = content.length ? this.queuedInput.toQueuedMessage(runId, content) : undefined;
@@ -121,12 +122,12 @@ export class ContinuationAcceptance {
   }
 
   private acceptResumedContinuation(runId: string, opts: ContinueRunOptions, deferForCapacity: boolean,
-    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): { ok: boolean; error?: string } {
+    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): continuation.ContinuationResult {
     const { run, supersedes } = admitted;
     // Usage-limit holds join the line even for a human Continue, behind known account deadlines.
     const toLine = deferForCapacity || isUsageLimitHold(run);
     try { this.workerExecutions.beginWorkerExecution(runId, !toLine); }
-    catch (error) { return { ok: false, error: this.host.admissionError(error, 'worker execution checkpoint unavailable') }; }
+    catch (error) { return admissionRefusal(error, 'worker execution checkpoint unavailable'); }
     this.autoResumeScheduler.clearAutoResume(runId);
     if (!deferForCapacity) this.host.clearWakeBackoff(runId);
     const failure = continuation.previousFailure(run);
@@ -162,10 +163,12 @@ export class ContinuationAcceptance {
     conversation: continuation.ContinuationConversation): continuation.ContinuationRefusal | undefined {
     if (run.delegation?.role === 'worker') {
       try { this.context.store.commitWorkerContinuation(runId, exit, acceptedPatch, continuationStep, conversation); }
-      catch {
+      catch (error) {
         // No session exists yet. Release the private reservation through execution finalization.
         void this.host.finishWorkerExecution(runId);
-        return { ok: false, error: 'worker execution checkpoint unavailable' };
+        const cause = error instanceof Error && error.message ? error.message : String(error);
+        console.warn(`${logPrefix()} worker ${runId} continuation was not saved: ${cause}`);
+        return { ok: false, error: `the resume could not be saved (${cause})`, next: 'retry the same command' };
       }
     } else this.context.store.move(runId, exit, acceptedPatch);
   }
