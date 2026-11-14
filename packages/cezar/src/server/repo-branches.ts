@@ -178,7 +178,7 @@ function runBranch(run: BranchOwner): string | undefined {
 
 /** A receipt-owned branch its receipt no longer keeps in use (hearsay-tools/squawk#911), and the
  *  refs that keep the commits its reflog recorded. */
-type ReleasedBranch = { orphan: boolean; witnesses: Array<{ ref: string; sha: string }> };
+type ReleasedBranch = { orphan: boolean; witnesses: Array<{ ref: string; sha: string }>; reflog: string };
 
 /**
  * The receipt-owned branches whose receipt no longer keeps them in use: every run that owns one is
@@ -195,8 +195,8 @@ async function releasedReceiptBranches(root: string, protection: { branches: Rea
     if (head.symbolic || !protection.branches.has(head.name)) continue;
     const owners = runs.filter((run) => runBranch(run) === head.name);
     if (!owners.every((run) => run.endedWorker)) continue;
-    const witnesses = await reflogWitnesses(root, head.name, head.sha);
-    if (witnesses) released.set(head.name, { orphan: owners.length === 0, witnesses });
+    const proof = await reflogWitnesses(root, head.name, head.sha);
+    if (proof) released.set(head.name, { orphan: owners.length === 0, ...proof });
   }
   return released;
 }
@@ -217,10 +217,10 @@ function keepOrphanLandedBranches(drafts: Draft[], released: ReadonlyMap<string,
   for (const d of drafts) if (released.get(d.head.name)?.orphan && (d.cls === 'merged' || d.cls === 'empty')) d.cls = 'active';
 }
 
-/** For each reflog entry of `branch` that is not under `tip`, another branch or remote-tracking ref
- *  that contains it; null when one has none, or when one ref is seen at two tips. */
-async function reflogWitnesses(root: string, branch: string, tip: string): Promise<Array<{ ref: string; sha: string }> | null> {
-  const log = await git(root, ['reflog', 'show', '--format=%H', `refs/heads/${branch}`]);
+/** The reflog of `branch` as read, and for each entry not under `tip` another branch or
+ *  remote-tracking ref that contains it; null when one has none, or when one ref is seen at two tips. */
+async function reflogWitnesses(root: string, branch: string, tip: string): Promise<Pick<ReleasedBranch, 'witnesses' | 'reflog'> | null> {
+  const log = await readReflog((args) => git(root, args), branch);
   if (!log.ok) return null;
   const refs = new Map<string, string>();
   for (const sha of new Set(log.stdout.split('\n').filter(Boolean))) {
@@ -229,7 +229,11 @@ async function reflogWitnesses(root: string, branch: string, tip: string): Promi
     if (!witness || (refs.has(witness.ref) && refs.get(witness.ref) !== witness.sha)) return null;
     refs.set(witness.ref, witness.sha);
   }
-  return [...refs].map(([ref, sha]) => ({ ref, sha }));
+  return { reflog: log.stdout, witnesses: [...refs].map(([ref, sha]) => ({ ref, sha })) };
+}
+
+function readReflog(run: (args: string[]) => Promise<WorktreeGitResult>, branch: string): Promise<WorktreeGitResult> {
+  return run(['reflog', 'show', '--format=%H', `refs/heads/${branch}`]);
 }
 
 function isFinished(run: BranchOwner): boolean {
@@ -857,6 +861,12 @@ export async function deleteBranches(
           // exact ref that was classified and named, never one an alias points at.
           if ((await lockedGit(input.root, ['symbolic-ref', '-q', `refs/heads/${name}`])).ok) {
             refused.push({ name, reason: `not a ${productName('cezar')} task branch` });
+            continue;
+          }
+          // A released branch's proof covers the reflog it read: one that changed since needs a new proof.
+          const proven = released.get(name);
+          if (proven && (await readReflog((args) => lockedGit(input.root, args), name)).stdout !== proven.reflog) {
+            refused.push({ name, reason: `it, ${payload.base} or the branch that keeps its commits changed since it was classified — refresh and try again` });
             continue;
           }
           const res = await lockedGit(input.root, ['update-ref', '--no-deref', '--stdin'], undefined, transaction);

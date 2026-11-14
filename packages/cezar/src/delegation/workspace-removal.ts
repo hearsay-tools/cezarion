@@ -254,6 +254,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           // tip above), prove on every attempt that no work is lost (hearsay-tools/squawk#911).
           const witnesses = checkpoint.forced ? [] : await keepingRefs(current);
           if (!witnesses) { named = await strandedName(current.sha); return; }
+          // The proof read the branch over several Git calls: read it once more, last, before the delete.
+          if (!checkpoint.forced) {
+            const last = await verifyBranch(repoRoot, workspace, receipt);
+            if (last.sha !== checkpoint.sha || hash(last.log.content) !== checkpoint.logHash) return;
+          }
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
           assertUnheld?.();
