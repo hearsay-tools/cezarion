@@ -10,7 +10,8 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { admissionRefusal } from '../runs/worker-execution.ts';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -239,6 +240,30 @@ describe('durable conversations', () => {
       holder.kill(); await exited;
       expect(await f.service.send(f.caller, request)).toMatchObject({ message: { state: 'accepted', resumed: true } });
     } finally { holder.kill(); }
+  });
+  // hearsay-tools/squawk#867: each store refusal carries its own cause and next step.
+  const spawnNext = 'spawn a new worker with the instruction';
+  it.each([
+    ['an unfinished checkpoint', (id: string) => { f.store.commitWorkerExecutionStart(id); },
+      'the previous execution is not proven finished (checkpoint starting)', `retry the same command after it ends; if this repeats, ${spawnNext}`],
+    ['an abandoned execution', (id: string) => {
+      const path = join(f.root, '.ai/cezar/runs', `${id}.execution.json`);
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), abandoned: true }), { mode: 0o600 });
+    }, 'the worker execution was abandoned', spawnNext],
+    ['a destroy request', (id: string) => {
+      const run = f.store.getRun(id)!;
+      f.store.commitDelegation([{ id, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['branch'] } } as never }]);
+    }, 'the worker is being destroyed', spawnNext],
+  ])('refuses a new execution after %s with its cause and next step', async (_, arrange, cause, next) => {
+    const w = await completedWorker();
+    arrange(w.id);
+    let thrown: unknown;
+    try { f.store.commitWorkerExecutionStart(w.id); } catch (error) { thrown = error; }
+    expect(admissionRefusal(thrown, 'fallback')).toEqual({ ok: false, error: cause, next });
+  });
+  it('keeps the fallback text only for an admission error without a message', () => {
+    expect(admissionRefusal(new Error(''), 'fallback')).toEqual({ ok: false, error: 'fallback' });
+    expect(admissionRefusal(new Error('disk full'), 'fallback')).toEqual({ ok: false, error: 'disk full' });
   });
   it('refuses --resume of a cancelled worker whose branch ref is gone, accepting nothing', async () => {
     const w = await completedWorker('cancelled');

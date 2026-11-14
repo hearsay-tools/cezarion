@@ -1,7 +1,9 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { RunStore } from '../runs/store.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { manager, parent, restart, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
@@ -57,12 +59,21 @@ describe('restart recovery of a running worker', { timeout: 30_000 }, () => {
     await until(() => store.getRun(w.id)?.status === RUN_STATUS.running && !!store.getRun(w.id)?.steps[0]?.sessionId);
     const delegation = store.getRun(w.id)!.delegation;
     if (delegation?.role !== 'worker') throw new Error('expected a worker');
-    const edit = join(delegation.workspace.path, 'uncommitted.txt');
-    writeFileSync(edit, 'kept across the restart');
+    const cwd = delegation.workspace.path; const edit = join(cwd, 'work.txt');
+    writeFileSync(edit, 'committed');
+    execFileSync('git', ['add', 'work.txt'], { cwd });
+    execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'work'], { cwd });
+    // The test restart stops the old manager first, and its final autosave commits the worktree.
+    // A crash runs no autosave: edit the tracked file after the stop, as the new store opens.
+    const open = RunStore.open.bind(RunStore);
+    vi.spyOn(RunStore, 'open').mockImplementationOnce((...args) => {
+      writeFileSync(edit, 'uncommitted edit');
+      return open(...args);
+    });
     await restart();
     await until(() => store.readEvents(w.id).some(event => event.type === 'lifecycle' && event.message === 'cezar restarted — resuming the interrupted task from its last session'));
     await until(() => store.getRun(w.id)?.status === RUN_STATUS.running && manager.isActive(w.id));
     expect(store.getRun(w.id)?.delegation).toMatchObject({ executionRevision: 1 });
-    expect(readFileSync(edit, 'utf8')).toBe('kept across the restart');
+    expect(readFileSync(edit, 'utf8')).toBe('uncommitted edit');
   });
 });
