@@ -1,6 +1,6 @@
 import { logPrefix } from './home/display.ts';
 import { fallbackProjectWriteError } from './project-paths.ts';
-import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
+import { withAutosaveGit, type AutosaveGitResult, type AutosaveOptions } from './autosave-git.ts';
 import { realpathSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -78,7 +78,7 @@ function hasConflictMarkers(text: string): boolean {
 /** Serialize all autosave entry points, including periodic/final flush overlap. */
 const autosaves = new Map<string, Promise<AutosaveResult>>();
 
-type AutosaveGitFn = (cwd: string, args: string[]) => ReturnType<typeof autosaveGit>;
+type AutosaveGitFn = (cwd: string, args: string[]) => Promise<AutosaveGitResult>;
 
 /** HEAD's symbolic ref, `null` on a detached HEAD, `undefined` when the read failed. */
 async function readAutosaveHead(dir: string, git: AutosaveGitFn): Promise<string | null | undefined> {
@@ -256,14 +256,14 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
   const previous = autosaves.get(key);
   const task = (async () => {
     if (previous) await previous;
-    return save();
+    // One owner marker and one holder watch for every Git command of this save (hearsay-tools/squawk#1694).
+    return withAutosaveGit<AutosaveResult>(dir, options, 'failed', git => save((_dir, args) => git(args)));
   })();
   autosaves.set(key, task);
   try { return await task; }
   finally { if (autosaves.get(key) === task) autosaves.delete(key); }
 
-  async function save(): Promise<AutosaveResult> {
-    const git: AutosaveGitFn = (cwd, args) => autosaveGit(cwd, args, options);
+  async function save(git: AutosaveGitFn): Promise<AutosaveResult> {
     const status = await git(dir, ['status', '--porcelain']);
     if (!status.ok) return 'failed';
     if (!status.stdout.trim()) return 'nothing-to-do';

@@ -326,12 +326,11 @@ export function describeAutosaveChurn(registration = { describe, it }): void {
           const save = worktrees.autosaveCommit;
           const saves: ReturnType<typeof save>[] = [];
           const settled = new Set<ReturnType<typeof save>>();
-          let onSaveStart: (() => void) | undefined;
+          let onSaveStart: (() => Promise<void>) | undefined;
           vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) => {
             // This cell exercises attribution, not a Git timeout. Real saves, including
             // the Continue setup save, keep their normal command and cleanup budgets.
-            onSaveStart?.();
-            const task = save(dir, reason, options);
+            const task = (async () => { await onSaveStart?.(); return save(dir, reason, options); })();
             saves.push(task);
             void task.then(() => settled.add(task), () => settled.add(task));
             return task;
@@ -351,7 +350,6 @@ export function describeAutosaveChurn(registration = { describe, it }): void {
               const dir = store.getRun(runId)!.worktreePath!;
               const signalled = join(mkdtempSync(join(tmpdir(), 'cez-unrelated-')), 'signalled');
               let births = 0;
-              let birthsAtSaveStart = 0;
               const unrelated = spawn(process.execPath, ['-e', `
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => require('node:fs').writeFileSync(${JSON.stringify(signalled)}, signal));
   // Keep creating children, but let each one exit before starting the next. A 20 ms
@@ -368,14 +366,17 @@ export function describeAutosaveChurn(registration = { describe, it }): void {
                 await waitFor(() => births > 0);
                 writeFileSync(join(dir, 'progress.txt'), 'save me\n');
                 saves.length = 0;
-                onSaveStart = () => { birthsAtSaveStart = births; };
+                // bound: hang guard; the churner reports a birth per child. A save takes two
+                // process scans, less than one child's Node boot under load
+                // (hearsay-tools/squawk#1694): start it right after a birth, so a fresh unrelated
+                // child is in the worktree while it scans.
+                onSaveStart = async () => { const before = births; await waitFor(() => births > before); };
                 expect(manager.finish(runId)).toBe(true);
                 // bound: with CPU 1 and two busy loops, the bounded-churn save took
                 // 5.076 s (hearsay-tools/cezarion#1308). Allow 30 s for real Git and
                 // process attribution, then guard registry release separately below.
                 await waitFor(() => saves.length > 0 && saves.every(task => settled.has(task)), 30_000);
                 expect(await Promise.all(saves)).toContain('committed');
-                expect(births).toBeGreaterThan(birthsAtSaveStart);
                 await waitFor(() => !manager.isActive(runId));
                 const notes = store.readEvents(runId).filter(event => event.type === 'note').map(event => String(event.message));
                 expect(notes.filter(note => /autosave (failed|unsuccessful)|termination not confirmed|cleanup/.test(note))).toEqual([]);

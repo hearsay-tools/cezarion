@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fsyncSync, lstatSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { processesWithCwdUnder, processStartToken, processPredatesCurrentBoot, recordedProcessLive } from './delegation/process-liveness.ts';
+import { describeProcesses, processesWithCwdUnder, processStartToken, processPredatesCurrentBoot, recordedProcessLive } from './delegation/process-liveness.ts';
+import { saveHolders } from './autosave-holders.ts';
 
 const processSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().optional() });
 /** Private safety evidence, independent of the run store's ownership/session lifetime. */
@@ -13,8 +14,10 @@ const cleanupSchema = z.object({
   version: z.literal(1), cwd: z.string().min(1), controller: processSchema,
   processes: z.array(processSchema), groups: z.array(z.number().int().min(2)),
   uncertain: z.boolean(), message: z.string(),
+  /** The save's owner marker; absent in evidence written before hearsay-tools/squawk#963. */
+  marker: z.string().optional(),
 });
-export type AutosaveCleanupProof = Pick<z.infer<typeof cleanupSchema>, 'processes' | 'groups' | 'uncertain'>;
+export type AutosaveCleanupProof = Pick<z.infer<typeof cleanupSchema>, 'processes' | 'groups' | 'uncertain' | 'marker'>;
 const processLive = (entry: { pid: number; startToken?: string | undefined }) => process.platform === 'win32' ? windowsAutosaveProcessLive(entry) : recordedProcessLive(entry);
 const pathFor = (dataDir: string, id: string) => join(runDataDir(dataDir, z.uuid().parse(id)), 'runs', `${id}.autosave-cleanup.json`);
 
@@ -63,9 +66,11 @@ export function autosaveCleanupBlocker(dataDir: string, id: string): string | un
   if (processLive(record.controller)) return record.message;
   const pids = record.processes.filter(processLive).map(entry => entry.pid);
   const groups = processPredatesCurrentBoot(record.controller) ? [] : record.groups.filter(autosaveGroupAliveSync);
-  const holders = processesWithCwdUnder(record.cwd);
+  // Only the save's own processes in the worktree block, never unrelated work there (hearsay-tools/squawk#963).
+  const scan = processesWithCwdUnder(record.cwd);
+  const holders = scan === 'unknown' ? scan : saveHolders(scan, record.marker, pids);
   if (record.uncertain || pids.length || groups.length || holders === 'unknown' || holders.length) {
-    return `autosave cleanup pending; retained PIDs: ${[...new Set([...pids, ...(holders === 'unknown' ? [] : holders)])].join(', ') || 'none'}; ` +
+    return `autosave cleanup pending; retained PIDs: ${describeProcesses([...new Set([...pids, ...(holders === 'unknown' ? [] : holders)])]) || 'none'}; ` +
       `process groups: ${groups.join(', ') || 'none'}${record.uncertain || holders === 'unknown' ? '; process inspection uncertain' : ''}; worktree reuse blocked`;
   }
   // Reads never unlink evidence: another process may have published a newer

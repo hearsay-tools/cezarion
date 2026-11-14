@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { autosaveCommit, type AutosaveOutcome } from './autosave-commit.ts';
+import * as liveness from './delegation/process-liveness.ts';
 
 const run = promisify(execFile);
 // The fixture reads Git directly, so a test's PATH shim reaches only the save.
@@ -50,6 +51,15 @@ describe('autosave task-branch rule (#1004)', () => {
     rmSync(repo, { recursive: true, force: true });
     if (bin) rmSync(bin, { recursive: true, force: true });
     bin = undefined;
+  });
+
+  // hearsay-tools/squawk#1694: the save's Git commands share one holder watch, which scans
+  // the worktree's processes before the first command and after the last.
+  it.runIf(process.platform === 'linux')('scans the worktree processes twice per save, not twice per Git command', async () => {
+    const scans = vi.spyOn(liveness, 'processesWithCwdUnder');
+    writeFileSync(join(repo, 'a.txt'), 'edited\n');
+    expect(await autosaveCommit(repo, 'turn end', { taskBranch: TASK_BRANCH })).toBe('committed');
+    expect(scans).toHaveBeenCalledTimes(2);
   });
 
   it('leaves a dirty tree uncommitted on a branch other than the task branch', async () => {

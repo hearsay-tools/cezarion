@@ -2,8 +2,9 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { autosaveOwnerEnv } from './autosave-git.ts';
 import { autosaveCleanupBlocker, autosaveCleanupIds, clearAutosaveCleanup, retainAutosaveCleanup } from './autosave-cleanup.ts';
 import { processStartToken } from './delegation/process-liveness.ts';
 import * as liveness from './delegation/process-liveness.ts';
@@ -97,6 +98,29 @@ describe('durable autosave cleanup', () => {
     expect(autosaveCleanupBlocker(dataDir, id)).toContain('123');
     scan.mockReturnValue([]);
     expect(autosaveCleanupBlocker(dataDir, id)).toBeUndefined();
+  });
+
+  it.runIf(process.platform === 'linux')('after controller death, only the save\'s own holders block, named by command (hearsay-tools/squawk#963)', async () => {
+    const { dataDir, id, deadOwner } = fixture();
+    const marker = randomUUID();
+    const holders: ReturnType<typeof spawn>[] = [];
+    const start = (env: NodeJS.ProcessEnv) => {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: dataDir, stdio: 'ignore', env });
+      holders.push(child);
+      return child;
+    };
+    try {
+      const unrelated = start({ PATH: process.env.PATH });
+      retainAutosaveCleanup(dataDir, id, dataDir, 'held', { processes: [], groups: [], uncertain: false, marker });
+      deadOwner();
+      expect(autosaveCleanupBlocker(dataDir, id)).toBeUndefined();
+      const saved = start(autosaveOwnerEnv(marker, { PATH: process.env.PATH }));
+      const blocker = autosaveCleanupBlocker(dataDir, id);
+      expect(blocker).toContain(`${saved.pid} (${basename(process.execPath)})`);
+      expect(blocker).not.toContain(String(unrelated.pid));
+    } finally {
+      await Promise.all(holders.map(child => new Promise(resolve => { child.once('exit', resolve); child.kill('SIGKILL'); })));
+    }
   });
 
   it('an unreadable cwd scan cannot retire a dead controller proof', () => {

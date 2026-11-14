@@ -1,6 +1,5 @@
-import { execFile } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { execFile, spawnSync } from 'node:child_process';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { processesWithCwdUnder, processStartToken, recordedProcessLive, type RecordedProcess } from './delegation/process-liveness.ts';
 
@@ -118,22 +117,26 @@ export const AUTOSAVE_OWNER_ENV = 'CEZ_AUTOSAVE_OWNER';
 /** `marked` is absent when the environment cannot be read; `gone` means the process exited. */
 export type OwnerProbe = (pid: number, marker: string) => Promise<{ marked?: boolean | undefined; parent?: number } | 'gone'>;
 
-const linuxOwnerProbe: OwnerProbe = async (pid, marker) => {
+type OwnerFacts = Awaited<ReturnType<OwnerProbe>>;
+
+/** `/proc` reads only, so the synchronous restart-time reader shares them. */
+function linuxOwner(pid: number, marker: string): OwnerFacts {
   let stat: string;
-  try { stat = await readFile(`/proc/${pid}/stat`, 'utf8'); }
+  try { stat = readFileSync(`/proc/${pid}/stat`, 'utf8'); }
   catch { return 'gone'; }
   const parent = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[1]);
   try {
-    const environ = (await readFile(`/proc/${pid}/environ`, 'utf8')).split('\0');
+    const environ = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
     return { marked: environ.includes(`${AUTOSAVE_OWNER_ENV}=${marker}`), parent };
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'gone' : { parent };
   }
-};
+}
 
-const darwinOwnerProbe: OwnerProbe = async (pid, marker) => {
-  const ps = await inspect('ps', ['-E', '-ww', '-o', 'ppid=,command=', '-p', String(pid)], 2_000);
-  const match = /^\s*(\d+)\s+(.*)$/s.exec(ps.stdout);
+const PS_OWNER_ARGS = (pid: number) => ['-E', '-ww', '-o', 'ppid=,command=', '-p', String(pid)];
+
+function darwinOwner(pid: number, marker: string, psStdout: string): OwnerFacts {
+  const match = /^\s*(\d+)\s+(.*)$/s.exec(psStdout);
   if (!match) {
     try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'gone'; }
     return {};
@@ -143,7 +146,55 @@ const darwinOwnerProbe: OwnerProbe = async (pid, marker) => {
   // `ps -E` silently omits an environment it may not read. Every ordinary
   // process carries PATH, so its absence is uncertainty, never proof.
   return { marked: /\sPATH=/.test(line) ? false : undefined, parent: Number(match[1]) };
-};
+}
+
+const linuxOwnerProbe: OwnerProbe = async (pid, marker) => linuxOwner(pid, marker);
+const darwinOwnerProbe: OwnerProbe = async (pid, marker) => darwinOwner(pid, marker, (await inspect('ps', PS_OWNER_ARGS(pid), 2_000)).stdout);
+
+function ownerSync(pid: number, marker: string): OwnerFacts {
+  if (process.platform === 'linux') return linuxOwner(pid, marker);
+  if (process.platform !== 'darwin') return {};
+  const ps = spawnSync('ps', PS_OWNER_ARGS(pid), { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+  return darwinOwner(pid, marker, ps.stdout ?? '');
+}
+
+/**
+ * The restart-time reader's attribution, after the save's controller died
+ * (hearsay-tools/squawk#963). Of the processes in the worktree, a holder is the
+ * save's when its environment carries the save's marker or cannot be read (fail
+ * closed), or when its parent is a `recorded` process, an attributed holder or a
+ * marked process. Unlike the live watch, an unreadable parent attributes nothing:
+ * the reader has no baseline, so every process under a non-dumpable parent such as
+ * `systemd --user` would block. Evidence without a marker, written before the marker
+ * was recorded, attributes every holder.
+ */
+export function saveHolders(holders: readonly number[], marker: string | undefined, recorded: readonly number[]): number[] {
+  if (marker === undefined) return [...holders];
+  const attributed = new Set<number>();
+  const pending = new Map<number, number | undefined>();
+  for (const pid of holders) {
+    const found = ownerSync(pid, marker);
+    if (found === 'gone') continue;
+    if (found.marked !== false) attributed.add(pid);
+    else pending.set(pid, found.parent);
+  }
+  const owns = (parent: number | undefined) => {
+    if (parent === undefined || parent <= 1) return false;
+    if (recorded.includes(parent) || attributed.has(parent)) return true;
+    const found = ownerSync(parent, marker);
+    return found !== 'gone' && found.marked === true;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [pid, parent] of pending) {
+      if (!owns(parent)) continue;
+      attributed.add(pid);
+      pending.delete(pid);
+      changed = true;
+    }
+  }
+  return holders.filter(pid => attributed.has(pid));
+}
 
 export interface AutosaveOwner {
   /** This command's `AUTOSAVE_OWNER_ENV` value. */
@@ -207,3 +258,6 @@ export async function watchAutosaveHolders(cwd: string, owner: AutosaveOwner,
   };
   return Object.assign(alive, { diagnostics: () => diagnostics });
 }
+
+/** A started watch: whether a Git holder is alive, and the holders it last saw. */
+export type AutosaveHolders = NonNullable<Awaited<ReturnType<typeof watchAutosaveHolders>>>;
