@@ -141,6 +141,24 @@ describe('branch deletion with a controlled mutation lock', () => {
       expect(await git(root, 'rev-parse', workspace.branch)).toBe(tip);
     });
 
+    it('refuses an ended worker branch whose last reflog read fails, whatever it printed', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workspace = await createOwnedWorkspace(root, 'cccccccc-1111-4111-8111-111111111111', base);
+      writeFileSync(join(workspace.path, 'work.txt'), 'work\n');
+      await git(workspace.path, 'add', '-A');
+      await git(workspace.path, 'commit', '-q', '-m', 'work');
+      const tip = await git(workspace.path, 'rev-parse', 'HEAD');
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = { ...branchOwnerOf(runRecord(workspace.ownerRunId, RUN_STATUS.done, { branch: workspace.branch }))!, endedWorker: true as const };
+      // The locked read fails but prints the very reflog the proof read.
+      hook.command = (args) => args[0] === 'reflog'
+        ? exec('git', args, { cwd: root }).then(({ stdout }) => ({ ok: false, stdout, stderr: 'failed' }))
+        : undefined;
+      const result = await deleteBranches({ ...input(), runs: [owner] }, [workspace.branch], workspace.branch);
+      expect(result.deleted).toEqual([]);
+      expect(await git(root, 'rev-parse', workspace.branch)).toBe(tip);
+    });
+
     it('refuses a delegated workspace owner appearing after classification at the mutation lock', async () => {
       const tip = await git(root, 'rev-parse', 'HEAD');
       const workspace = await createOwnedWorkspace(root, 'aaaaaaaa-1111-4111-8111-111111111111', tip);

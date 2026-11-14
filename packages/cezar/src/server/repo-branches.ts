@@ -214,10 +214,13 @@ function verifiedRefs(refs: ReadonlyArray<{ ref: string; sha: string }>): string
 
 /** The `verify` lines of one branch delete: `refs`, and a released receipt-owned branch's reflog
  *  witnesses once its reflog is still the one its proof read, read last before the transaction.
- *  Null when that reflog changed or a ref would be verified at two tips. */
+ *  Null when that reflog changed or could not be read, or a ref would be verified at two tips. */
 async function deleteVerifies(run: (args: string[]) => Promise<WorktreeGitResult>, name: string,
   proven: ReleasedBranch | undefined, refs: ReadonlyArray<{ ref: string; sha: string }>): Promise<string[] | null> {
-  if (proven && (await readReflog(run, name)).stdout !== proven.reflog) return null;
+  if (proven) {
+    const last = await readReflog(run, name);
+    if (!last.ok || last.stdout !== proven.reflog) return null;
+  }
   return verifiedRefs([...refs, ...(proven?.witnesses ?? [])]);
 }
 
