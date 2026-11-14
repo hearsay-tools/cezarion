@@ -12,7 +12,7 @@ import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import type { PreviewHostLike } from '../preview/registration.ts';
-import { isEndedRoot } from './run-row.ts';
+import { isEndedRoot, isLiveRecord } from './run-row.ts';
 import type { RunRecord, RunStatus, RunStore } from './store.ts';
 
 /** The "finished" status set — mirrors the statuses `RunStore.archiveFinished` sweeps. A run at the
@@ -54,9 +54,10 @@ export function isReclaimable(run: RunRecord, lookup: (id: string) => RunRecord 
 
 /**
  * Given the runs with a worktree and the keep-count `keep`, return the ids of the finished
- * worktrees whose *directory* should be reclaimed: every worker of an ended family, then, of the
- * rest, keep the `keep` most-recently-finished reclaimable worktrees and reclaim the others.
- * `lookup` finds an owned worker's parent; without it, the parent is looked for among `runs`.
+ * worktrees whose *directory* should be reclaimed: every worker of an ended family with no live or
+ * destroying worker, then, of the rest, keep the `keep` most-recently-finished reclaimable
+ * worktrees and reclaim the others. `lookup` finds an owned worker's parent; without it, the
+ * parent is looked for among `runs`. `workersOf` lists a parent's workers; without it, among `runs`.
  *
  * `keep === 0` means "unlimited — never auto-reclaim" and returns `[]`.
  * Pure: no I/O, no mutation of the input.
@@ -65,10 +66,13 @@ export function selectReclaimableWorktrees(
   runs: readonly RunRecord[],
   keep: number,
   lookup: (id: string) => RunRecord | undefined = (id) => runs.find((run) => run.id === id),
+  workersOf: (parentId: string) => readonly RunRecord[] = (parentId) =>
+    runs.filter((run) => run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId),
 ): string[] {
   if (!Number.isFinite(keep) || keep <= 0) return [];
   const reclaimable = runs.filter((run) => isReclaimable(run, lookup));
-  const ended = reclaimable.filter((run) => workerFamilyEnded(run, lookup));
+  const ended = reclaimable.filter((run) => workerFamilyEnded(run, lookup) &&
+    run.delegation?.role === 'worker' && !workersOf(run.delegation.parentRunId).some(isLiveRecord));
   const budgeted = reclaimable.filter((run) => !ended.includes(run))
     .sort((a, b) => (recencyKey(a) < recencyKey(b) ? 1 : recencyKey(a) > recencyKey(b) ? -1 : 0));
   return [...ended, ...budgeted.slice(keep)].map((r) => r.id);
@@ -189,7 +193,9 @@ export async function reclaimWorktrees(
   const runs = store.listRunsWithWorktree();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
-  const selected = selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId));
+  // A real store lists every worker; a structural test store answers from the candidates.
+  const workersOf = (store as Partial<RunStore>).listWorkersOf?.bind(store);
+  const selected = selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId), workersOf);
   const readonly = (id: string) => Boolean(byId.get(id) && readOnlyWorktree(repoRoot, store, byId.get(id)!));
   const skipped = selected.filter(readonly).length;
   if (skipped) console.info(`${logPrefix()} Worktree retention skipped ${skipped} read-only fallback item(s) under ${projectPaths(repoRoot).reads[1]}.`);

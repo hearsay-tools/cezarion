@@ -898,12 +898,26 @@ describe('the branch classifier (issue 08 §A)', () => {
       await commit(workspace.path, 'work.txt', 'unlanded');
       await git(workspace.path, 'checkout', '-q', '--detach');
       const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
-      const ended = { ...input(), runs: [{ ...owner, endedWorker: true as const }] };
+      const ended = { ...input(), runs: [{ ...owner, endedWorker: true as const, parentRunId: 'parent-run' }] };
       expect((await classesOf({ runs: [runRecord(workerId, 'done', { branch: workspace.branch })] })).cls[workspace.branch]).toBe('active');
       const { payload } = await classifyBranches(ended);
-      expect(payload.branches.find((row) => row.name === workspace.branch)).toMatchObject({ class: 'not-landed', ahead: 1, runId: workerId });
+      expect(payload.branches.find((row) => row.name === workspace.branch)).toMatchObject({ class: 'not-landed', ahead: 1, runId: workerId, parentRunId: 'parent-run' });
       expect((await deleteBranches(ended, [workspace.branch])).deleted).toEqual([]);
       expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch] });
+    });
+
+    it('deletes an ended worker family branch whose reflog commit the base keeps, verifying the base once', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      const landed = await commit(workspace.path, 'landed.txt', 'landed');
+      await git(root, 'merge', '-q', '--ff-only', landed);
+      await git(workspace.path, 'reset', '-q', '--hard', base);
+      await commit(workspace.path, 'work.txt', 'unlanded');
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
+      const ended = { ...input({ configuredBase: 'main' }), runs: [{ ...owner, endedWorker: true as const }] };
+      expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch], refused: [] });
     });
 
     it('keeps an ended worker family branch in use while its reflog holds a commit no other ref keeps', async () => {

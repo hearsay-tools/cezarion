@@ -11,6 +11,9 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
   it('retries branch-only cleanup after a locked ref; rejects repurposing after partial cleanup', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    // A commit no other ref keeps: the explicit destroy that removed the checkout still deletes it on retry.
+    await writeFile(join(workspace.path, 'tracked.txt'), 'worker');
+    git(workspace.path, 'commit', '-qam', 'worker');
     const lock = join(root, '.git/refs/heads', workspace.branch + '.lock');
     await writeFile(lock, 'test lock');
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });

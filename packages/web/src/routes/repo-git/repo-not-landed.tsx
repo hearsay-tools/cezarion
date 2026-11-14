@@ -310,6 +310,11 @@ function NotLandedTitleAndMeta({ entry, finishedAt }: {
           ) : null}
           {when ? <span className="truncate">· {when}</span> : null}
         </span>
+        {entry.parentRunId ? (
+          <Link to={`/tasks/${entry.parentRunId}`} data-slot="not-landed-parent" className="w-fit rounded-[2px] text-[11px] text-soft-foreground hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
+            Worker of its parent task
+          </Link>
+        ) : null}
         <BranchKeptReason entry={entry} />
       </div>
     </>

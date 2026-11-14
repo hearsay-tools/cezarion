@@ -18,6 +18,8 @@ export interface BranchOwner {
   /** A settled owned worker whose family has ended (hearsay-tools/squawk#911): its root is
    *  archived and settled and no member is live. Its receipt alone no longer keeps its branch in use. */
   endedWorker?: true;
+  /** A worker's parent task. */
+  parentRunId?: string;
 }
 
 const SETTLED_WORKER: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'failed', 'cancelled', 'review']);
@@ -38,6 +40,7 @@ export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
     ...(branch ? { branch } : {}),
     ...(run.baseBranch === undefined ? {} : { baseBranch: run.baseBranch }),
     ...(run.pullRequestUrl === undefined ? {} : { pullRequestUrl: run.pullRequestUrl }),
+    ...(run.delegation?.role === 'worker' ? { parentRunId: run.delegation.parentRunId } : {}),
   };
 }
 
@@ -49,6 +52,7 @@ function branchOwnerOfRow(row: BranchOwnerRow, summary: ReturnType<typeof parseS
     ...(row.baseBranch === null ? {} : { baseBranch: row.baseBranch }),
     title: summary?.title ?? row.id,
     ...(summary?.pullRequestUrl === undefined ? {} : { pullRequestUrl: summary.pullRequestUrl }),
+    ...(summary?.delegation?.role === 'worker' ? { parentRunId: summary.delegation.parentRunId } : {}),
   };
 }
 

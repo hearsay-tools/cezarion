@@ -156,6 +156,10 @@ describe('selectReclaimableWorktrees (#483)', () => {
     }
     const archived = { ...parent(RUN_STATUS.failed), archived: true };
     expect(selectReclaimableWorktrees([archived, worker, newer], 2)).toEqual(['w']);
+    // A live or destroying sibling keeps the family's directories inside the budget.
+    for (const sibling of [run({ id: 's', status: RUN_STATUS.running, role: 'worker' }), run({ id: 's', status: RUN_STATUS.done, role: 'worker', destroying: true })]) {
+      expect(selectReclaimableWorktrees([archived, worker, newer, sibling], 2)).toEqual([]);
+    }
   });
 
   it('counts a worker at review as settled only once its family has ended', () => {

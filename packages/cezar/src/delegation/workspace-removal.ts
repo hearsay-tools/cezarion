@@ -68,8 +68,6 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   if (refusal) return { workerId: value.ownerRunId, state: 'incomplete', remaining: ['worktree', 'branch'], error: refusal };
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
-  /** This attempt force-removed the worktree itself (an explicit destroy), so its branch goes too. */
-  let forced = false;
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
   // A refusal that names its blocker and the step that clears it.
   let named: string | undefined;
@@ -164,7 +162,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return undefined;
-        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
+        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared', forced: true };
         return checkpoint;
       }
 
@@ -182,7 +180,6 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
         if (!(await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path])).ok) { report?.unexplained?.(); return false; }
         remaining = ['branch'];
-        forced = true;
         return true;
       }
 
@@ -253,9 +250,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           // hearsay-tools/squawk#910: a tip that moved after the checkpoint is named like a stranded one.
           if (current.sha !== checkpoint.sha) { named = await movedBranch(checkpoint.sha, current.sha, 'the tip destroy recorded'); return; }
           if (hash(current.log.content) !== checkpoint.logHash) return;
-          // Unless this attempt removed the worktree itself, prove again on every attempt that no work
-          // is lost (hearsay-tools/squawk#911): a checkpoint from an earlier attempt carries no proof.
-          const witnesses = forced ? [] : await keepingRefs(current);
+          // Unless the destroy removed the present checkout itself (`forced`, bound to the unchanged
+          // tip above), prove on every attempt that no work is lost (hearsay-tools/squawk#911).
+          const witnesses = checkpoint.forced ? [] : await keepingRefs(current);
           if (!witnesses) { named = await strandedName(current.sha); return; }
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
