@@ -5,53 +5,54 @@
     "root": "packages/web/e2e",
     "runs": [
       {
-        "id": 43421934321,
-        "headSha": "e5c15e26fccc43b420b2c1b5ff298a302e8b8cec",
+        "id": 43583323345,
+        "headSha": "34f14f64fe2c76049ac23f9544a75bf779b073b5",
         "jobs": [
-          131873882990,
-          131873882995,
-          131873883135,
-          131873883146,
-          131873883174,
-          131873883193,
-          131873883246,
-          131873883260
+          132412625449,
+          132412625468,
+          132412625470,
+          132412625473,
+          132412625485,
+          132412625504,
+          132412625509,
+          132412625522
         ]
       },
       {
-        "id": 43421746562,
-        "headSha": "1f4da782b1302f5ca675dcedf638f38d12f07e89",
+        "id": 43581901650,
+        "headSha": "85913f8df74b89f40c5df5b31cffaf0e7abb7881",
         "jobs": [
-          131873352913,
-          131873352949,
-          131873352974,
-          131873352991,
-          131873353023,
-          131873353026,
-          131873353108,
-          131873353140
+          132408337678,
+          132408337680,
+          132408337681,
+          132408337696,
+          132408337716,
+          132408337725,
+          132408337757,
+          132408337761
         ]
       },
       {
-        "id": 43420669483,
-        "headSha": "7474cdebadcb75585c0fff090397139f4e43ed3c",
+        "id": 43580824664,
+        "headSha": "2a08ed06108c5bcb0fad7a7cb46e2cc1d11d6de4",
         "jobs": [
-          131869632901,
-          131869632938,
-          131869632948,
-          131869632987,
-          131869633001,
-          131869633067,
-          131869633127,
-          131869633183
+          132405070437,
+          132405070447,
+          132405070466,
+          132405070476,
+          132405070478,
+          132405070492,
+          132405070497,
+          132405070511
         ]
       }
     ],
     "estimatedFiles": [],
-    "baselineCommit": "e5c15e26fccc43b420b2c1b5ff298a302e8b8cec",
+    "baselineCommit": "0cf0bee94f3aa4cc2b765e0c161e3bb3d9e9ee85",
     "updatedFiles": [
-      "quick-list.e2e.ts",
-      "task-list-workload.e2e.ts"
+      "live-preview.e2e.ts",
+      "project-rail.e2e.ts",
+      "task-list-virtualization.e2e.ts"
     ],
     "remainingChanges": 0
   },
@@ -89,7 +90,7 @@
     "index-workload.e2e.ts": 24319,
     "ios-sweep.e2e.ts": 14275,
     "issue-linked-tasks.e2e.ts": 6296,
-    "live-preview.e2e.ts": 16344,
+    "live-preview.e2e.ts": 23951,
     "markdown-preview.e2e.ts": 8727,
     "mobile-projects.e2e.ts": 14052,
     "mobile-tab-bar.e2e.ts": 26652,
@@ -103,7 +104,7 @@
     "plan-mode.e2e.ts": 18521,
     "progressive-history.e2e.ts": 26503,
     "project-order.e2e.ts": 6942,
-    "project-rail.e2e.ts": 34846,
+    "project-rail.e2e.ts": 21669,
     "project-sidebar.e2e.ts": 6354,
     "queued-stack.e2e.ts": 41137,
     "quick-list.e2e.ts": 121253,
@@ -139,7 +140,7 @@
     "task-files.e2e.ts": 13596,
     "task-github-items.e2e.ts": 13607,
     "task-handoff.e2e.ts": 12886,
-    "task-list-virtualization.e2e.ts": 126239,
+    "task-list-virtualization.e2e.ts": 171220,
     "task-list-workload.e2e.ts": 28812,
     "task-pr-collection.e2e.ts": 24058,
     "task-status-groups.e2e.ts": 11763,
