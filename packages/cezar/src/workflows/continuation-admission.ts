@@ -75,9 +75,8 @@ export function identityRefusal(identity: WorkerStepIdentity | undefined, opts: 
 }
 
 export function workerRefusal(run: RunRecord): ContinuationRefusal | undefined {
-  if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) {
-    return { ok: false, error: 'worker cannot continue', next: SPAWN_NEXT };
-  }
+  if (run.delegation?.role === 'invalid') return { ok: false, error: 'the worker record is invalid', next: SPAWN_NEXT };
+  if (run.delegation?.role === 'worker' && run.delegation.destroy) return { ok: false, error: 'the worker is being destroyed', next: SPAWN_NEXT };
 }
 
 export function answerRefusal(run: RunRecord, opts: ContinueRunOptions, defer: boolean,
