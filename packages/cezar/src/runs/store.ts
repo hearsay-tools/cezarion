@@ -67,14 +67,14 @@ import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
-  type BranchOwnerRow,
 } from './run-database.ts';
+import { listBranchOwners, type BranchOwner } from './branch-owners.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
 import { hasLegacyWaitFields, upgradeLegacyWaits, UNREADABLE_WAIT } from './legacy-waits.ts';
 export { ciWaitEntry, holdsWorkerWait, upgradeLegacyWaits, workerWaitEntry } from './legacy-waits.ts';
 import { ExitEvents } from './exit-events.ts';
-import { encodeRunRow, isEndedRoot, isLiveRecord, isLiveStatus } from './run-row.ts';
+import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
@@ -379,53 +379,7 @@ const AUTOMATION_ORIGIN_HEAL_SQL =
   "instr(data, '\"automation') > 0 AND json_extract(summary, '$.automationId') IS NULL" +
   " AND (json_extract(data, '$.automation.automationId') IS NOT NULL OR json_extract(data, '$.automationTrigger.automationId') IS NOT NULL)";
 
-/** What branch cleanup and git-log attribution read about a run (`RunStore.listBranchOwners`). */
-export interface BranchOwner {
-  id: string;
-  title: string;
-  status: RunStatus;
-  archived: boolean;
-  createdAt: string;
-  /** The branch the run owns (see `encodeRunRow`); absent for a run listed for its PR alone. */
-  branch?: string;
-  baseBranch?: string;
-  pullRequestUrl?: string;
-  /** A settled owned worker whose family has ended (hearsay-tools/squawk#911): its root is
-   *  archived and settled and no member is live. Its receipt alone no longer keeps its branch in use. */
-  endedWorker?: true;
-}
-
-const SETTLED_WORKER: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'failed', 'cancelled', 'review']);
-
-/** The parent of a worker that may end with its family: settled, not live, no destroy recorded. */
-function settledWorkerParent(run: Pick<RunRecord, 'status'> & { delegation?: { role?: string; parentRunId?: string; destroy?: unknown } | null | undefined }): string | undefined {
-  const delegation = run.delegation;
-  return delegation?.role === 'worker' && !delegation.destroy && SETTLED_WORKER.has(run.status) ? delegation.parentRunId : undefined;
-}
-
-/** A record as a branch owner, or undefined when it owns no branch and created no PR: the
- *  projection `listBranchOwners` reads off a row's summary and columns, computed from memory. */
-export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
-  const branch = encodeRunRow(run).branch;
-  if (!branch && run.pullRequestUrl === undefined) return undefined;
-  return {
-    id: run.id, title: run.title, status: run.status, archived: run.archived, createdAt: run.createdAt,
-    ...(branch ? { branch } : {}),
-    ...(run.baseBranch === undefined ? {} : { baseBranch: run.baseBranch }),
-    ...(run.pullRequestUrl === undefined ? {} : { pullRequestUrl: run.pullRequestUrl }),
-  };
-}
-
-/** A stored row as a branch owner: its summary and columns, no record decoded. */
-function branchOwnerOfRow(row: BranchOwnerRow, summary: ReturnType<typeof parseStoredSummary>): BranchOwner {
-  return {
-    id: row.id, createdAt: row.createdAt, status: row.status as RunStatus, archived: row.archived,
-    ...(row.branch === null ? {} : { branch: row.branch }),
-    ...(row.baseBranch === null ? {} : { baseBranch: row.baseBranch }),
-    title: summary?.title ?? row.id,
-    ...(summary?.pullRequestUrl === undefined ? {} : { pullRequestUrl: summary.pullRequestUrl }),
-  };
-}
+export { branchOwnerOf, type BranchOwner } from './branch-owners.ts';
 
 /** Who may hold a run in memory besides its own record (see `RunStore.pin`). `maintenance` is the
  *  RunManager's publish, worktree-reclaim and branch-cleanup claims, held across their async work. */
@@ -1507,32 +1461,9 @@ export class RunStore extends EventEmitter {
    * no record. Held runs answer from memory.
    */
   listBranchOwners(): BranchOwner[] {
-    const owners = new Map<string, BranchOwner>();
-    // Each settled worker's parent; its owner is marked `endedWorker` once the parent is archived.
-    const parents = new Map<string, string>();
-    for (const row of this.db?.listBranchOwners("branch IS NOT NULL OR json_extract(summary, '$.pullRequestUrl') IS NOT NULL") ?? []) {
-      if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
-      const summary = parseStoredSummary(row.summary);
-      // A row not held is not live (`isLiveRecord` rows are held).
-      const parent = summary && settledWorkerParent({ status: row.status as RunStatus, delegation: summary.delegation });
-      if (parent) parents.set(row.id, parent);
-      owners.set(row.id, branchOwnerOfRow(row, summary));
-    }
-    for (const run of this.held.values()) {
-      const owner = branchOwnerOf(run);
-      if (!owner) continue;
-      owners.set(run.id, owner);
-      const parent = isLiveRecord(run) ? undefined : settledWorkerParent(run);
-      if (parent) parents.set(run.id, parent);
-    }
-    // The family ends with a settled archived root and no live member (live runs are all held).
-    const live = new Set([...this.held.values()].flatMap((run) => isLiveRecord(run) && run.delegation?.role === 'worker' ? [run.delegation.parentRunId] : []));
-    const ended = new Map<string, boolean>();
-    for (const [id, parent] of parents) {
-      if (!ended.has(parent)) { const root = this.getRun(parent); ended.set(parent, !!root && isEndedRoot(root) && !live.has(parent)); }
-      if (ended.get(parent)) owners.get(id)!.endedWorker = true;
-    }
-    return [...owners.values()];
+    const rows = (this.db?.listBranchOwners("branch IS NOT NULL OR json_extract(summary, '$.pullRequestUrl') IS NOT NULL") ?? [])
+      .filter((row) => !this.deleted.has(row.id) && !this.held.has(row.id));
+    return listBranchOwners(rows, [...this.held.values()], (id) => this.getRun(id));
   }
 
   /** The rows a column query returned, as records, with memory laid over them: a held run
