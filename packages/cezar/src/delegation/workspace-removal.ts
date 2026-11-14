@@ -239,6 +239,18 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         return [...refs].map(([ref, sha]) => ({ ref, sha }));
       }
 
+      /** The refs the branch delete verifies. Unless the destroy removed the present checkout itself
+       * (`forced`, bound to the unchanged tip), prove on every attempt that no work is lost
+       * (hearsay-tools/squawk#911); the proof takes several Git calls, so the branch and its reflog
+       * are read once more, last. Undefined when the proof fails or the branch changed. */
+      async function deletionWitnesses(receipt: Receipt, checkpoint: Cleanup, current: Awaited<ReturnType<typeof verifyBranch>>) {
+        if (checkpoint.forced) return [];
+        const witnesses = await keepingRefs(current);
+        if (!witnesses) { named = await strandedName(current.sha); return undefined; }
+        const last = await verifyBranch(repoRoot, workspace, receipt);
+        return last.sha === checkpoint.sha && hash(last.log.content) === checkpoint.logHash ? witnesses : undefined;
+      }
+
       async function removeBranch(receipt: Receipt, checkpoint: Cleanup): Promise<void> {
         if (await exists(workspace.path) || await exists(receipt.gitDir) || (await registered()).includes(`worktree ${workspace.path}`)) return;
         remaining = ['branch'];
@@ -250,15 +262,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           // hearsay-tools/squawk#910: a tip that moved after the checkpoint is named like a stranded one.
           if (current.sha !== checkpoint.sha) { named = await movedBranch(checkpoint.sha, current.sha, 'the tip destroy recorded'); return; }
           if (hash(current.log.content) !== checkpoint.logHash) return;
-          // Unless the destroy removed the present checkout itself (`forced`, bound to the unchanged
-          // tip above), prove on every attempt that no work is lost (hearsay-tools/squawk#911).
-          const witnesses = checkpoint.forced ? [] : await keepingRefs(current);
-          if (!witnesses) { named = await strandedName(current.sha); return; }
-          // The proof read the branch over several Git calls: read it once more, last, before the delete.
-          if (!checkpoint.forced) {
-            const last = await verifyBranch(repoRoot, workspace, receipt);
-            if (last.sha !== checkpoint.sha || hash(last.log.content) !== checkpoint.logHash) return;
-          }
+          const witnesses = await deletionWitnesses(receipt, checkpoint, current);
+          if (!witnesses) return;
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
           assertUnheld?.();

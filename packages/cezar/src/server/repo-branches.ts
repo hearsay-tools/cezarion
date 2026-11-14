@@ -212,6 +212,15 @@ function verifiedRefs(refs: ReadonlyArray<{ ref: string; sha: string }>): string
   return [...tips].map(([ref, sha]) => `verify ${ref} ${sha}`);
 }
 
+/** The `verify` lines of one branch delete: `refs`, and a released receipt-owned branch's reflog
+ *  witnesses once its reflog is still the one its proof read, read last before the transaction.
+ *  Null when that reflog changed or a ref would be verified at two tips. */
+async function deleteVerifies(run: (args: string[]) => Promise<WorktreeGitResult>, name: string,
+  proven: ReleasedBranch | undefined, refs: ReadonlyArray<{ ref: string; sha: string }>): Promise<string[] | null> {
+  if (proven && (await readReflog(run, name)).stdout !== proven.reflog) return null;
+  return verifiedRefs([...refs, ...(proven?.witnesses ?? [])]);
+}
+
 /** An orphan receipt's landed branch stays in use: the owned-workspace removal deletes it. */
 function keepOrphanLandedBranches(drafts: Draft[], released: ReadonlyMap<string, ReleasedBranch>): void {
   for (const d of drafts) if (released.get(d.head.name)?.orphan && (d.cls === 'merged' || d.cls === 'empty')) d.cls = 'active';
@@ -846,29 +855,19 @@ export async function deleteBranches(
           // Not `git branch -D`: a squash-merged branch is not an ancestor of the base, and only a
           // ref transaction can make "the base did not move" — and, for an empty branch, "the ref
           // that keeps its commits did not move" — part of the same atomic step.
-          // A released receipt-owned branch: the refs that keep its reflog's commits stay put too.
-          const verified = verifiedRefs([
-            ...(baseFullRef && baseSha ? [{ ref: baseFullRef, sha: baseSha }] : []),
-            ...(witness ? [witness] : []),
-            ...(released.get(name)?.witnesses ?? []),
-          ]);
-          if (!verified) {
-            refused.push({ name, reason: `it, ${payload.base} or the branch that keeps its commits changed since it was classified — refresh and try again` });
-            continue;
-          }
-          const transaction = [...verified, `delete refs/heads/${name} ${candidate.tip}`].join('\n') + '\n';
           // `--no-deref`, and a symbolic ref refused outright: the transaction may only ever remove the
           // exact ref that was classified and named, never one an alias points at.
           if ((await lockedGit(input.root, ['symbolic-ref', '-q', `refs/heads/${name}`])).ok) {
             refused.push({ name, reason: `not a ${productName('cezar')} task branch` });
             continue;
           }
-          // A released branch's proof covers the reflog it read: one that changed since needs a new proof.
-          const proven = released.get(name);
-          if (proven && (await readReflog((args) => lockedGit(input.root, args), name)).stdout !== proven.reflog) {
+          const verified = await deleteVerifies((args) => lockedGit(input.root, args), name, released.get(name),
+            [...(baseFullRef && baseSha ? [{ ref: baseFullRef, sha: baseSha }] : []), ...(witness ? [witness] : [])]);
+          if (!verified) {
             refused.push({ name, reason: `it, ${payload.base} or the branch that keeps its commits changed since it was classified — refresh and try again` });
             continue;
           }
+          const transaction = [...verified, `delete refs/heads/${name} ${candidate.tip}`].join('\n') + '\n';
           const res = await lockedGit(input.root, ['update-ref', '--no-deref', '--stdin'], undefined, transaction);
           if (!res.ok) {
             refused.push({ name, reason: `it, ${payload.base} or the branch that keeps its commits changed since it was classified — refresh and try again` });
