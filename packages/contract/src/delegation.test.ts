@@ -10,6 +10,7 @@ import {
   workerListResultSchema, workerParamsSchema, workerResultFileSchema, workerSpawnRequestSchema, workerSpawnResultSchema,
   workerSteerRequestSchema, workerSteerResultSchema, workerStopResultSchema, workerWaitRequestSchema, workerWaitResultSchema,
 } from './delegation.ts';
+import { runStatusSchema } from './run-status.ts';
 import { runnerSchema } from './runner.ts';
 import { RUN_STATUS, WAIT_PHASE, WAIT_VIA, WORKER_OUTCOME_STATUS } from './test-factories.testkit.ts';
 
@@ -376,7 +377,7 @@ describe('collected worker results', () => {
   });
 
   it.each([
-    ['status', ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']],
+    ['status', runStatusSchema.options],
     ['outcome', ['running', 'review-ready', 'completed', 'failed', 'cancelled', 'destroyed']],
     ['lastExecutionOutcome', ['running', 'review-ready', 'completed', 'failed', 'cancelled']],
     ['cleanup', ['retained', 'requested', 'terminating', 'cleaning', 'complete', 'incomplete']],
@@ -420,7 +421,7 @@ describe('worker inspection, list and relationships', () => {
   const entry = { workerId: U1, parentRunId: U2, status: RUN_STATUS.done, workspace, destroy, revision: 1, settled: true, destroyed: false };
 
   it('keeps every inspection field and accepts every status', () => {
-    acceptsEach(workerInspectionSchema, inspection, 'status', ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']);
+    acceptsEach(workerInspectionSchema, inspection, 'status', runStatusSchema.options);
     refuses(workerInspectionSchema, { ...inspection, model: 'm'.repeat(513) });
     refuses(workerInspectionSchema, { ...inspection, inputs: Array.from({ length: 33 }, () => input) });
     accepts(workerDestroyViewSchema, inspection.destroy);

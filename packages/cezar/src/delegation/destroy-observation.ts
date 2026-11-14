@@ -51,10 +51,11 @@ function adminDir(worktree: string): string | undefined {
  * execution checkpoint, the process record, the scratch locations, the worktree and its own admin
  * dir, lock and ownership marker and, given the repository's common Git dir, the ownership receipt
  * and its cleanup checkpoint, the branch ref, `packed-refs`, the branch reflog and the
- * linked-worktree admin dirs. Synchronous, with no git and no `/proc` scan. The worktree mutation
+ * linked-worktree admin dirs, and the project's `worktreeTeardown` value the caller read.
+ * Synchronous, with no git and no `/proc` scan. The worktree mutation
  * lock is not here: every full attempt takes it, so its stamp would change on every attempt.
  */
-export function observeDestroy({ store, dataDir, commonDir, workerId }: { store: RunStore; dataDir: string; commonDir?: string | undefined; workerId: string }): string {
+export function observeDestroy({ store, dataDir, commonDir, workerId, teardown }: { store: RunStore; dataDir: string; commonDir?: string | undefined; workerId: string; teardown?: unknown }): string {
   const run = store.getRun(workerId);
   if (run?.delegation?.role !== 'worker') return JSON.stringify({ status: run?.status, role: run?.delegation?.role });
   const { destroy: _destroy, ...delegation } = run.delegation;
@@ -64,7 +65,7 @@ export function observeDestroy({ store, dataDir, commonDir, workerId }: { store:
   const { path, branch, resourceId } = delegation.workspace;
   const admin = adminDir(path);
   return JSON.stringify({
-    status: run.status, delegation,
+    status: run.status, delegation, teardown: teardown ?? null,
     receipt: receipt ? receipt.deletion ?? 'present' : 'absent',
     execution: execution ?? 'absent',
     processes: execution ? store.readWorkerProcesses(workerId, execution.generation) : 'absent',

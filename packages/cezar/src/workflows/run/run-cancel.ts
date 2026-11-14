@@ -63,11 +63,17 @@ export class RunCancel {
   }
 
   private cancelWorkerExecution(runId: string): void {
-    if (this.context.store.getRun(runId)?.delegation?.role === 'worker') {
+    const run = this.context.store.getRun(runId);
+    if (run?.delegation?.role === 'worker') {
       const proof = this.context.store.readWorkerExecution(runId);
-      // The first cancel write names the cancellation's one event, a queued worker's too (B12).
-      this.context.store.move(runId, 'stop-worker', {}, this.line.indexOf(runId) >= 0 ? { event: CANCELLED_WHILE_QUEUED } : {});
-      this.workerExecutions.markStopped(runId);
+      const queued = this.line.indexOf(runId) >= 0;
+      // A settled worker keeps its status and the result its parent collects (hearsay-tools/squawk#1907).
+      // A session still closing takes the late Stop a root's does.
+      if (queued || !['review', 'done', 'failed', 'cancelled'].includes(run.status)) {
+        // The first cancel write names the cancellation's one event, a queued worker's too (B12).
+        this.context.store.move(runId, 'stop-worker', {}, queued ? { event: CANCELLED_WHILE_QUEUED } : {});
+        this.workerExecutions.markStopped(runId);
+      }
       if (!this.workerExecutions.has(runId) && !this.host.active.has(runId) && !this.line.hasStarting(runId) && proof?.phase === 'queued') {
         this.context.store.commitWorkerExecutionComplete(runId, proof.generation);
       }

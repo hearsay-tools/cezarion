@@ -1287,12 +1287,12 @@ Squawk is not married to one vendor. Every agent step runs through a single
 
 | Backend | CLI | How Squawk drives it | Tool access |
 |---|---|---|---|
-| **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`HSQ_APPROVAL_GATE=1` (`CEZ_APPROVAL_GATE` fallback) → `acceptEdits` + approval UI; `HSQ_CLAUDE_PERMISSION_MODE=bypass` (`CEZ_CLAUDE_PERMISSION_MODE` fallback) → `--dangerously-skip-permissions`). |
+| **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); an empty `allowedTools` sends `--tools ""`, which removes every built-in tool, and pre-approves Squawk's own tools (other MCP tools follow the permission mode); `dontAsk` denies unapproved tools without prompting (`HSQ_APPROVAL_GATE=1` (`CEZ_APPROVAL_GATE` fallback) → `acceptEdits` + approval UI; `HSQ_CLAUDE_PERMISSION_MODE=bypass` (`CEZ_CLAUDE_PERMISSION_MODE` fallback) → `--dangerously-skip-permissions`). |
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `HSQ_CODEX_NETWORK=0` (`CEZ_CODEX_NETWORK` fallback) requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. Squawk answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
 | **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Resumable `--print --output-format stream-json` turns on a qualified build; an unqualified build fails the task before inference. | Print mode admits marketplace plugins, including user and team plugins. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
 | **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the Squawk tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
-| **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
+| **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. `--tools` filters built-in tools only, so MCP and extension tools stay callable under a narrowed list. |
 
 > ⚠️ **OpenCode, pi and OMP support are experimental.** These runners work but are less
 > battle-tested than the Claude Code and Codex backends, and OpenCode ignores
@@ -1531,7 +1531,8 @@ JSON:
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable
   "plannerModel": "sonnet",  // model the "Plan first" button uses to draft chains
   "baseBranch": "develop",   // branch worktrees fork from + PRs target (also settable in the Git view)
-  "worktreeSetup": { "commands": ["npm ci"] } // prepare each new worktree before the agent starts (below)
+  "worktreeSetup": { "commands": ["npm ci"] }, // prepare each new worktree before the agent starts (below)
+  "worktreeTeardown": { "commands": ["docker compose down"] } // stop a worker worktree's own services before destroy (below)
 }
 ```
 
@@ -1624,6 +1625,28 @@ Without the key nothing runs, exactly as before. Examples:
 | Go | `["go mod download"]` |
 | Rust | `["cargo fetch"]` |
 | Copy local env | `["cp \"$CEZ_PROJECT_ROOT/.env\" .env"]` |
+
+### Stopping a worker worktree's services before destroy
+
+A worker's worktree can start things that keep running after the worker settles: a test
+server, a file watcher, a container. Worker destroy refuses while a process still works in
+the worktree, and names each one by its pid and executable name, never its arguments. Give the project a
+`worktreeTeardown` and destroy runs those commands in the worker's worktree first:
+
+```jsonc
+// .ai/squawk/config.json (.ai/cezar/config.json before the project moves)
+"worktreeTeardown": {
+  "commands": ["command -v my-watcher >/dev/null 2>&1 && my-watcher stop . || true"],
+  "timeoutSeconds": 120 // optional, per command; default 900, max 7200
+}
+```
+
+The key has the shape, the limits and the environment of `worktreeSetup`. The commands run
+only in a worktree whose ownership destroy has proven, before it looks for holders. A failed
+command or a timeout is recorded in the worker's events, and destroy goes on: a process that
+still holds the worktree is named in the refusal and never signalled, and the next retry runs
+the teardown again. The key is edited in the config file only; Settings does not show it.
+Without the key nothing runs, exactly as before.
 
 ### Editing the agents' own config (Settings → Agent config)
 

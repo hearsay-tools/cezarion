@@ -127,3 +127,11 @@ To limit it, set `HSQ_PROJECT_WARMUP=0` and `HSQ_AUTOMATIONS=0`, or unregister p
 registered project is now prepared at start, the automatic move from `.ai/cezar/` to
 `.ai/squawk/` described above also runs for registered projects the mode used to hide;
 an older binary then stops seeing that project's earlier tasks.
+
+The project config key `worktreeTeardown` is optional and additive: it takes the shape of
+`worktreeSetup`, and a config without it destroys workers as before. Worker destroy no
+longer stops a test app it finds through `.ai/qa/test-env.json` and
+`.ai/qa/test-env-lease.sqlite`; a project that relied on that lists its own stop command in
+`worktreeTeardown`. Stop on an owned worker that already settled keeps its `review`, `done`
+or `failed` status and the result its parent collects, instead of recording `cancelled`
+(hearsay-tools/squawk#1907).

@@ -1,11 +1,10 @@
 /**
  * Host model discovery guard — AGENT_PROTOCOL.md §10, "Host model discovery".
  *
- * Discovery landed one runner at a time (#1 pi, #18 invalidation, #74 codex reasons, #89
- * claude), so nothing derived it from `RUNNER_IDS`: `modelDiscoveryRunnerSchema` is a hand-kept
- * enum and `RunnerModelCatalog` takes a `Partial` adapter map. A runner added without its
- * adapter therefore fails nowhere — the picker just shows presets again. This suite makes that
- * a red test. A runner whose CLI has no model-listing surface at all is recorded in
+ * `modelDiscoveryRunnerSchema` is `runnerSchema`, so every runner is a discovery runner, but
+ * `RunnerModelCatalog` takes a `Partial` adapter map. A runner added without its adapter
+ * therefore fails nowhere — the picker just shows presets again. This suite makes that a red
+ * test. A runner whose CLI has no model-listing surface at all is recorded in
  * `MODEL_DISCOVERY_EXEMPTIONS` with the wire reason, never "not implemented yet".
  */
 import { existsSync } from 'node:fs';
@@ -23,7 +22,7 @@ interface ModelDiscoveryExemption {
   readonly reason: string;
 }
 
-/** Runners with no host-local model catalog to discover. Empty today: all four discover. */
+/** Runners with no host-local model catalog to discover. Empty today: every runner discovers. */
 export const MODEL_DISCOVERY_EXEMPTIONS: readonly ModelDiscoveryExemption[] = [];
 
 const here = dirname(fileURLToPath(import.meta.url));

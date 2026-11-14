@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it, vi } from 'vitest';
-import { leaseGroupLive, leaseIdentity, reclaimTestEnvHolders } from './detached-process.ts';
+import { leaseGroupLive, leaseIdentity, reclaimTestEnvHolders } from '../../../.ai/scripts/test-env-lease.mjs';
 
 afterEach(() => vi.unstubAllGlobals());
 it.each([

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveAttention } from './attention.ts';
 import { engineOwnsRun, isSessionOpen, isSweepable } from './run-predicates.ts';
+import { runStatusSchema } from './run-status.ts';
 import type { ArchiveFinishedScope, RunStatus } from './runs.ts';
 import { computeWaitingOn, isUsageLimitHold } from './waits.ts';
 
@@ -11,7 +12,7 @@ import { computeWaitingOn, isUsageLimitHold } from './waits.ts';
  * time set and unset.
  */
 
-const ALL_STATUSES: readonly RunStatus[] = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'];
+const ALL_STATUSES: readonly RunStatus[] = runStatusSchema.options;
 const AT = '2026-10-25T23:00:00.000Z';
 const records = ALL_STATUSES.flatMap((status) => [{ status }, { status, autoResumeAt: AT }]);
 const name = (run: { status: RunStatus; autoResumeAt?: string }) => `${run.status}${run.autoResumeAt ? ' with a resume time' : ''}`;

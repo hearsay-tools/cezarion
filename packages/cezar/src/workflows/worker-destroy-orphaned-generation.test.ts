@@ -196,9 +196,10 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         const blocked = await service.destroyForHuman('reopened', w.id);
         expect(blocked).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
         const assertReported = (error: string | undefined) => {
-          const reason = /^Worker termination is not proven: (processes [\d, ]+ still hold the worker's worktree or scratch); retry cleanup later$/.exec(error ?? '')?.[1];
+          const reason = /^Worker termination is not proven: (processes .+ still hold the worker's worktree or scratch); retry cleanup later$/.exec(error ?? '')?.[1];
           expect(reason).toBeDefined();
-          const reported = reason!.match(/\d+/g)!.map(Number).sort((a, b) => a - b);
+          // Each holder is its pid, then its command in parentheses (hearsay-tools/squawk#914).
+          const reported = [...reason!.matchAll(/(?:processes |, )(\d+)(?= \(|,| still)/g)].map(match => Number(match[1])).sort((a, b) => a - b);
           const boundedDiagnostics = blockerDiagnostics.slice(0, 8).map(entry => ({ ...entry, cwd: entry.cwd?.slice(0, 160) }));
           expect(reported, JSON.stringify(boundedDiagnostics)).toEqual([...blockerPids].sort((a, b) => a - b));
           for (const pid of expectedPids) expect(reported).toContain(pid);

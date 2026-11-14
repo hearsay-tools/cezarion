@@ -150,6 +150,27 @@ describe('buildClaudeArgs governed native messaging', () => {
   });
 });
 
+// hearsay-tools/squawk#1849: the planner and the run namer send an empty list on the default runner.
+describe('buildClaudeArgs empty tool list', () => {
+  const squawkTools = { name: 'cezar_ci_probe', command: 'node', args: ['/installed/ci-wait/mcp.js'] };
+  const empty = { userPrompt: 'do it', cwd: '/tmp', toolGrant: { kind: 'explicit', tools: [] } } as const;
+  const toolFlags = (args: string[]) => args.flatMap((arg, i) => (arg === '--tools' || arg === '--allowedTools' ? [arg, args[i + 1]] : []));
+
+  it.each(['dontAsk', 'acceptEdits', 'bypass'])('removes every built-in tool in permission mode %s', mode => {
+    expect(toolFlags(buildClaudeArgs(empty, { CEZ_CLAUDE_PERMISSION_MODE: mode }))).toEqual(['--tools', '']);
+  });
+
+  it('pre-approves the Squawk tools', () => {
+    const allowed = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']
+      .map(tool => `mcp__cezar_ci_probe__${tool}`).join(',');
+    expect(toolFlags(buildClaudeArgs({ ...empty, squawkTools }, {}))).toEqual(['--tools', '', '--allowedTools', allowed]);
+  });
+
+  it('leaves an unset grant to Claude\'s own settings', () => {
+    expect(toolFlags(buildClaudeArgs({ ...empty, squawkTools, toolGrant: UNSET_TOOL_GRANT }, {}))).toEqual([]);
+  });
+});
+
 describe('buildClaudeArgs permission mode', () => {
   const spec = { userPrompt: 'do it', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
