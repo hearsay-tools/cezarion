@@ -307,6 +307,25 @@ setTimeout(() => process.exit(0), 50);
     expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
   });
 
+  // CodeRabbit on hearsay-tools/squawk#3545: a caller that throws still waits for Git's descendants.
+  it('waits for observed holders before a failing save rejects', async () => {
+    let held = true;
+    const left = { pid: 4545, startToken: 'left-before-the-throw' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [left.pid] : [], processes: held ? [left] : [], inspectionFailed: false }) }));
+    const blocked = vi.fn();
+    let settled = false;
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['status']);
+      throw new Error('unexpected');
+    }).finally(() => { settled = true; });
+    const rejected = job.catch((error: Error) => error.message);
+    await until(() => settled || blocked.mock.calls.length > 0, 'the save to report the held worktree');
+    expect(settled).toBe(false);
+    held = false;
+    expect(await Promise.race([rejected, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unexpected');
+  });
+
   // Review round 3 of hearsay-tools/squawk#3545: the proof is compared after the holders are
   // merged in, so a new incarnation of the same PID and executable reaches the evidence.
   it('reports a new incarnation of the same holder PID', async () => {

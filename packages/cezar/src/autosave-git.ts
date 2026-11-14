@@ -120,11 +120,17 @@ export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, 
     }
     save.holders = holders;
   }
-  const result = await run(async args => {
-    const ran = await runAutosaveGit(save, args);
-    await save.holders(); // Observes this command's descendants; the save waits for them below.
-    return ran;
-  });
+  let result: T;
+  try {
+    result = await run(async args => {
+      const ran = await runAutosaveGit(save, args);
+      await save.holders(); // Observes this command's descendants; the save waits for them below.
+      return ran;
+    });
+  } catch (error) {
+    await settleHolders(save); // An unexpected failure still waits for Git's descendants.
+    throw error;
+  }
   return await settleHolders(save) ? result : unsuccessful;
 }
 
