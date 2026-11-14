@@ -1,12 +1,17 @@
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { shellQuote } from './core/shell-env.ts';
 
-function git(cwd: string, args: string[]): Promise<{ code: number; stdout: string }> {
-  return new Promise(done => {
-    execFile('git', args, { cwd, encoding: 'utf8', timeout: 30_000 }, (error, stdout) => done({
-      code: !error ? 0 : typeof error.code === 'number' ? error.code : -1, stdout: (stdout ?? '').trim(),
-    }));
-  });
+const run = promisify(execFile);
+
+async function git(cwd: string, args: string[]): Promise<{ code: number; stdout: string }> {
+  try {
+    const { stdout } = await run('git', args, { cwd, encoding: 'utf8', timeout: 30_000 });
+    return { code: 0, stdout: String(stdout).trim() };
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    return { code: typeof code === 'number' ? code : -1, stdout: '' };
+  }
 }
 
 /**

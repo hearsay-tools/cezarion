@@ -79,28 +79,21 @@ export async function createDraftPr(input: DraftPrInput): Promise<DraftPrOutcome
 
 /** Why the task branch cannot hold the run's final state, or `undefined` once it does. */
 async function saveFinalWork(worktree: string, branch: string): Promise<string | undefined> {
-  // The push publishes the task branch: with HEAD elsewhere, the final work is not on it
-  // (hearsay-tools/squawk#1110). Refuse and let the agent decide where its work belongs.
-  const left = await headLeftTaskBranch(worktree, branch);
-  if (left) return left;
-
   // Final autosave: the branch must hold everything before it leaves the box.
   // This is the LAST flush — unlike the turn-end and run-finalize ones there is
   // no later autosave to pick the work up, so a refusal (conflicted tree) or a
   // failed commit has to stop the publish instead of silently opening a PR from
   // a branch that is missing the run's final state. `taskBranch` commits only onto
-  // the branch the push publishes; a checkout during the save skips it.
+  // the branch the push publishes, and skips while HEAD is elsewhere.
   const saved = await autosaveCommit(worktree, 'pre-PR', { taskBranch: branch });
-  if (saved === 'skipped') {
-    return await headLeftTaskBranch(worktree, branch) ?? 'worktree HEAD moved during the final autosave — publish again';
-  }
-  if (saved === 'refused') {
-    return 'worktree has unresolved merge conflicts — resolve them, then publish again';
-  }
-  if (saved === 'failed') {
-    return 'could not commit the final changes — check git status in the worktree';
-  }
-  return undefined;
+  if (saved === 'refused') return 'worktree has unresolved merge conflicts — resolve them, then publish again';
+  if (saved === 'failed') return 'could not commit the final changes — check git status in the worktree';
+  // The push publishes the task branch: with HEAD elsewhere, the final work is not on it
+  // (hearsay-tools/squawk#1110). Checked after the save, so a clean tree that skipped the
+  // save's own HEAD read is covered too. Refuse and let the agent decide where its work belongs.
+  const left = await headLeftTaskBranch(worktree, branch);
+  if (left || saved !== 'skipped') return left;
+  return 'worktree HEAD moved during the final autosave — publish again';
 }
 
 /**

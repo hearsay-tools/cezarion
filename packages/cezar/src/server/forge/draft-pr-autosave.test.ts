@@ -116,6 +116,14 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
     expect((await git(['status', '--porcelain'])).stdout.trim()).toBe('M a.txt');
   });
 
+  it('refuses to publish when the final work is committed on another branch and the tree is clean', async () => {
+    await git(['checkout', '-q', '-b', 'agent-branch']);
+    writeFileSync(join(repo, 'a.txt'), 'final work\n');
+    await git([...GIT_ID, 'commit', '-qam', 'final work']);
+    const outcome = await createDraftPr(input());
+    expect(outcome.ok === false && outcome.error).toMatch(/^Worktree HEAD is on agent-branch, not on its task branch cez\/abc123\./);
+  });
+
   it('publishes when there was nothing left to flush', async () => {
     const outcome = await createDraftPr(input());
     expect(outcome.ok).toBe(true);
