@@ -379,7 +379,7 @@ describe('debounced saves write only what changed', () => {
 
 describe('loading normalizes and saves exactly the rows it changed', () => {
   const steps = [{ id: 's', name: 'S', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }];
-  // One case per field `loadNormalizedFields` watches; the control row must not be rewritten.
+  // One case per load-time repair; the control row must not be rewritten.
   const cases: Array<[string, RunRecord, boolean | undefined, (run: RunRecord) => void]> = [
     ['an accepted stop', record('stop', { status: RUN_STATUS.running, stopping: true, steps }), true, (run) => expect(run).toMatchObject({ status: RUN_STATUS.cancelled, steps: [{ status: STEP_STATUS.cancelled }] })],
     ['an interrupted live run', record('live', { status: RUN_STATUS.running, steps }), undefined, (run) => expect(run).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted'), steps: [{ status: STEP_STATUS.failed }] })],

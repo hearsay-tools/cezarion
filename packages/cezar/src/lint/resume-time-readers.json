@@ -10,7 +10,6 @@
     "packages/cezar/src/workflows/run-scheduling.ts": "derives account holds from future resume deadlines",
     "packages/cezar/src/workflows/run/run-line.ts": "queue rescue reads the resume time",
     "packages/cezar/src/runs/run-row.ts": "the live column keeps an older row with a stale time live, so the store can heal it",
-    "packages/cezar/src/runs/run-index.ts": "the cold reader decodes a summary with a stale time to heal it",
     "packages/cezar/src/task-cli/projections.ts": "prints the resume time beside the usage-limit label",
     "packages/web/src/lib/run-row-meta.ts": "prints the time until the resume",
     "packages/web/src/lib/tasks-table.ts": "prints the resume time in the status cell",

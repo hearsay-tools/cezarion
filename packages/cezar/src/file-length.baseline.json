@@ -5,7 +5,7 @@
     "packages/cezar/src/core/codex-app-server-runner.ts": 1260,
     "packages/cezar/src/core/opencode-server-runner.ts": 1717,
     "packages/cezar/src/runs/run-database.ts": 1158,
-    "packages/cezar/src/runs/store.ts": 3434,
+    "packages/cezar/src/runs/store.ts": 3431,
     "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1005,
     "packages/cezar/src/server/forge/github.ts": 3216,
     "packages/cezar/src/server/server.ts": 5102,
