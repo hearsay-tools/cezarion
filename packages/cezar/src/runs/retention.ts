@@ -54,10 +54,10 @@ export function isReclaimable(run: RunRecord, lookup: (id: string) => RunRecord 
 
 /**
  * Given the runs with a worktree and the keep-count `keep`, return the ids of the finished
- * worktrees whose *directory* should be reclaimed: every worker of an ended family with no live or
- * destroying worker, then, of the rest, keep the `keep` most-recently-finished reclaimable
+ * worktrees whose *directory* should be reclaimed: every worker of an ended family, then, of the rest, keep the `keep` most-recently-finished reclaimable
  * worktrees and reclaim the others. `lookup` finds an owned worker's parent; without it, the
- * parent is looked for among `runs`. `workersOf` lists a parent's workers; without it, among `runs`.
+ * parent is looked for among `runs`. A worker whose family has a live or destroying worker is kept.
+ * `workersOf` lists a parent's workers; without it, among `runs`.
  *
  * `keep === 0` means "unlimited — never auto-reclaim" and returns `[]`.
  * Pure: no I/O, no mutation of the input.
@@ -70,9 +70,10 @@ export function selectReclaimableWorktrees(
     runs.filter((run) => run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId),
 ): string[] {
   if (!Number.isFinite(keep) || keep <= 0) return [];
-  const reclaimable = runs.filter((run) => isReclaimable(run, lookup));
-  const ended = reclaimable.filter((run) => workerFamilyEnded(run, lookup) &&
-    run.delegation?.role === 'worker' && !workersOf(run.delegation.parentRunId).some(isLiveRecord));
+  // A family with a live or destroying worker keeps every directory, inside the budget and past it.
+  const reclaimable = runs.filter((run) => isReclaimable(run, lookup) &&
+    !(run.delegation?.role === 'worker' && workersOf(run.delegation.parentRunId).some(isLiveRecord)));
+  const ended = reclaimable.filter((run) => workerFamilyEnded(run, lookup));
   const budgeted = reclaimable.filter((run) => !ended.includes(run))
     .sort((a, b) => (recencyKey(a) < recencyKey(b) ? 1 : recencyKey(a) > recencyKey(b) ? -1 : 0));
   return [...ended, ...budgeted.slice(keep)].map((r) => r.id);

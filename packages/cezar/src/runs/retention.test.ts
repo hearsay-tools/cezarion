@@ -159,6 +159,8 @@ describe('selectReclaimableWorktrees (#483)', () => {
     // A live or destroying sibling keeps the family's directories inside the budget.
     for (const sibling of [run({ id: 's', status: RUN_STATUS.running, role: 'worker' }), run({ id: 's', status: RUN_STATUS.done, role: 'worker', destroying: true })]) {
       expect(selectReclaimableWorktrees([archived, worker, newer, sibling], 2)).toEqual([]);
+      expect(selectReclaimableWorktrees([archived, worker, newer, sibling], 1)).toEqual([]);
+      expect(selectReclaimableWorktrees([parent(RUN_STATUS.failed), worker, newer, sibling], 1)).toEqual([]);
     }
   });
 
