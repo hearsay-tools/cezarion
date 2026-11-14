@@ -1,4 +1,3 @@
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -88,7 +87,7 @@ describe('RunManager agent-profile resolution', () => {
       'CEZ_HANDOFF_FILE',
       'CEZ_TASK_ID',
       'CEZ_TODOS_FILE',
-      ...(REBRAND_SWITCH ? ['HSQ_ARTIFACTS_DIR', 'HSQ_HANDOFF_FILE', 'HSQ_TASK_ID', 'HSQ_TODOS_FILE'] : []),
+      'HSQ_ARTIFACTS_DIR', 'HSQ_HANDOFF_FILE', 'HSQ_TASK_ID', 'HSQ_TODOS_FILE',
       'TEMP',
       'TMP',
       'TMPDIR',

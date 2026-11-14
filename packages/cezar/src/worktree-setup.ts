@@ -139,11 +139,10 @@ export function worktreeSetupEnv(opts: {
   projectRoot: string;
   runId: string;
   tmpEnv: Record<string, string>;
-  rebrand?: boolean;
   source?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   return buildCommandEnv({
-    extraEnv: { ...opts.tmpEnv, ...productEnvEntries('TASK_ID', opts.runId, opts.rebrand), ...productEnvEntries('PROJECT_ROOT', opts.projectRoot, opts.rebrand) },
+    extraEnv: { ...opts.tmpEnv, ...productEnvEntries('TASK_ID', opts.runId), ...productEnvEntries('PROJECT_ROOT', opts.projectRoot) },
     ...(opts.source ? { source: opts.source } : {}),
   });
 }

@@ -6,13 +6,12 @@ import { TaskWebhooks } from '../runs/webhook.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { loadWorkspaceConfig, PROJECT_ID_RE, type WorkspaceProject } from '../workspace/config.ts';
 import { allocateProjectSlug, listProjects } from '../workspace/projects.ts';
-import { resolveCapabilities } from './capabilities.ts';
 import { assertProjectAdmitted, CockpitAlreadyRunningError, projectAdmissionRefusal, ProjectMigrationFencedError } from './cockpit-ownership.ts';
 import { ProjectMigrationRecoveryError } from '../project-migration/recovery.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
-type ContextServices = Pick<ServerDeps, 'contexts' | 'createManager' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home' | 'legacyCanary'> & {
+type ContextServices = Pick<ServerDeps, 'contexts' | 'createManager' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home'> & {
   /** Every project's manager builds runners the way the boot manager does. */
   manager: Pick<ServerDeps['manager'], 'createRunner'>;
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
@@ -28,7 +27,7 @@ export function createWorkspaceProjectContexts(
     addressManager?: (project: Parameters<NonNullable<ProjectContextDeps['prepareManager']>>[0]) => void;
   },
 ): ProjectContexts {
-  // Both entry points supply the visible registry (hearsay-tools/cezarion#2320).
+  // Both entry points supply the registry (hearsay-tools/cezarion#2320).
   return deps.contexts ?? new ProjectContexts({
     home: deps.home,
     createRunner: deps.manager.createRunner,
@@ -38,7 +37,6 @@ export function createWorkspaceProjectContexts(
     semaphore: deps.semaphore,
     preview: deps.previewHost,
     toolActivity: deps.toolActivity,
-    rebrand: deps.legacyCanary,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       options.addressManager?.(project);
@@ -73,8 +71,8 @@ function classifyProjectBuildFailure(error: unknown) {
 }
 
 /** Workspace identity and lookup rules shared by HTTP, live feeds, upgrades and registry edits. */
-export function createWorkspaceProjects(options: { bootRoot: string; bootProjectId?: string | undefined; bindHost?: string | undefined; home: Home }) {
-  const { bootRoot, bootProjectId, bindHost, home } = options;
+export function createWorkspaceProjects(options: { bootRoot: string; bootProjectId?: string | undefined; home: Home }) {
+  const { bootRoot, bootProjectId, home } = options;
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
   // and plumbs its registry id in via `deps.bootProjectId`. Legacy callers and
@@ -109,14 +107,6 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     }
     return { id: await canonicalProjectId(raw) };
   };
-  const singleProject = () => resolveCapabilities(process.env, bindHost).singleProject;
-  const visibleRegistry = async <T extends { id: string }>(registry: readonly T[], resolvedBootId?: string): Promise<readonly T[]> => {
-    if (!singleProject()) return registry;
-    const bootId = resolvedBootId ?? await resolveBootProject();
-    return registry.filter((project) => project.id === bootId);
-  };
-  const projectSelector = async () => singleProject() ? { projectId: await resolveBootProject() } : undefined;
-  const listVisibleProjects = async () => listProjects(await projectSelector(), home);
   const registryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
     const id = await canonicalProjectId(projectId);
     return (await loadWorkspaceConfig(home.workspaceConfig)).projects.find((entry) => entry.id === id);
@@ -163,8 +153,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     if (failure.kind === 'missing-root') return { error: `project folder not found: ${failure.error.projectId}`, status: 409 };
     return { error: failure.error.message, status: failure.kind === 'unknown-project' ? 404 : 409 };
   };
-  return { resolveBootProject, canonicalProjectId, resolveProjectId, singleProject, visibleProjects: visibleRegistry,
-    listVisibleProjects, registryEntry, resolveRegistryEntry, resolveProject, bindContexts, lookupProject, resolveLiveProject, projectFailure };
+  return { resolveBootProject, canonicalProjectId, resolveProjectId, listProjects: () => listProjects(home), registryEntry, resolveRegistryEntry, resolveProject, bindContexts, lookupProject, resolveLiveProject, projectFailure };
 }
 
 export type WorkspaceProjects = ReturnType<typeof createWorkspaceProjects>;

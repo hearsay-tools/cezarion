@@ -1,7 +1,7 @@
 import { Home } from '../../home/home.ts';
 import { useTestHome } from '../../home/test-home.testkit.ts';
 import { testHome } from '../../home/test-home.testkit.ts';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,7 +50,7 @@ describe('macosx-ngrok', () => {
     expect(p).toContain('<string>4321</string>');
     expect(p).toContain('<string>/repo</string>');
     expect(p).toContain('<key>CEZ_REMOTE</key>');
-    expect(p).toContain('<string>ai.cezar.cockpit</string>');
+    expect(p).toContain('<string>tools.hearsay.squawk.cockpit</string>');
   });
 
   it('dry-run install walks every step and server-uninstall reverses it', async () => {
@@ -154,7 +154,7 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
       interactive: async () => 0,
     };
     await ngrokStepOf().run(ctxFor(runner));
-    const p = join(home, 'Library', 'LaunchAgents', 'ai.cezar.ngrok.plist');
+    const p = join(home, 'Library', 'LaunchAgents', 'tools.hearsay.squawk.ngrok.plist');
     const mode = statSync(p).mode & 0o777;
     expect(mode).toBe(0o600);
     expect(readFileSync(p, 'utf8')).toContain('ops:longenough'); // creds live here → hence 0600
@@ -182,7 +182,7 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
       interactive: async () => 0,
     };
     await ngrokStepOf().undo(ctxFor(runner), null);
-    expect(commands.some((c) => c[0] === 'bootout' && (c[1] ?? '').includes('ai.cezar.ngrok'))).toBe(true);
+    expect(commands.some((c) => c[0] === 'bootout' && (c[1] ?? '').includes('tools.hearsay.squawk.ngrok'))).toBe(true);
   });
 
   it('rejects a scheme-carrying domain (bare hostname only)', async () => {
@@ -236,7 +236,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
 
   function writeCockpitPlist(argv: string[]): void {
     writeFileSync(
-      join(home, 'Library', 'LaunchAgents', 'ai.cezar.cockpit.plist'),
+      join(home, 'Library', 'LaunchAgents', 'tools.hearsay.squawk.cockpit.plist'),
       squawkLaunchdPlist('/repo', 4321, argv),
     );
   }
@@ -286,7 +286,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
 
   it('repairs an old plist once and recognizes it on the next install check', async () => {
     writeCockpitPlist(['/usr/bin/node', '/usr/local/bin/cezarion']);
-    const path = join(home, 'Library', 'LaunchAgents', 'ai.cezar.cockpit.plist');
+    const path = join(home, 'Library', 'LaunchAgents', 'tools.hearsay.squawk.cockpit.plist');
     const current = readFileSync(path, 'utf8').replace(/      <key>HSQ_REMOTE<\/key>\n      <string>1<\/string>\n/, '');
     writeFileSync(path, current);
     const { interactive, calls } = recordingInteractive();
@@ -306,7 +306,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
 
   it('loads the repaired plist on retry after bootstrap failed', async () => {
     writeCockpitPlist(['/usr/bin/node', '/usr/local/bin/cezarion']);
-    const path = join(home, 'Library', 'LaunchAgents', 'ai.cezar.cockpit.plist');
+    const path = join(home, 'Library', 'LaunchAgents', 'tools.hearsay.squawk.cockpit.plist');
     writeFileSync(path, readFileSync(path, 'utf8').replace(/      <key>HSQ_REMOTE<\/key>\n      <string>1<\/string>\n/, ''));
     let loaded = true;
     let bootstraps = 0;
@@ -316,7 +316,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
         loaded = bootstraps > 1;
         return loaded ? 0 : 1;
       }
-      if (program === 'launchctl' && args[0] === 'kickstart' && args[2]?.endsWith('/ai.cezar.cockpit')) {
+      if (program === 'launchctl' && args[0] === 'kickstart' && args[2]?.endsWith('/tools.hearsay.squawk.cockpit')) {
         expect(loaded).toBe(true);
       }
       return 0;
@@ -380,6 +380,3 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
     expect(calls).toEqual([]);
   });
 });
-
-// These installer fixtures describe the existing ai.cezar launchd jobs.
-vi.mock('../../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

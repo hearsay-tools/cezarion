@@ -17,6 +17,7 @@ import {
   collectRunCommits,
   commitAll,
   createOrSwitchBranch,
+  gitReason,
   patchByPath,
   pushCurrentBranch,
   readWorktreePath,
@@ -26,6 +27,7 @@ import {
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { getStatus } from './git.ts';
+import { GIT_OVERFLOW_REASON } from '../git-command.ts';
 
 /**
  * Session git API (redesign R5 Step 1.2 — spec §"Git/session API additions"):
@@ -1295,5 +1297,18 @@ describe('commitAll / pushCurrentBranch — direct degradation paths', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('gitReason', () => {
+  it('says the diff is too large when git output went over the buffer cap', () => {
+    const res = { ok: false, stdout: 'diff --git a/x b/x\n', stderr: '', overflow: true };
+    expect(gitReason(res, 'git diff failed')).toBe(GIT_OVERFLOW_REASON);
+    expect(GIT_OVERFLOW_REASON).toBe('the diff is too large: git output is over the 32 MiB limit');
+  });
+
+  it("keeps git's first stderr line, else the fallback, for any other failure", () => {
+    expect(gitReason({ ok: false, stdout: '', stderr: 'fatal: bad object\nmore', overflow: false }, 'x')).toBe('fatal: bad object');
+    expect(gitReason({ ok: false, stdout: '', stderr: '', overflow: false }, 'git diff failed')).toBe('git diff failed');
   });
 });

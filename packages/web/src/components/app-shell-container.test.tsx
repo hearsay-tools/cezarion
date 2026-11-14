@@ -50,7 +50,7 @@ const HEALTH: HealthResponse = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, automations: false, preview: false, voice: false },
 }
 
 /** One registered project — the degenerate workspace every existing install upgrades into. */
@@ -218,15 +218,10 @@ describe('sidebar wiring', () => {
     expect(screen.getByText('route content')).toBeTruthy()
   })
 
-  // CEZ_SINGLE_PROJECT pins this response to the boot row even when the saved registry has more.
-  // The shell must collapse from that ordinary one-row response, not grow a second capability
-  // branch for navigation: flat nav, one quick-list, repo chip, no group headers.
-  it('uses a project card when single-project mode pins the registry to the boot project', async () => {
+  // A one-row registry: flat nav, one quick-list, repo chip, no group headers.
+  it('uses a project card when the registry holds only the boot project', async () => {
     serve({
-      '/api/v1/health': {
-        ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, singleProject: true },
-      },
+      '/api/v1/health': HEALTH,
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/run-summaries': [],
     })
@@ -235,23 +230,6 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
     expect(document.querySelectorAll('[data-slot="project-header"]')).toHaveLength(1)
-  })
-
-  it('hides add-project chrome when health reports single-project mode', async () => {
-    serve({
-      '/api/v1/health': {
-        ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, singleProject: true },
-      },
-      '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
-      '/api/v1/run-summaries': [],
-    })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(inSidebar().getByRole('link', { name: /New task/ })).toBeTruthy()
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
   })
 
   it('renders one current-project sidebar with both projects on the rail', async () => {
@@ -943,24 +921,6 @@ describe('project rail wiring', () => {
     expect(within(nav).getByRole('button', { name: 'Add project' })).toBeTruthy()
     expect(nav.querySelectorAll('[data-slot="rail-project"]')).toHaveLength(1)
   })
-
-  it('renders the rail without Add project and All projects when the capability is on', async () => {
-    serve({
-      '/api/v1/health': { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
-      '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
-      '/api/v1/workspace/ui-state': {},
-      '/api/v1/workspace/runs-index': railIndex([]),
-      '/api/v1/run-summaries': [],
-      '/api/v1/p/cezar/run-summaries': [],
-    })
-    renderShell('/p/cezar/')
-
-    const nav = await rail()
-    await waitFor(() => expect(within(nav).getByAltText(`${productName("Cezarion")} v0.1.3`)).toBeTruthy())
-    expect(within(nav).queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(within(nav).queryByRole('link', { name: 'All projects' })).toBeNull()
-    expect(within(nav).getByRole('link', { name: 'Global settings' })).toBeTruthy()
-  })
 })
 
 it('keeps sidebar data on the URL project when rendered above the route scope provider', async () => {
@@ -1044,17 +1004,6 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   const selected = document.querySelector('[data-slot="settings-sidebar"] [aria-current="page"]')
   expect(selected?.getAttribute('href')).toBe(entry)
   expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
-})
-
-it('applies single-project visibility to the Settings sidebar', async () => {
-  serve({
-    '/api/v1/health': { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
-    '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT] },
-  })
-  renderShell('/settings/global/resources')
-  const group = await screen.findByRole('navigation', { name: 'Global · every project' })
-  await waitFor(() => expect(within(group).queryByRole('link', { name: 'Projects' })).toBeNull())
-  expect(within(group).getByRole('link', { name: 'Resources' }).getAttribute('aria-current')).toBe('page')
 })
 
 describe('GitHub view sidebar list (#622)', () => {

@@ -11,9 +11,7 @@ import { digest, readBytes } from './version-log.ts';
 
 export interface LegacySource { entry: MigrationFile; bytes: Buffer | null; hash: string | null; mtimeMs: number | null; regular: boolean }
 
-/** The release gate precedes even the marker and legacy filesystem reads. */
-export function legacyMigration(home: Home, enabled: boolean): MigrationRecord | undefined {
-  if (!enabled) return;
+export function legacyMigration(home: Home): MigrationRecord | undefined {
   const marker = readInstallMarker(home.config);
   if (marker?.state !== 'committed' || !marker.migratedFrom) return;
   const record = readMigrationRecord(home);
@@ -46,9 +44,9 @@ export function readLegacySource(record: MigrationRecord, entry: MigrationFile):
   }
 }
 
-export function legacyWatchDirectories(home: Home, enabled: boolean): string[] {
+export function legacyWatchDirectories(home: Home): string[] {
   try {
-    const record = legacyMigration(home, enabled);
+    const record = legacyMigration(home);
     return record ? [...new Set([record.legacyRoot, join(record.legacyRoot, 'remote-settings'),
       join(record.legacyRoot, 'server-instances'), ...legacyEntries(record).map(entry => dirname(join(record.legacyRoot, entry.path)))])] : [];
   } catch { return []; }

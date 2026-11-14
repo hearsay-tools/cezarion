@@ -54,9 +54,9 @@ async function planUnit(ctx: InstallContext): Promise<UnitPlan | undefined> {
   const recorded = ctx.state.steps.autostart?.created?.artifacts.find((a) => a.kind === 'owned' && a.type === 'service');
   if (!recorded?.name) throw new Error('No recorded autostart unit');
   const from = { ...recorded, name: recorded.name };
-  const names = ubuntuNames(ctx.instance, true);
+  const names = ubuntuNames(ctx.instance);
   if (from.name === names.unit) return undefined;
-  if (from.name !== ubuntuNames(ctx.instance, false).unit) throw new Error(`Unexpected unit name: ${from.name}`);
+  if (from.name !== ubuntuNames(ctx.instance, { legacy: true }).unit) throw new Error(`Unexpected unit name: ${from.name}`);
   if (!from.path || (from.scope !== 'user' && from.scope !== 'system')) throw new Error(`No recorded unit path for ${from.name}`);
   const to: StepArtifact = { ...from, name: names.unit, path: join(dirname(from.path), names.unit) };
   const backup: StepArtifact = { kind: 'owned', type: 'file', path: `${from.path}.migrated` };
@@ -82,7 +82,7 @@ function recordedArtifact(ctx: InstallContext, type: string, path: string): Step
 
 async function planSite(ctx: InstallContext): Promise<SitePlan | undefined> {
   const from = ledgerSite(ctx);
-  const to = ubuntuNames(ctx.instance, true);
+  const to = ubuntuNames(ctx.instance);
   if (from.vhostAvailable === to.vhostAvailable) return undefined;
   if (!ctx.state.steps['nginx-proxy']) throw new Error('No recorded nginx-proxy step');
   const next = siteCopy(await readText(ctx, from.vhostAvailable), from.htpasswd, to.htpasswd);
@@ -141,22 +141,21 @@ async function moveSite(ctx: InstallContext, { moves, next }: SitePlan): Promise
 async function healthDetail(ctx: InstallContext, site: SitePlan | undefined): Promise<string> {
   const port = ctx.state.primaryPort;
   if (ctx.state.externalProxy) return `health check: http://${ctx.state.bindHost?.trim() || '127.0.0.1'}:${port}/ answers (the bind address; the proxy is not checked)`;
-  const { url } = publicTarget(ctx, site?.next ?? await readText(ctx, recordedSite(ctx, true).vhostAvailable));
+  const { url } = publicTarget(ctx, site?.next ?? await readText(ctx, recordedSite(ctx).vhostAvailable));
   const tls = url.startsWith('https:') ? 'HTTPS, the site has TLS' : 'HTTP, the site has no TLS';
   return `health check: port ${port} answers, then ${url} (${tls}) asks for a login and accepts a probe login`;
 }
 
 /** Move only recorded Squawk resources. Dry runs plan the same moves and change nothing. */
-export async function migrateUbuntu(ctx: InstallContext, rebrand: boolean): Promise<PlatformMigrationReport> {
+export async function migrateUbuntu(ctx: InstallContext): Promise<PlatformMigrationReport> {
   const report = emptyReport();
-  if (!rebrand) return report;
   let unit: UnitPlan | undefined;
   let site: SitePlan | undefined;
   try {
     unit = await planUnit(ctx);
     site = ctx.state.externalProxy ? undefined : await planSite(ctx);
   } catch (error) {
-    report.errors.push({ artifact: recordedUnit(ctx, true), message: message(error) });
+    report.errors.push({ artifact: recordedUnit(ctx), message: message(error) });
     return report;
   }
   report.details = [...unit?.details ?? [], ...site?.details ?? []];
@@ -164,7 +163,7 @@ export async function migrateUbuntu(ctx: InstallContext, rebrand: boolean): Prom
   try {
     report.details.push(await healthDetail(ctx, site));
   } catch (error) {
-    report.errors.push({ artifact: recordedUnit(ctx, true), message: message(error) });
+    report.errors.push({ artifact: recordedUnit(ctx), message: message(error) });
     return report;
   }
   const steps: Array<[Move[], () => Promise<void>]> = [];
@@ -184,7 +183,7 @@ export async function migrateUbuntu(ctx: InstallContext, rebrand: boolean): Prom
 
 /** A journal entry names only this instance's new resources; anything else is refused. */
 function assertRollbackEntry(ctx: InstallContext, moves: Move[]): void {
-  const names = ubuntuNames(ctx.instance, true);
+  const names = ubuntuNames(ctx.instance);
   for (const { stepId, from, to, backup } of moves) {
     const valid = stepId === 'autostart'
       ? to.name === names.unit && to.path === join(dirname(from.path ?? ''), names.unit) && backup?.path === `${from.path}.migrated`
@@ -248,9 +247,8 @@ async function restoreSite(ctx: InstallContext, moves: Move[]): Promise<void> {
 }
 
 /** Reverse planned or completed moves from disk state. Repeat calls are safe. */
-export async function rollbackUbuntuMigration(ctx: InstallContext, migrated: PlatformMigrationReport, rebrand: boolean): Promise<PlatformMigrationReport> {
+export async function rollbackUbuntuMigration(ctx: InstallContext, migrated: PlatformMigrationReport): Promise<PlatformMigrationReport> {
   const report = emptyReport();
-  if (!rebrand) return report;
   const site = migrated.moved.filter((m) => m.stepId === 'nginx-proxy');
   const unit = migrated.moved.filter((m) => m.stepId === 'autostart');
   const undo: Array<[Move[], () => Promise<void>]> = [];
@@ -268,8 +266,8 @@ export async function rollbackUbuntuMigration(ctx: InstallContext, migrated: Pla
   return report;
 }
 
-async function systemctl(ctx: InstallContext, verb: 'start' | 'stop', rebrand: boolean): Promise<void> {
-  const unit = recordedUnit(ctx, rebrand);
+async function systemctl(ctx: InstallContext, verb: 'start' | 'stop'): Promise<void> {
+  const unit = recordedUnit(ctx);
   if (ctx.dryRun) { ctx.ui.info(`DRY RUN — would ${verb} ${unit.name}.`); return; }
   const active = async (c: InstallContext) => {
     return (await c.runner.capture('systemctl', [...(unit.scope === 'user' ? ['--user'] : []), 'is-active', '--quiet', unit.name])).code === 0;
@@ -286,8 +284,8 @@ async function systemctl(ctx: InstallContext, verb: 'start' | 'stop', rebrand: b
   });
 }
 
-export function stopUbuntuService(ctx: InstallContext, rebrand: boolean): Promise<void> {
-  return systemctl(ctx, 'stop', rebrand);
+export function stopUbuntuService(ctx: InstallContext): Promise<void> {
+  return systemctl(ctx, 'stop');
 }
 
 export interface UbuntuHealth {
@@ -366,13 +364,13 @@ async function checkPublicSite(ctx: InstallContext, vhostAvailable: string, logi
 }
 
 /** Start the recorded unit and check health: the bind address for an external proxy, else the public site. */
-export async function startUbuntuService(ctx: InstallContext, health: UbuntuHealth, rebrand: boolean, opts: { probeAuth?: boolean } = {}): Promise<void> {
-  await systemctl(ctx, 'start', rebrand);
+export async function startUbuntuService(ctx: InstallContext, health: UbuntuHealth, opts: { probeAuth?: boolean } = {}): Promise<void> {
+  await systemctl(ctx, 'start');
   if (ctx.dryRun) return;
   if (ctx.state.externalProxy) { await health.identity.run(ctx); return; }
-  const unit = recordedUnit(ctx, rebrand).name;
+  const unit = recordedUnit(ctx).name;
   if (!(await health.waitForSquawk(ctx, ctx.state.primaryPort))) throw new StepAborted(`${unit} did not answer on port ${ctx.state.primaryPort}`);
-  const { vhostAvailable, htpasswd } = recordedSite(ctx, rebrand);
+  const { vhostAvailable, htpasswd } = recordedSite(ctx);
   if (opts.probeAuth) await withProbeLogin(ctx, htpasswd, (login) => checkPublicSite(ctx, vhostAvailable, login));
   else await checkPublicSite(ctx, vhostAvailable);
 }

@@ -245,6 +245,7 @@ describe.each([
     expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(1)
   })
 
+  // Rule: docs/areas/web-ui.md § Touch and phone rules and § Accessibility rules (contrast).
   it('keeps 44×44 targets and readable contrast in light and dark themes', () => {
     // The pinned link is measured at the tail, where its row is mounted; the pill once away.
     const measure = (selector: string) => {

@@ -3,7 +3,6 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceProject } from '../workspace/config.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
-import { listProjects} from '../workspace/projects.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
@@ -25,10 +24,6 @@ vi.mock('./project-context.ts', async (original) => {
 vi.mock('../workspace/config.ts', async (original) => ({
   ...await original<typeof import('../workspace/config.ts')>(),
   loadWorkspaceConfig: vi.fn(),
-}));
-vi.mock('../workspace/projects.ts', async (original) => ({
-  ...await original<typeof import('../workspace/projects.ts')>(),
-  listProjects: vi.fn(),
 }));
 
 const row = (id: string, root = `/repos/${id}`): WorkspaceProject => ({ id, root, name: id, addedAt: '2026-10-30T00:00:00Z', lastOpenedAt: '', source: 'local' });
@@ -64,20 +59,6 @@ describe('workspace project identity', () => {
     expect(await projects.resolveProjectId('other')).toEqual({ id: 'other' });
     expect(await projects.resolveProjectId('../bad')).toEqual({ error: 'unknown project: ../bad' });
     expect(loadWorkspaceConfig).not.toHaveBeenCalled();
-  });
-
-  it('reads the visible set live and keeps the list selector at its existing boundary', async () => {
-    const home = testHome();
-    const projects = workspace(home);
-    const registry = [row('boot'), row('other')];
-    vi.stubEnv('CEZ_SINGLE_PROJECT', '0');
-    expect(await projects.visibleProjects(registry)).toBe(registry);
-    await projects.listVisibleProjects();
-    expect(listProjects).toHaveBeenLastCalledWith(undefined, home);
-    vi.stubEnv('CEZ_SINGLE_PROJECT', '1');
-    expect(await projects.visibleProjects(registry)).toEqual([registry[0]]);
-    await projects.listVisibleProjects();
-    expect(listProjects).toHaveBeenLastCalledWith({ projectId: 'boot' }, home);
   });
 });
 
@@ -166,11 +147,4 @@ it('removal validates first and reads boot identity only once, including a fallb
   expect(loadWorkspaceConfig).not.toHaveBeenCalled();
   expect(await projects.resolveProjectId('default', true)).toEqual({ id: 'boot', bootId: 'boot' });
   expect(loadWorkspaceConfig).toHaveBeenCalledTimes(1);
-});
-
-it('health uses its already-resolved boot identity without another registry read', async () => {
-  vi.stubEnv('CEZ_SINGLE_PROJECT', '1');
-  const projects = createWorkspaceProjects({ home: testHome(), bootRoot: '/repos/boot' });
-  expect(await projects.visibleProjects([row('boot'), row('other')], 'boot')).toEqual([row('boot')]);
-  expect(loadWorkspaceConfig).not.toHaveBeenCalled();
 });

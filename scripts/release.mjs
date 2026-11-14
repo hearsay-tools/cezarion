@@ -146,10 +146,10 @@ const publish = (dir, label) => {
 // exactly this reason. A `private` manifest is stamped above but never published: it is part of
 // the release (its version moves, its pins are rewritten) without being on the registry.
 const published = [];
-// The name users install through: the alias, or the compatibility alias after the rebrand.
-let installName = publication.alias?.name ?? publication.cezar.name;
+// The name users install through: the old unscoped alias, now a compatibility package.
+let installName = publication.cezar.name;
 withCompatibilityPackages(dirs.cezar, publication.cezar, compatibility => {
-  if (!publication.alias && compatibility.legacyAlias) installName = compatibility.legacyAlias.manifest.name;
+  if (compatibility.legacyAlias) installName = compatibility.legacyAlias.manifest.name;
   const targets = [
     ...order.map(key => ({ key, dir: dirs[key], manifest: publication[key] })),
     ...Object.entries(compatibility).map(([key, value]) => ({ key, ...value })),

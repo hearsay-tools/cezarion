@@ -103,11 +103,13 @@ describe('peer-wait motion', () => {
   const wait = { id: WAIT_ID, waiterRunId: 'waiter', peerRunId: 'peer', since: iso(-192_000), deadline: iso(408_000) }
   const motionOf = (kind: 'wait-opened' | 'wait-closed') => applyMotion(EMPTY_MOTION, planMotion([{ kind, projectId: 'cezarion', wait }], 1, false).changes)
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('fades a new wait line in', () => {
     renderBoard(project({ tasks: [WAITER, PEER] }), BOXES, 1092, motionOf('wait-opened'))
     expect(waitPath()?.classList.contains('activity-line-in')).toBe(true)
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('keeps an ended wait drawn while it fades out, with its label', () => {
     const stopped = run({ ...WAITER, status: RUN_STATUS.running, rung: 'running', wait: undefined })
     renderBoard(project({ tasks: [stopped, PEER] }), BOXES, 1092, motionOf('wait-closed'))

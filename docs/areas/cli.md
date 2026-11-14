@@ -10,27 +10,27 @@
 
 Project entry points use `projectPaths`: the write root is the first read root, the
 other directory is the fallback. The write root is `.ai/cezar/`, or `.ai/squawk/` for a
-fresh or moved project with the release switch on (a completed migration's marker in the Git common directory,
-hearsay-tools/cezarion#3150). Dual reads work with the release switch off. `init`,
+fresh or moved project (a completed migration's marker in the Git common directory,
+hearsay-tools/cezarion#3150). `init`,
 generated task paths, task state and config writes go to the write root; `init` skips a
 starter whose workflow or skill name already exists in the fallback.
 Singleton config/context files use whole-file presence precedence. Reads never
 create a fallback directory or an empty legacy run store that hides its data.
 Git excludes cover both runtime trees and `.ai/squawk-migration.json`; tracked
 workflows, skills and `context.yaml` keep their existing committable paths.
-Only the release switch enables the legacy-directory notice. A blocked automatic move prints
+A project that still writes `.ai/cezar/` gets one legacy-directory notice. A blocked automatic move prints
 one detailed notice; later readers omit the generic notice for that cause. Fresh means no
 `.ai/cezar` path, including no empty directory. Such a project starts in `.ai/squawk/`
 and preparation or its first CLI write records the same Git marker as a completed move.
-`init` help names `.ai/squawk/` with the switch on; switch-off help stays unchanged.
+`init` help names `.ai/squawk/`.
 
 ## Project migration fence
 
 Every CLI operation that touches project data checks the migration fence
 ([project routes](project-routes.md#project-migration-fence)) and exits 1 with a
 one-line `ProjectMigrationFencedError` message. `serve` checks in its ownership claim
-before the listener and before any directory is created. `run`, `init` and a
-single-project `projects` listing check in `cli-dispatch.ts` (`admitProjectCommand`);
+before the listener and before any directory is created. `run` and `init` check in
+`cli-dispatch.ts` (`admitProjectCommand`);
 Every CLI write that follows an await re-checks admission right before it runs
 (`admittedWrite`): `init` before its directories, each starter file and `.gitignore`; the
 headless store open before `.gitignore` and the open (later store writes pass the store's
@@ -42,7 +42,7 @@ the run lookup of a fenced project. `task`, `automation`, `webhook`, `worker`,
 cockpit, whose project routes refuse. `backup`, the managed install commands and
 `server-*` touch no project data. Git excludes also cover `.ai/squawk-migration.lock*`.
 
-Before that check, `serve`, `run`, `init`, the single-project `projects` listing,
+Before that check, `serve`, `run`, `init`,
 `artifact publish` and `versions` finish an unfinished migration journal
 ([early recovery](project-routes.md#project-migration-command-and-early-recovery)); a
 journal that cannot finish ends the command with its cause, exit 1. No CLI write targets a
@@ -53,9 +53,7 @@ recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff
 ## `migrate-project`
 
 `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is registered,
-listed in help and dispatched exactly when `REBRAND_SWITCH` is true, as it is since the
-switch release; a build with the switch off treats it as an unknown command and never loads
-its module. Only the user runs it, and it runs
+listed in help and dispatched. Only the user runs it, and it runs
 offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner, or a live
 cockpit of the user's legacy or split home whose registry lists the project) or any task of it is live, and
 names each pid, URL, port or task to stop. It cannot see a cockpit of another home that
@@ -68,7 +66,7 @@ nothing was moved or rewritten.` (or, after such a recovery, `Dry run: planning 
 nothing; the completed migration above did.`) or `Migration complete.`; it prints the `git mv` commands for
 tracked files and never runs them. A dry run with plan blockers or conflicts keeps
 that output on stdout and exits 1, including when the plan has no moves. Other refusals (in use, a held fence, conflicts, an untrusted
-journal) print one message to stderr and exit 1. A cockpit with the switch on moves each
+journal) print one message to stderr and exit 1. A cockpit moves each
 registered project by itself at start, and a project added later when it is added, when
 nothing else is live and its plan has no blocker or conflict; otherwise the project stays
 in place and its single notice names the blocker or conflict, even with no planned moves
@@ -110,7 +108,7 @@ The host operator can use `hsq backup import <file>` or
 writer as the cockpit. Import applies legacy deltas after a required backup;
 Ignore keeps the live file. Both record the current legacy hash and next merge
 base. Deleted legacy files allow Ignore only. `hsq backup --help` lists these
-actions. A build with the release switch off omits them from help and refuses both.
+actions.
 
 Remote-settings grants remain host-CLI-only, even for a local cockpit. Their
 legacy banner rows show these commands. Existing `backup list` and `backup
@@ -119,13 +117,11 @@ restore` behavior is unchanged.
 Before migration, `hsq migrate --resolve-legacy <file> restore|accept` resolves
 an outside-write or reset incident on the legacy home. It uses the pinned restore
 or acceptance writer directly, without preparing or migrating the split home.
-Help lists both actions. The command is registered only with `REBRAND_SWITCH`
-enabled. See `BACKWARD_COMPATIBILITY.md` for output and exit codes.
+Help lists both actions. See `BACKWARD_COMPATIBILITY.md` for output and exit codes.
 
 Product task-context reads accept `HSQ_*` first with `CEZ_*` fallback during
 the deprecation window. The `CEZ_HOME` fallback is permanent.
-Generated child entries keep the legacy names with the release switch off; with
-it on they carry both names and the same value. Empty context values remain
+Generated child entries carry both names and the same value. Empty context values remain
 intentional clears. `core/product-env.ts` owns both selection and generation.
 
 Fresh project writes also require an absent or real `.ai/squawk` directory. A
@@ -137,13 +133,11 @@ failure. It does not treat the failed read as an empty task list.
 ## CLI metadata
 
 Every binary name accepts `--version` and `-v`. Both print the package version to
-stdout and exit 0 without resolving or preparing a home. With the release switch
-on, old names still print their notice only to stderr. Top-level help shows the
-resolved home's versions directory with the switch on; reading this path does
-not prepare or migrate the home. If resolution fails, help describes the data
-folder without a path and still exits successfully. Switch-off help keeps
-`~/.cezar/versions`.
-Discovery's missing-cockpit hint uses the switch-aware preferred command.
+stdout and exit 0 without resolving or preparing a home. Old names still print
+their notice only to stderr. Top-level help shows the resolved home's versions
+directory; reading this path does not prepare or migrate the home. If resolution
+fails, help describes the data folder without a path and still exits successfully.
+Discovery's missing-cockpit hint uses the preferred command.
 
 ## Dependency wait bounds
 

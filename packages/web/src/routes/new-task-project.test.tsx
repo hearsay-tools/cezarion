@@ -70,7 +70,7 @@ const HEALTH: HealthResponse = {
     { name: 'git', available: true, version: '2.43.0' },
   ],
   forge: null,
-  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, automations: false, preview: false, voice: false },
   projects: [
     { id: BOOT, name: 'cezar' },
     { id: OTHER, name: 'shop-frontend' },
@@ -270,14 +270,8 @@ describe('the new-task project pill', () => {
     await waitFor(() => expect(options().map((o) => o.getAttribute('data-project-id'))).toEqual([OTHER, BOOT]))
   })
 
-  it('stays hidden when single-project mode pins the registry to the boot project', async () => {
+  it('stays hidden when the registry holds only the boot project', async () => {
     serve({
-      // Health advertises the mode, but the composer deliberately has no capability gate: the
-      // ordinary pinned registry response is enough to collapse a choice with one option.
-      health: {
-        ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, singleProject: true },
-      },
       registry: { ...REGISTRY, projects: [REGISTRY.projects[0]!] },
     })
     renderAt(`/p/${BOOT}/new`)

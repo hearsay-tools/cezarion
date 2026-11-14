@@ -409,8 +409,26 @@ describe('RunActivityDock — the workflow glyph', () => {
     ['failed', 'failed'],
     ['cancelled', 'failed'],
   ] as const)('renders the rail visual for a %s step, not a check mark', (status, visual) => {
-    renderDock(run({ status: RUN_STATUS.done, steps: step(status) }))
+    renderDock(run({ status: RUN_STATUS.waiting, steps: step(status) }))
     expect(glyph()).toBe(visual)
+  })
+
+  // hearsay-tools/squawk#2589: a Continue step stays `waiting` while a later one runs.
+  const continued: StepState[] = Array.from({ length: 8 }, (_, i) => ({
+    id: `s${i + 1}`, name: `Step ${i + 1}`, kind: STEP_KIND.agent, status: i < 7 ? STEP_STATUS.waiting : STEP_STATUS.running, iterations: 1, tokensUsed: 0,
+  }))
+
+  it("names the run's current step, not the first parked one", () => {
+    renderDock(run({ steps: continued, currentStepId: 's8' }))
+    expect(metaOf('workflow')).toBe('Step 8 · Step 8 of 8')
+  })
+
+  it('draws no spinner for a cancelled run that kept open steps', () => {
+    renderDock(run({ status: RUN_STATUS.cancelled, steps: continued, currentStepId: 's8' }))
+    fireEvent.click(sectionHead('workflow'))
+    expect(glyph()).toBe('failed')
+    expect(screen.queryAllByRole('status', { name: 'Step running' })).toEqual([])
+    expect(document.querySelector<HTMLElement>('[data-slot="step-progress"] > div')?.style.width).toBe('100%')
   })
 })
 

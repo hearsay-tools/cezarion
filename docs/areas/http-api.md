@@ -86,5 +86,4 @@ with `canImport`. POST `/home/recovery/import` takes the same `{file, detectedAt
 uses the same local-only and host-CLI grant guards. Import performs a three-way merge
 through HomeStore and requires its backup to succeed. `/accept` means Ignore for a
 legacy row: it keeps the live file and records the observed legacy hash and next merge
-base. Deleted legacy files are Ignore-only. The explicit `legacyCanary` server option
-exists for fixtures; its default is the release switch, with no CLI or env setting.
+base. Deleted legacy files are Ignore-only.

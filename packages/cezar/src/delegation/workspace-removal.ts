@@ -1,7 +1,6 @@
 /** Checked removal of an owned worker workspace, on top of the record and Git layers. */
 import { fallbackProjectWriteError } from '../project-paths.ts';
-import { inspectGeneration } from './process-liveness.ts';
-import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
+import { describeProcesses, inspectGeneration } from './process-liveness.ts';
 import { entryExists as exists } from './entry-exists.ts';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,7 +10,6 @@ import { branchLog, checkedGit, gitCommonDir, liveGitDir, worktreeEntries } from
 import { cleanupSchema, hash, readIdentityFile, readReceipt, RECEIPT_CAP, receiptLocation, replaceIdentityFile, validateIntent, type Cleanup, type Receipt } from './workspace-record.ts';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
 
 async function verifyBranch(repoRoot: string, workspace: WorkerWorkspace, receipt: Receipt) {
   if (!receipt.branchIdentity) throw new Error('Branch creation identity absent');
@@ -37,6 +35,17 @@ async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Prom
   return false;
 }
 
+/** Whether `value` is still the worktree its receipt and identity marker name, at its own real path:
+ * only then may destroy stop what runs there. Any doubt answers false. */
+export async function ownedWorktreePresent(repoRoot: string, value: WorkerWorkspace): Promise<boolean> {
+  try {
+    const workspace = await validateIntent(repoRoot, value);
+    const receipt = await readReceipt(await receiptLocation(repoRoot, workspace));
+    return !!receipt && same(receipt.workspace, workspace) && await liveGitDir(repoRoot, workspace) === receipt.gitDir &&
+      await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) === workspace.resourceId;
+  } catch { return false; }
+}
+
 /** A removal that could not take the worktree mutation lock in time. Contention clears without
  * changing anything a destroy can observe, so a retry must not skip it (hearsay-tools/cezarion#879). */
 export const WORKTREE_LOCK_BUSY_ERROR = 'Owned resources retained: worktree mutation lock is busy; retry destroy later';
@@ -59,11 +68,10 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
-  let stranded: string | undefined; let testAppBlocker: string | undefined;
+  let stranded: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
-      : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
-      : testAppBlocker ? testAppBlocker
+      : heldBy.length ? `Owned resources retained: processes ${describeProcesses(heldBy)} may still hold the worker worktree or scratch; retry destroy after they exit`
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
@@ -154,21 +162,12 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
-        // Preview release may itself terminate a known owned holder. Check unrelated holders
-        // only afterwards, immediately before destructive Git; they are never signalled.
-        checkUnheld(assertUnheld);
-        const removed = await withIdleTestApp(workspace.path, async (_stopped, busy, reason) => {
-          if (busy) testAppBlocker = reason;
-          if (busy) { report?.unexplained?.(); return false; }
-          if (!await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
-          assertCurrent?.(); assertUnheld?.();
-          const holders = inspectGeneration({ paths: [workspace.path] });
-          if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
-          const removal = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
-          if (!removal.ok) { report?.unexplained?.(); return false; }
-          return true;
-        });
-        if (!removed) return false;
+        // Preview release may itself end a known owned holder. Check unrelated holders only
+        // afterwards, immediately before destructive Git; they are never signalled.
+        assertUnheld?.();
+        const holders = inspectGeneration({ paths: [workspace.path] });
+        if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
+        if (!(await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path])).ok) { report?.unexplained?.(); return false; }
         remaining = ['branch'];
         return true;
       }

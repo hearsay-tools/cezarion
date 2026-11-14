@@ -53,7 +53,6 @@ const SIGNALS = new Map<string, ProjectSignal>([
 const nav = (overrides: Partial<MobileProjectNav> = {}): MobileProjectNav => ({
   projects: PROJECTS,
   signals: SIGNALS,
-  singleProject: false,
   ...overrides,
 })
 
@@ -206,15 +205,6 @@ describe('mobile drawer', () => {
     fireEvent.click(menuButton())
     expect(within(drawer()).getByRole('link', { name: 'All projects · task overview' }).getAttribute('href')).toBe('/tasks')
     expect(within(drawer()).getByRole('button', { name: 'Add project' })).toBeTruthy()
-  })
-
-  it('drops both workspace rows and their divider with CEZ_SINGLE_PROJECT=1', () => {
-    renderShell('/p/cezarion/', nav({ projects: [PROJECTS[0]!], singleProject: true }))
-    fireEvent.click(menuButton())
-    expect(rows()).toHaveLength(1)
-    expect(within(drawer()).queryByRole('link', { name: /All projects/ })).toBeNull()
-    expect(within(drawer()).queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(drawer().querySelector('[data-slot="drawer-workspace"]')).toBeNull()
   })
 
   it('keeps Global settings and the theme cycle at the bottom', () => {

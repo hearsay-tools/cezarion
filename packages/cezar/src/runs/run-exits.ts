@@ -184,6 +184,8 @@ export const RUN_EXITS = {
   'cancel-root': { durability: 'committed', from: ['waiting', 'cancelled'], to: 'cancelled',
     guard: run => (run.status === 'waiting' || run.status === 'cancelled') && rootFinishPending(run), steps: cancelledStep, event: RUN_CANCELLED },
   // Must hit disk before queued no-start evidence authorizes cleanup.
+  // A settled worker keeps its status (hearsay-tools/squawk#1907); a settled status here is a run still in
+  // the line, or a Continue that failed after the Stop, whose execution then ends.
   'stop-worker': { durability: 'committed', from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled',
     guard: run => run.delegation?.role === 'worker', refused: 'Worker not found', steps: cancelledStep, event: RUN_CANCELLED },
   // A Stop that lands after the run settled. A Stop accepted before an exit (`stopping` on load)

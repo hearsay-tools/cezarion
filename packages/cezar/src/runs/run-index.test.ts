@@ -9,7 +9,8 @@ import { findColdRunByCheckout, readRunIndexFromDisk, searchRunIndexFromDisk } f
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
 import { setRunStatus, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
-import { RunStore, type RunRecord } from './store.ts';
+import { decodeRunRecord, reconcileLoadedRun, RunStore, type RunRecord } from './store.ts';
+import { rescopeRun } from './run-references.ts';
 
 const handle = { owner: 'local', name: 'repo' };
 const foreignPr = 'https://github.com/foreign/repo/pull/42';
@@ -123,10 +124,12 @@ describe.each(Object.entries(sources))('repository scoping of cold disk records 
     expect(first(handle)?.referencedPullRequestUrl).toBeUndefined();
   });
 
-  it('reads a run a crashed process left live as interrupted, never as running', () => {
-    seed({ status: RUN_STATUS.running, activity: 'monitoring', steps: [{ id: 's', name: 'S', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }] });
-    expect(first()).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted') });
-    expect(first()).not.toHaveProperty('activity');
+  // No process in this cockpit holding a live run does not make it failed: its owner, or
+  // recovery once this cockpit builds the project, decides how it ends (hearsay-tools/squawk#967).
+  it('reads a live run as its stored status, never as interrupted', () => {
+    seed({ status: RUN_STATUS.running, steps: [{ id: 's', name: 'S', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }] });
+    expect(first()).toMatchObject({ status: RUN_STATUS.running });
+    expect(first()).not.toHaveProperty('error');
   });
 
   it('answers the window newest first: every unarchived run and the newest archived roots', () => {
@@ -195,6 +198,100 @@ describe('the cold window agrees with the store', () => {
       expect(cold.runs.map((run) => run.id)).toContain('w-live');
     } finally {
       store.close();
+    }
+  });
+});
+
+/**
+ * One raw row per read-time rule, in the shape an older build wrote it: the stored summary and
+ * `live` column are that build's. The cold reader, a store opened as `serve` opens a project
+ * (`keepLive`), and `toRunSummary` of the normalized record must agree on each row, field for
+ * field (hearsay-tools/squawk#1502). A rule whose rows only one read path selects fails here.
+ */
+describe('the cold reader and the store read every repaired row alike', () => {
+  const steps = [{ id: 's', name: 'S', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }];
+  const base = (id: string, over: Record<string, unknown> = {}) => ({
+    id, title: id, workflow: 'build', task: 'research', status: RUN_STATUS.done,
+    createdAt: '2026-09-01T00:00:00Z', finishedAt: '2026-09-01T01:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over,
+  });
+  const corpus = [
+    // Rule 1: an accepted Stop reads cancelled, even on a row that settled before it did.
+    base('stop', { stopping: true }),
+    // Rule 2 (hearsay-tools/squawk#967): a live run keeps its status; no holder here is no failure.
+    base('live', { status: RUN_STATUS.running, finishedAt: undefined, steps }),
+    // Rule 3: a failed usage-limit row reads waiting; a stale resume time on a finished run goes.
+    base('limit', { status: RUN_STATUS.failed, error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' }),
+    base('stale-resume', { autoResumeAt: '2026-10-06T00:00:00.000Z' }),
+    // Rule 4: a referenced PR an older created-PR declaration erased is restored.
+    base('pr-heal', { markerRefs: { pr: 9 }, pullRequestUrl: 'https://github.com/local/repo/pull/9', referencedPrCandidates: ['https://github.com/local/repo/pull/4'] }),
+    // Rule 5 (hearsay-tools/cezarion#1221): a follow-up issue declaration displaced the originating issue.
+    base('issue-heal', { task: 'Fix issue #1200', issueNumber: 1216, markerRefs: { issue: 1216 },
+      referencedIssueUrl: 'https://github.com/local/repo/issues/1216',
+      referencedIssueCandidates: ['https://github.com/local/repo/issues/1200', 'https://github.com/local/repo/issues/1216'] }),
+    // Rule 6: a foreign reference the prompt does not corroborate is dropped once the handle is known.
+    // A declared foreign PR the task does not corroborate goes too, beside a local reference or alone.
+    base('declared-pr', { referencedPullRequestUrl: localPr, referencedPrCandidates: [localPr], pullRequests: [{ number: 812, url: 'https://github.com/foreign/repo/pull/812', source: 'declared' }] }),
+    base('declared-only', { pullRequests: [{ number: 813, url: 'https://github.com/foreign/repo/pull/813', source: 'declared' }] }),
+    base('foreign', { referencedPullRequestUrl: foreignPr, referencedPrCandidates: [foreignPr], referencedIssueUrl: localPr.replace('pull/44', 'issues/45') }),
+    // Rule 7: schema-3 wait fields are read into the wait list, finished or parked.
+    base('monitoring', { activity: 'monitoring', monitoringWakeAt: '2026-10-06T00:00:00.000Z' }),
+    base('ci-park', { status: RUN_STATUS.running, finishedAt: undefined, activity: 'monitoring', steps, ciWait: {
+      id: '55555555-5555-4555-8555-555555555555', generation: 'g', turnId: 't', prUrl: 'https://github.com/local/repo/pull/9', repository: 'local/repo', prNumber: 9,
+      headSha: 'a'.repeat(40), timeoutSeconds: 1800, registeredAt: '2026-10-05T00:00:00.000Z', deadline: '2026-10-05T00:30:00.000Z', phase: 'parked',
+    } }),
+    base('control'),
+  ];
+  // Rule 8: a summary stored before it carried `automationId` (hearsay-tools/cezarion#1335).
+  const automation = base('automation', { automationTrigger: { automationId: 'auto-s', automationRevision: 1, receiptId: 'r', trigger: 'manual', occurrenceAt: '2026-10-05T00:00:00.000Z' } });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const byId = (runs: readonly { id: string }[]) => new Map(runs.map((run) => [run.id, plain(run)]));
+
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-13T00:00:00Z') }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it.each([[undefined], [handle]])('agree row by row (handle: %o)', (identity) => {
+    seedRuns(dir, [...corpus, automation]);
+    const db = RunDatabase.open(join(dir, RUNS_DB_FILE));
+    const { automationId: _, ...stale } = toRunSummary(automation as unknown as RunRecord);
+    db.transaction({ upserts: [{ ...encodeRunRow(automation as unknown as RunRecord), summary: JSON.stringify(stale) }], deletes: [] });
+    db.close();
+    // Cold first: the store writes back what it repairs, which the cold reader would then serve.
+    const cold = byId(readRunIndexFromDisk(dir, { handle: identity }).runs);
+    const store = RunStore.open(dir, { keepLive: true });
+    try {
+      if (identity) store.setRepoHandle(identity);
+      const owned = byId(store.listRunSummaries().runs);
+      for (const raw of corpus) {
+        const run = decodeRunRecord(JSON.stringify(raw))!;
+        reconcileLoadedRun(run, { keepLive: true });
+        rescopeRun(run, identity);
+        const expected = plain(toRunSummary(run));
+        expect({ id: raw.id, cold: cold.get(raw.id) }).toEqual({ id: raw.id, cold: expected });
+        expect({ id: raw.id, store: owned.get(raw.id) }).toEqual({ id: raw.id, store: expected });
+      }
+      // The named exemption: the cold selection leaves the automation-origin heal out, because no
+      // cross-project view reads `automationId` and selecting it scans every row's `data`.
+      expect(owned.get('automation')).toMatchObject({ automationId: 'auto-s' });
+      const { automationId: __, ...ownedRest } = owned.get('automation');
+      expect(cold.get('automation')).toEqual(ownedRest);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('reads a live run another cockpit holds as that cockpit lists it (hearsay-tools/squawk#967)', () => {
+    seedRuns(dir, [base('held', { status: RUN_STATUS.running, finishedAt: undefined, steps })]);
+    const owner = RunStore.open(dir, { keepLive: true });
+    const other = RunStore.open(dir, { keepLive: true });
+    try {
+      expect(other.runOwnership('held')).toBe('foreign');
+      const cold = readRunIndexFromDisk(dir).runs;
+      expect(cold).toEqual(other.listRunSummaries().runs);
+      expect(cold).toEqual(owner.listRunSummaries().runs);
+      expect(cold).toMatchObject([{ id: 'held', status: RUN_STATUS.running }]);
+    } finally {
+      other.close();
+      owner.close();
     }
   });
 });

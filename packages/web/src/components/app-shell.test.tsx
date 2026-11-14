@@ -300,13 +300,6 @@ describe('AppShell', () => {
       renderShell()
       expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
     })
-
-    it('is omitted in single-project mode while normal navigation remains', () => {
-      renderShell('/')
-      expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
-      expect(within(nav()).getByRole('link', { name: 'Tasks' })).toBeTruthy()
-      expect(within(sidebar()).getByRole('link', { name: /New task/ })).toBeTruthy()
-    })
   })
 
   describe('sidebar search and footer chrome', () => {
@@ -392,8 +385,9 @@ describe('AppShell', () => {
   })
 
   /** The resizable desktop column (#788, option C). jsdom has no layout engine, so these assert
-   *  the state machine and the accessibility contract; the drag itself is exercised for real in
-   *  `e2e/sidebar-resize.e2e.ts`. */
+   *  the state machine and the accessibility contract; the drag, the clamps, the keyboard resize
+   *  and the reload are exercised for real in `e2e/quick-list.e2e.ts` ("a row under width
+   *  contention, in a column the user can widen"). */
   describe('resizable sidebar', () => {
     const handle = () => document.querySelector('[data-slot="sidebar-resize-handle"]') as HTMLElement
 
@@ -533,6 +527,7 @@ describe('AppShell', () => {
    *  scroll its document or clip its composer on an iPhone — a refactor that drops one is a
    *  regression no visual test would catch on a desktop viewport. */
   describe('layout contract', () => {
+    // Rule: .ai/specs/2026-07-14-cockpit-ui-redesign.md § Mobile (layout contract).
     it('is exactly one viewport tall and never scrolls the document', () => {
       renderShell()
       const shell = document.querySelector('[data-slot="app-shell"]') as HTMLElement
@@ -542,6 +537,7 @@ describe('AppShell', () => {
       expect(shell.className).toContain('overflow-hidden')
     })
 
+    // Rule: .ai/specs/2026-07-14-cockpit-ui-redesign.md § Mobile (layout contract).
     it('makes the main region the only scroller, and contains its overscroll', () => {
       renderShell()
       const main = screen.getByRole('main')
@@ -549,6 +545,7 @@ describe('AppShell', () => {
       expect(main.className).toContain('overscroll-contain')
     })
 
+    // Rule: docs/areas/web-ui.md § Touch and phone rules: chrome clears the safe-area insets.
     it('pads for safe areas and lets the keyboard reserve the composer row', () => {
       renderShell()
       const shell = document.querySelector('[data-slot="app-shell"]') as HTMLElement
@@ -791,6 +788,7 @@ describe('AppShell', () => {
       await waitFor(() => expect(drawer()).toBeNull())
     })
 
+    // Rule: docs/areas/web-ui.md § Touch and phone rules: chrome clears the safe-area insets.
     it('pads the drawer for the safe-area insets', () => {
       renderShell()
       openMenu()

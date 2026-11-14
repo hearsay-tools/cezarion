@@ -41,7 +41,6 @@ const projects: MobileProjectNav = {
     { id: 'cezarion', name: `${productName("Cezarion")}`, root: '/r/c', addedAt: '2026-07-01T00:00:00.000Z', lastOpenedAt: '2026-07-01T00:00:00.000Z', source: 'local', status: 'ok', branch: 'main' },
   ],
   signals: new Map([['cezarion', { needsYou: 0, failedUnread: 0, inMotion: 0, finishedUnread: 0 }]]),
-  singleProject: false,
 }
 
 /** Prints the project scope the shell gives the task list slot. */

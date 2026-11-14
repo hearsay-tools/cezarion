@@ -110,9 +110,9 @@ export function snapshotSharedHome(...names: string[]): () => void {
 }
 
 /**
- * vitest `globalSetup` — pin the registry to the single-project shape for the whole run.
+ * vitest `globalSetup` — pin the registry to the one-project shape for the whole run.
  *
- * "The boot project alone" rather than "empty": the flat shell is what a real single-project
+ * "The boot project alone" rather than "empty": the flat shell is what a real one-project
  * workspace renders, and dropping the boot entry too would also drop the `lastOpenedAt` the
  * cockpit orders by. Filtering by the id the SERVER reports keeps this honest — the slug is
  * allocated by the registry, so only the server knows it.

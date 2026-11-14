@@ -150,6 +150,27 @@ describe('buildClaudeArgs governed native messaging', () => {
   });
 });
 
+// hearsay-tools/squawk#1849: the planner and the run namer send an empty list on the default runner.
+describe('buildClaudeArgs empty tool list', () => {
+  const squawkTools = { name: 'cezar_ci_probe', command: 'node', args: ['/installed/ci-wait/mcp.js'] };
+  const empty = { userPrompt: 'do it', cwd: '/tmp', toolGrant: { kind: 'explicit', tools: [] } } as const;
+  const toolFlags = (args: string[]) => args.flatMap((arg, i) => (arg === '--tools' || arg === '--allowedTools' ? [arg, args[i + 1]] : []));
+
+  it.each(['dontAsk', 'acceptEdits', 'bypass'])('removes every built-in tool in permission mode %s', mode => {
+    expect(toolFlags(buildClaudeArgs(empty, { CEZ_CLAUDE_PERMISSION_MODE: mode }))).toEqual(['--tools', '']);
+  });
+
+  it('pre-approves the Squawk tools', () => {
+    const allowed = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']
+      .map(tool => `mcp__cezar_ci_probe__${tool}`).join(',');
+    expect(toolFlags(buildClaudeArgs({ ...empty, squawkTools }, {}))).toEqual(['--tools', '', '--allowedTools', allowed]);
+  });
+
+  it('leaves an unset grant to Claude\'s own settings', () => {
+    expect(toolFlags(buildClaudeArgs({ ...empty, squawkTools, toolGrant: UNSET_TOOL_GRANT }, {}))).toEqual([]);
+  });
+});
+
 describe('buildClaudeArgs permission mode', () => {
   const spec = { userPrompt: 'do it', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
@@ -741,7 +762,7 @@ describe('agent input steering (#505)', () => {
   const start = (opts: Parameters<ClaudeCliRunner['startSession']>[2] = {}) => {
     const events: AgentEvent[] = [];
     const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:steer-tool', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:steer-tool', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_NOTES: '0' } },
       event => events.push(event), opts);
     return { session, events };
   };
@@ -801,7 +822,7 @@ describe('agent input written after the last model call (#505)', () => {
   it('reports a line the CLI ran as its next queued turn as consumed then', async () => {
     const events: AgentEvent[] = []; const consumed: string[][] = []; const ui: UiEvent[] = [];
     const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:hold', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:hold', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_NOTES: '0' } },
       event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]), onUiEvent: event => ui.push(event) });
     // The mock answers each stdin line as its own queued turn outside mock:steer-tool.
     // bound: the native turn-start marks the mock's opening turn before the late stdin line.
@@ -943,7 +964,7 @@ describe('Claude failed result (#505 review)', () => {
   it('never marks a line read by an error result', async () => {
     const events: AgentEvent[] = []; const consumed: string[][] = [];
     const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_CLAUDE_NO_REPLAY: '1' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_NOTES: '0', CEZ_MOCK_CLAUDE_NO_REPLAY: '1' } },
       event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
     const start = Date.now();
     while (!events.some(e => e.type === 'turn-end')) { if (Date.now() - start > 10_000) throw new Error('no turn-end'); await new Promise(r => setTimeout(r, 10)); }
@@ -1000,7 +1021,7 @@ describe('Claude queued-turn announcement with a synchronous follow-up (#505 loc
     const ui: UiEvent[] = []; let ends = 0;
     let session!: ReturnType<ClaudeCliRunner['startSession']>;
     session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_NOTES: '0' } },
       event => { if (event.type === 'turn-end' && ++ends === 1) session.sendMessage([{ type: 'text', text: 'mock:agent-echo nudge' }]); },
       { onUiEvent: event => ui.push(event) });
     const start = Date.now();

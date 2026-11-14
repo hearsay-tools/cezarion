@@ -1,5 +1,8 @@
 # CEZ_SINGLE_PROJECT mode
 
+> **Removed 2026-11-13** (hearsay-tools/squawk#2988). This mode no longer exists; the env vars
+> are ignored and every rule below is history. See `BACKWARD_COMPATIBILITY.md` and the CHANGELOG.
+
 > Historical source: `open-mercato/cezar` (upstream), preserved at fork point
 > `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
 > that upstream tracker; example numbers, UI values and command literals retain

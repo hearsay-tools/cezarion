@@ -122,7 +122,7 @@ it('allows a fixture to request hosted mode explicitly', () => {
 // hearsay-tools/cezarion#1045: the live cockpit's opt-ins reach an agent's shell; a fixture
 // cockpit must boot with product defaults unless the spec asks for an override.
 it('drops ambient CEZ_* feature flags and cockpit plumbing from the fixture environment', () => {
-  for (const name of ['CEZ_PREVIEW', 'CEZ_PREVIEW_NO_SANDBOX', 'CEZ_AUTOMATIONS', 'CEZ_FOLLOWUPS', 'CEZ_SINGLE_PROJECT']) vi.stubEnv(name, '1')
+  for (const name of ['CEZ_PREVIEW', 'CEZ_PREVIEW_NO_SANDBOX', 'CEZ_AUTOMATIONS', 'CEZ_FOLLOWUPS']) vi.stubEnv(name, '1')
   vi.stubEnv('CEZ_TASK_ID', 'ambient-task')
   const env = fixtureServeEnv(root())
   expect(Object.keys(env).filter(key => key.startsWith('CEZ_')).sort())

@@ -54,12 +54,18 @@ function seedRow(record: Record<string, unknown>): RunRowInput {
     createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
     status: typeof record.status === 'string' ? record.status : '',
     archived: record.archived === true,
-    // A row with the pre-schema-4 `activity` was live to the Squawk that wrote it, and the column
-    // is never recomputed on read (phase 4b dropped `activity` from `isLiveRecord`).
-    live: 'activity' in record || (encoded?.live ?? ['queued', 'running', 'waiting'].includes(String(record.status))),
+    // A row with the pre-schema-4 `activity`, or with a pre-schema-7 `delegation.wait`, was live
+    // to the Squawk that wrote it, and the column is never recomputed on read (`isLiveRecord`
+    // dropped `delegation.wait` at schema 7 and `activity` in phase 4b).
+    live: 'activity' in record || hasDelegationWait(record) || (encoded?.live ?? ['queued', 'running', 'waiting'].includes(String(record.status))),
     data: JSON.stringify(record),
     summary: encoded?.summary ?? '{}',
   };
+}
+
+function hasDelegationWait(record: Record<string, unknown>): boolean {
+  const delegation = record.delegation;
+  return !!delegation && typeof delegation === 'object' && (delegation as { wait?: unknown }).wait !== undefined;
 }
 
 /** The id of every run the store knows, held or only in `runs.db`, newest first. `listRuns()` is

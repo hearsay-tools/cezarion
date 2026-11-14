@@ -76,9 +76,8 @@ async function movePlist(ctx: InstallContext, move: Move, xml: string): Promise<
 }
 
 /** Migrate only provably owned legacy agents. State and persistence belong to the caller. */
-export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: boolean): Promise<PlatformMigrationReport> {
+export async function migrateLaunchd(ctx: InstallContext, dir: string): Promise<PlatformMigrationReport> {
   const report = emptyReport();
-  if (!rebrand) return report;
   const details: string[] = [];
   for (const [stepId, agent] of [['autostart', 'cockpit'], ['ngrok', 'ngrok']] as const) {
     const from: StepArtifact = { kind: 'owned', type: 'launchd', name: `ai.cezar.${agent}`, path: join(dir, `ai.cezar.${agent}.plist`) };
@@ -157,9 +156,8 @@ async function restorePlist(ctx: InstallContext, move: Move): Promise<boolean> {
   return true;
 }
 
-export async function rollbackLaunchdMigration(ctx: InstallContext, migrated: PlatformMigrationReport, rebrand: boolean): Promise<PlatformMigrationReport> {
+export async function rollbackLaunchdMigration(ctx: InstallContext, migrated: PlatformMigrationReport): Promise<PlatformMigrationReport> {
   const report = emptyReport();
-  if (!rebrand) return report;
   for (const move of [...migrated.moved].reverse()) {
     try {
       if (await restorePlist(ctx, move)) report.moved.push({ stepId: move.stepId, from: move.to, to: move.from, ...(move.backup ? { backup: move.backup } : {}) });

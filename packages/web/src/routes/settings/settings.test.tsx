@@ -81,11 +81,11 @@ const AGENTS_CONFIG = {
 /** Seeds the step-3.2 route gates — boot id (legacy redirect) + registry (known-check) — so a
  *  flat entry URL lands scoped immediately. The boot project mounts UNSCOPED, so the exact
  *  `/api/v1/*` paths this file's fetch stub matches stay byte-identical. */
-function gateSeededClient(singleProject = false) {
+function gateSeededClient() {
   const client = createQueryClient()
   client.setQueryData(queryKeys.health, {
     bootProject: 'boot',
-    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject },
+    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false },
   })
   client.setQueryData(workspaceQueryKeys.projects, {
     projects: [],
@@ -95,9 +95,9 @@ function gateSeededClient(singleProject = false) {
   return client
 }
 
-function renderAt(entry: string, { singleProject = false }: { singleProject?: boolean } = {}) {
+function renderAt(entry: string) {
   render(
-    <QueryClientProvider client={gateSeededClient(singleProject)}>
+    <QueryClientProvider client={gateSeededClient()}>
       <ThemeProvider>
         <AppearanceProvider>
           <MemoryRouter initialEntries={[entry]}>
@@ -154,16 +154,6 @@ describe('the section registry', () => {
     // No id may appear in both areas — the two navs would then link to two different pages
     // under the same name, and the `settings/<id>` legacy redirect would be ambiguous.
     expect(PROJECT_SECTIONS.filter((id) => GLOBAL_SECTIONS.includes(id))).toEqual([])
-  })
-
-  it('hides Projects only when the single-project capability is active', () => {
-    // Accounts survives: a single-project cockpit still runs on ONE of possibly several logins,
-    // so "which account" is orthogonal to "how many projects".
-    expect(visibleSettingsSections('global', { singleProject: true }).map((s) => s.id)).toEqual([
-      'appearance', 'notifications', 'resources', 'tasks', 'accounts',
-    ])
-    expect(visibleSettingsSections('global', { singleProject: false }).map((s) => s.id)).toEqual(GLOBAL_SECTIONS)
-    expect(visibleSettingsSections('global').map((s) => s.id)).toEqual(GLOBAL_SECTIONS)
   })
 })
 
@@ -252,12 +242,6 @@ describe('the settings shell', () => {
     renderAt('/settings/global')
     expect(document.querySelector('[data-route="settings-global-appearance"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="settings-index"]')).toBeNull()
-  })
-
-  it('single-project mode removes Projects from the global index and navigation', () => {
-    renderAt('/settings/global/appearance', { singleProject: true })
-    expect(document.querySelector('[data-slot="settings-nav-mobile"] [data-section="projects"]')).toBeNull()
-    expect(document.querySelector('[data-section="resources"]')).not.toBeNull()
   })
 
   it('a moved section keeps its old URL working: /settings/appearance → the global twin', async () => {

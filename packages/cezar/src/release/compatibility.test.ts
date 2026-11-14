@@ -5,12 +5,9 @@ import { expect, it } from 'vitest';
 import { productIdentity } from '../home/identity.ts';
 import { COMPATIBILITY_ENTRIES, compatibilityManifests, withCompatibilityPackages } from './compatibility.ts';
 
-it('does not read or allocate a compatibility tree with the switch off', () => {
-  expect(compatibilityManifests({ name: 'ignored', version: '1.2.3' }, false)).toEqual({});
-  expect(withCompatibilityPackages('/does/not/exist', { name: 'ignored', version: '1.2.3' }, packages => packages, false)).toEqual({});
-});
 it('does not publish forwarders to a private runtime', () => {
-  expect(withCompatibilityPackages('/does/not/exist', { name: productIdentity(true).npmPackage, version: '1.2.3', private: true }, packages => packages, true)).toEqual({});
+  expect(compatibilityManifests({ name: productIdentity().npmPackage, version: '1.2.3', private: true })).toEqual({});
+  expect(withCompatibilityPackages('/does/not/exist', { name: productIdentity().npmPackage, version: '1.2.3', private: true }, packages => packages)).toEqual({});
 });
 it.each([false, true])('cleans both pack trees after callback failure %s; preserves source bytes', fail => {
   const root = mkdtempSync(join(tmpdir(), 'compatibility-test-'));
@@ -31,7 +28,7 @@ it.each([false, true])('cleans both pack trees after callback failure %s; preser
         for (const entry of COMPATIBILITY_ENTRIES) expect(readFileSync(join(dir, entry), 'utf8')).toBe(`#!/usr/bin/env node\nimport ${JSON.stringify(runtime.name)};\n`);
       }
       if (fail) throw new Error('pack failed');
-    }, true);
+    });
     if (fail) expect(run).toThrow('pack failed'); else run();
     expect(paths.every(path => !existsSync(path))).toBe(true);
     expect(readFileSync(join(root, 'web/dist/assets/app.js'), 'utf8')).toBe('real built asset');

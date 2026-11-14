@@ -9,7 +9,7 @@ import {
   getWorkflows,
 } from '@/api/client'
 import type { NavigateFunction } from 'react-router'
-import type { Capabilities, ProjectsResponse } from '@open-mercato/cezar-api-client'
+import type { ProjectsResponse } from '@open-mercato/cezar-api-client'
 import { rememberedProjectPage } from '@/lib/last-location'
 import { taskItemTabs } from '@/lib/tasks-table'
 import { scopeTo } from '@/lib/project-router'
@@ -20,7 +20,6 @@ const CHECK_TIMEOUT_MS = 2_500
 
 export type ProjectSwitchContext = {
   registry: ProjectsResponse | undefined
-  capabilities: Capabilities | undefined
   /** The target project's repository base (`useProjectRepoBase`'s answer for it), which decides
    *  which task references are its own. Absent when unknown. */
   repoBaseOf?: (projectId: string) => string | undefined
@@ -51,7 +50,7 @@ export function projectSwitchTarget(
   try {
     const pathname = page.replace(/[?#].*$/, '')
     decodeURI(pathname) // a malformed percent escape is no page; the router would only warn
-    const route = context.matchRoute(pathname, context.capabilities)
+    const route = context.matchRoute(pathname)
     if (route === null) return home
     return { href: page, verify: Object.keys(route.params).some((name) => name !== 'projectId') }
   } catch {
@@ -166,14 +165,13 @@ const ENTITY_CHECKERS: readonly { matches: (pattern: string) => boolean; check: 
 async function entityExists(
   projectId: string,
   pathname: string,
-  capabilities: Capabilities | undefined,
   signal: AbortSignal,
   repoBase: string | undefined,
   matchRoute: ProjectRouteMatcher,
 ): Promise<boolean | null> {
   let pattern = ''
   try {
-    const route = matchRoute(pathname, capabilities)
+    const route = matchRoute(pathname)
     if (route === null) return false
     pattern = route.pattern
     const entry = ENTITY_CHECKERS.find((candidate) => candidate.matches(route.pattern))
@@ -209,7 +207,7 @@ export async function resolveProjectSwitch(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS)
   try {
-    const exists = await entityExists(projectId, target.href.replace(/[?#].*$/, ''), context.capabilities, controller.signal, context.repoBaseOf?.(projectId), context.matchRoute)
+    const exists = await entityExists(projectId, target.href.replace(/[?#].*$/, ''), controller.signal, context.repoBaseOf?.(projectId), context.matchRoute)
     return exists === false ? homeOf(projectId) : target.href
   } finally {
     clearTimeout(timer)

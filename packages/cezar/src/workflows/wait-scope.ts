@@ -4,7 +4,7 @@ import type { AgentInput, SquawkWaitRequest, PeerWaitEntry, PeerWaitResult, RunR
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { peerPair } from '../delegation/conversations.ts';
 import { hasLiveInboxClaim } from '../delegation/input.ts';
-import { DelegationPolicyError, MESSAGING_OFF } from '../delegation/policy.ts';
+import { DelegationPolicyError, MessagingOffError } from '../delegation/policy.ts';
 import { identicalPeerWait, openWaits } from './waits.ts';
 
 /**
@@ -113,6 +113,6 @@ export function delegationWaitRefusal(error: unknown, finishing: () => boolean):
   if (!(error instanceof DelegationPolicyError)) throw error;
   if (error.code === 'denied_scope') return 'denied_scope';
   if (error.code === 'capacity_limit') return 'capacity';
-  if (error.message === MESSAGING_OFF) return 'messaging_off';
+  if (error instanceof MessagingOffError) return 'messaging_off';
   return finishing() ? 'root_finish_pending' : 'unavailable';
 }

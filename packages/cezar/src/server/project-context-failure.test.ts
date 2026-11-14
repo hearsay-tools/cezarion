@@ -34,12 +34,11 @@ describe('project context failures over HTTP and live feeds', () => {
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-ctx-fail-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-ctx-fail-other-'));
     useTestHome(home ? Home.sandbox(home) : undefined);
-    vi.stubEnv('CEZ_SINGLE_PROJECT', '0');
     vi.stubEnv('CEZ_DRY_RUN', '1');
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(bootRoot, '.ai/cezar'));
-    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(testHome())});
     bootProjectId = (await registerProject(bootRoot, undefined, testHome())).id;
     otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     app = createApp({ home: testHome(), repoRoot: bootRoot, store, manager: {} as RunManager, version: 'test', bootProjectId, contexts });

@@ -66,7 +66,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, rebrand: false,
+  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
@@ -458,29 +458,6 @@ describe('health while fenced', () => {
   });
 });
 
-describe('with the release switch off', () => {
-  it('offers no migration command and a normal project build writes no fence or journal', async () => {
-    vi.resetModules();
-    vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));
-    try {
-      const { SUBCOMMAND_NAMES: names, loadSubcommand: load } = await import('../subcommands.ts');
-      const { ProjectContexts: SwitchOffContexts } = await import('./project-context.ts');
-      const { createRunManager: switchOffManager } = await import('./run-manager.testkit.ts');
-      expect(names.includes('migrate-project')).toBe(false);
-      expect(await load('migrate-project', undefined, false)).toBeUndefined();
-      const { ai, root } = project();
-      const contexts = new SwitchOffContexts({ createRunner, createManager: switchOffManager, home: testHome(), ownership: owner(), rebrand: false,
-        listProjects: async () => [{ id: 'p', root, status: 'not-git' as const }] });
-      disposers.push(() => contexts.disposeAll());
-      await contexts.context('p');
-      expect(readdirSync(ai)).toEqual(['cezar']);
-    } finally {
-      vi.doUnmock('../home/switch.ts');
-      vi.resetModules();
-    }
-  });
-});
-
 describe('the live-task check under the fence', () => {
   function cockpitStore() {
     const { root, dataDir } = project();
@@ -697,13 +674,13 @@ describe('admission sweep', () => {
     writeFileSync(leftover, '{}');
     const lazy = contextsFor(owner(), { id: coldId!, root: cold.root });
     const lazyContext = vi.spyOn(lazy, 'context');
-    const cli = (args: string[], env: Record<string, string> = {}) => {
+    const cli = (args: string[]) => {
       const deps = { ...defaultCliDeps, process: { argv: ['/bin/node', '/bin/cez', ...args, '--repo', cold.root], env: {}, cwd: () => cold.root, exitCode: undefined as number | undefined },
-        console: { log: vi.fn(), error: vi.fn() }, productEnv: (name: string) => env[name], resolveCliHome: () => testHome(), prepareOperatorHome: () => testHome(),
+        console: { log: vi.fn(), error: vi.fn() }, resolveCliHome: () => testHome(), prepareOperatorHome: () => testHome(),
         runSubcommand: vi.fn().mockResolvedValue(undefined), getRepoInfo: vi.fn().mockResolvedValue(null),
         runProjectsCommand: vi.fn().mockResolvedValue(0), readOwnVersion: () => '1.2.3', serveCommand: vi.fn(), serverCommand: vi.fn(),
-        runCommand: vi.fn().mockResolvedValue(undefined), initCommand: vi.fn(), initWorkspace: vi.fn().mockResolvedValue(coldId) };
-      return main(deps as unknown as CliDeps).then(() => [deps.runCommand, deps.initCommand, deps.initWorkspace].every((spy) => spy.mock.calls.length === 0), (error) => error instanceof ProjectMigrationFencedError);
+        runCommand: vi.fn().mockResolvedValue(undefined), initCommand: vi.fn() };
+      return main(deps as unknown as CliDeps).then(() => [deps.runCommand, deps.initCommand].every((spy) => spy.mock.calls.length === 0), (error) => error instanceof ProjectMigrationFencedError);
     };
     const serveListener = vi.fn().mockRejectedValue(new Error('listener reached'));
     const serve = () => serveCommand(testHome(), cold.root, 0, false, undefined, false,
@@ -762,7 +739,6 @@ describe('admission sweep', () => {
       'headless store open': async () => { try { openStore(cold.root).close(); return false; } catch (error) { return error instanceof ProjectMigrationFencedError && !existsSync(join(cold.dataDir, '.gitignore')); } },
       'cli run': () => { return cli(['run', 'task']); },
       'cli init': () => { return cli(['init']); },
-      'cli single-project listing': () => { return cli(['projects'], { SINGLE_PROJECT: '1' }); },
       'artifact publish': async () => {
         const code = await runArtifactCommand(['publish', join(cold.root, 'missing.txt')], { CEZ_ARTIFACTS_DIR: join(cold.dataDir, 'runs', 'task-artifacts'), CEZ_TASK_ID: 'task' });
         return code === 1 && String(artifactError.mock.calls.at(-1)?.[0]).includes('project migration') && !existsSync(join(cold.dataDir, 'runs'));

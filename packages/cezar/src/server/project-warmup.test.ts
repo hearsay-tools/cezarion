@@ -27,7 +27,7 @@ vi.mock('./project-context.ts', async (original) => {
  * off and leaves every project lazy, as before. The server binds an ephemeral loopback port.
  */
 describe('startServer project warm-up', () => {
-  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN, warmup: process.env.CEZ_PROJECT_WARMUP, single: process.env.CEZ_SINGLE_PROJECT };
+  const saved = { home: process.env.CEZ_HOME, dryRun: process.env.CEZ_DRY_RUN, warmup: process.env.CEZ_PROJECT_WARMUP };
   let home: string;
   let bootRoot: string;
   let otherRoot: string;
@@ -40,7 +40,6 @@ describe('startServer project warm-up', () => {
     useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_PROJECT_WARMUP;
-    delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     vi.mocked(sweepRegisteredPreviewLeftovers).mockClear();
   });
@@ -48,7 +47,7 @@ describe('startServer project warm-up', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     for (const dir of [home, bootRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    for (const [key, value] of [['CEZ_HOME', saved.home], ['CEZ_DRY_RUN', saved.dryRun], ['CEZ_PROJECT_WARMUP', saved.warmup], ['CEZ_SINGLE_PROJECT', saved.single]] as const) {
+    for (const [key, value] of [['CEZ_HOME', saved.home], ['CEZ_DRY_RUN', saved.dryRun], ['CEZ_PROJECT_WARMUP', saved.warmup]] as const) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
@@ -58,7 +57,7 @@ describe('startServer project warm-up', () => {
     const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
     const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome())});
     const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,
@@ -106,25 +105,12 @@ describe('startServer project warm-up', () => {
     }
   }, 15_000);
 
-  it('warms nothing in single-project mode, where other projects are out of reach', async () => {
-    process.env.CEZ_SINGLE_PROJECT = '1';
-    const warmAll = vi.spyOn(ProjectContexts.prototype, 'warmAll');
-    const { contexts, otherId, close } = await boot();
-    try {
-      await vi.waitFor(() => expect(sweepRegisteredPreviewLeftovers).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
-      expect(warmAll).not.toHaveBeenCalled();
-      expect(contexts.peek(otherId)).toBeUndefined();
-    } finally {
-      close();
-    }
-  }, 15_000);
-
   it('starts nothing when the server closes before the project list arrives', async () => {
     const warmAll = vi.spyOn(ProjectContexts.prototype, 'warmAll');
     const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
     const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(testHome())});
     const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,

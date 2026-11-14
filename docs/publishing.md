@@ -2,12 +2,9 @@
 
 ## Package identity
 
-With `REBRAND_SWITCH` off, a build keeps the old npm packages, alias directory,
-pack paths, tags and version-bump paths. Release tools read the shared
-`productIdentity` data through `product-identity.mjs` or the same source module.
-
-With the switch on (since the switch release), stable, dev, nightly and PR archives select the new
-scoped package and no alias package: npm refuses the unscoped name `hsq` as too
+Release tools read the shared `productIdentity` data through `product-identity.mjs`
+or the same source module. Since the rebrand release (v0.18.0), stable, dev, nightly
+and PR archives select the new scoped package and no new-name alias package: npm refuses the unscoped name `hsq` as too
 similar to existing names (owner decision A1, 2026-11-11). Users install
 `@hearsay-tools/squawk` or run it once with `npx -p @hearsay-tools/squawk hsq`.
 Release outputs carry that run command (`runCommand`, `tagCommand`, `installLines`)
@@ -20,8 +17,9 @@ The version-bump PR therefore remains a version-only change.
 The copy retains the source commit as `gitHead`, so stable-release retries can
 verify a version that npm already has.
 
-This preparation does not publish the new names or create compatibility releases.
-The owner performs publication and deprecation only after the switch release.
+The release also builds the compatibility packages `@wjarka/cezarion` and
+`cezarion` for the deprecation window; see the owner runbook below. The owner
+performs publication and deprecation.
 
 ## Package identity
 
@@ -88,9 +86,9 @@ them ship:
 |---|---|---|
 | `@open-mercato/cezar-contract` | **no — `private`** | the HTTP contract schemas (`packages/contract`) |
 | `@open-mercato/cezar-api-client` | **no — `private`** | the typed client (`packages/api-client`) |
-| `@wjarka/cezarion` | yes | the service + CLI, ships the built cockpit (`packages/cezar`) |
+| `@hearsay-tools/squawk` | yes | the service + CLI, ships the built cockpit (`packages/cezar`, renamed in the pack copy) |
 | `@open-mercato/cezar-web` | **no — `private`** | the cockpit SPA (`packages/web`) |
-| `cezarion` | yes | the unscoped bin alias, so `npx cezarion` works (`alias-cezarion`) |
+| `@wjarka/cezarion`, then `cezarion` | yes | generated compatibility packages that pin `@hearsay-tools/squawk` exactly (owner runbook below); `alias-cezarion/` holds the shipped alias files and is no longer stamped |
 
 The publishable rows are also the **publish order**, and it is load-bearing: each
 package depends on the one above it, so publishing a dependent first would briefly
@@ -605,8 +603,7 @@ continue to use npm; end users do not need pnpm.
 
 ## Owner runbook for the npm rename
 
-This section applies with `REBRAND_SWITCH = true`. It does not change the
-switch-off release procedure above. The owner performs registry writes. Agents
+The owner performs registry writes. Agents
 prepare and verify the patch and artifacts; they do not publish, move tags,
 deprecate packages or unpublish versions.
 
@@ -636,9 +633,8 @@ the old scoped wrapper's matching runtime dependency. No saved launch path or
 update record changes. The new dispatcher prints one old-command
 notice on stderr; JSON stdout stays parseable.
 
-A build from before cutover accepts an exact-pinned forwarding update target
-with the release switch off. Current-install discovery still follows that build's
-switch. Target validation checks the alias, old scoped wrapper and new runtime at
+A build from before cutover (before v0.18.0) accepts an exact-pinned forwarding
+update target. Current-install discovery still follows that build's identity. Target validation checks the alias, old scoped wrapper and new runtime at
 the same exact version and rejects foreign paths. The updater preserves the
 original outer name and launch entry across this first update.
 
@@ -661,7 +657,7 @@ Do not replace the exact pins with a range or `latest`.
 Use a dedicated release checkout at the approved source commit. Confirm package
 ownership and trusted-publisher/token access for all three names first. Keep the
 release version, source commit, tarball integrity values and prior channel tags
-in the owner release record. The switch must already be on in the build.
+in the owner release record.
 
 1. **Pack and inspect.** Build the approved source and run the release dry-run
    matrix before any write. Preview archive preparation uses

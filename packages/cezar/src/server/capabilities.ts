@@ -11,11 +11,6 @@ import { automationsEnabled } from '../automations/enabled.ts';
  * hosted mode — the UI hides every local-machine affordance and the open-in-*
  * endpoints 409.
  *
- * `singleProject` (spec 2026-07-21-cez-single-project): the workspace is
- * deliberately constrained to the launch project when `CEZ_SINGLE_PROJECT=1`.
- * Like the other opt-in capabilities, activation is strict: no other spelling
- * enables it.
- *
  * `automations` (spec 2026-07-25-github-automations, #801): GitHub automations
  * are on by default; only `CEZ_AUTOMATIONS=0` disables them. Off, the
  * `Automations` nav item is gone everywhere it is rendered, the
@@ -152,7 +147,6 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
     localHandoff,
     settingsAdmin: localHandoff || remoteSettingsAdmin,
     remoteSettingsAdmin,
-    singleProject: productEnv('SINGLE_PROJECT', env) === '1',
     automations: automationsEnabled(env),
     preview: productEnv('PREVIEW', env) === '1',
     // Boot-time flag, like `automations`. The key is read here only as present or absent; the

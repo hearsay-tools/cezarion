@@ -92,9 +92,9 @@ function admissionResult(check, exception, threads, head) {
     reason: openThreads ? 'unresolved-threads' : accepted ? 'admitted' : `provider-${state}` };
 }
 async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
-  now = Date.now, deadline = now() + 60000 }) {
+  now = Date.now, sleep, deadline = now() + 60000 }) {
   if (!positive(pullNumber) || !validSha(head)) throw new Error('Invalid review identity');
-  const read = reader(github, owner, repo, deadline, now), fullName = `${owner}/${repo}`;
+  const read = reader(github, owner, repo, deadline, now, sleep), fullName = `${owner}/${repo}`;
   const pull = () => read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
   const pr = await pull();
   if (!validPull(pr, fullName, pullNumber, head)) throw new Error('PR head changed or invalid target');

@@ -27,17 +27,17 @@ do not prohibit their use of danger.
 
 Reproduced for hearsay-tools/cezarion#1133 at `3040cbf78`:
 open `src/routes/task-thread/thread-items.tsx`, find `data-slot="tool-error"`,
-and follow its parent `bg-card-2`. The body uses `text-xs text-danger`.
+and follow its parent `bg-card-2`. The body then used `text-xs text-danger`.
 Resolve the foreground and background tokens from `src/styles/index.css`, convert
 OKLCH to linear sRGB, and calculate `(lighter luminance + .05) / (darker luminance + .05)`.
-This yields 4.05:1 dark and 4.24:1 light. Substituting soft-foreground yields
+This yielded 4.05:1 dark and 4.24:1 light. Substituting soft-foreground yields
 4.88:1 dark and 4.37:1 light. For rendered measurements, use
-`e2e/contrast.ts`'s `contrastSampleExpression` on the expanded tool-error element.
-The initial baseline also records the small step number and Remove hover text in
+`e2e/contrast.ts`'s `contrastSampleExpression` on the element.
+hearsay-tools/squawk#1114 moved the tool-error body to `text-signal-word-red`.
+The baseline still records the small step number and Remove hover text in
 `routes/plan-review.tsx`, settings section descriptions in `routes/settings/settings-shell.tsx`,
 and project-link details in `routes/unknown-project.tsx`. The latter two inherit card-2
-on hover. All five instances predate this guard; the ratchet applies after this initial baseline.
-The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
+on hover. These instances predate this guard; the ratchet applies to everything else.
 
 `cez/card-2-contrast` in `npm run lint` scans JSX class strings, including literal
 branches of class helpers and templates. It follows card-2 ancestors, inherited

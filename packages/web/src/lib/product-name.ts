@@ -1,11 +1,13 @@
-declare const __PRODUCT_IDENTITY__: { rebrand: boolean; displayName: string; command: string; npx: string; npmPackage: string }
+declare const __PRODUCT_IDENTITY__: { displayName: string; command: string; npx: string }
 
-/** Display prose only. Persisted names, paths and protocol values keep their identity. */
+/** Display prose only. Persisted names, paths and protocol values keep their identity.
+ *  The `_legacy` argument is ignored: it keeps the call sites' old spelling until
+ *  hearsay-tools/squawk#3509 rewrites them as literals. */
 export function productName(
-  legacy: 'cezar' | 'Cezar' | 'Cezarion',
+  _legacy: 'cezar' | 'Cezar' | 'Cezarion',
   identity = __PRODUCT_IDENTITY__,
 ): string {
-  return identity.rebrand ? identity.displayName : legacy
+  return identity.displayName
 }
 
 /** The installed command and one-off npx command come from the same build identity as product prose. */
@@ -16,9 +18,4 @@ export function productCommand(identity = __PRODUCT_IDENTITY__): string {
 /** Runs the cockpit without a global install, for example `npx -p @hearsay-tools/squawk hsq`. */
 export function productNpx(identity = __PRODUCT_IDENTITY__): string {
   return identity.npx
-}
-
-/** Runs the scoped package once. The new package has no binary named after it, so npx names `hsq`. */
-export function productPackageNpx(identity = __PRODUCT_IDENTITY__): string {
-  return identity.rebrand ? `npx -p ${identity.npmPackage} ${identity.command}` : `npx ${identity.npmPackage}`
 }

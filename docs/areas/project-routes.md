@@ -9,16 +9,15 @@
 ## Two project directories
 
 `projectPaths(root)` is the one rule for the write root; no caller picks a folder itself.
-With `REBRAND_SWITCH` on, a moved project (a completed migration wrote
+A moved project (a completed migration wrote
 the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` names the project's real root; `projectMovedMarker`) writes `.ai/squawk/` and reads `.ai/cezar/`
 as its fallback (hearsay-tools/cezarion#3150). A fresh project with no `.ai/cezar` path
 also writes `.ai/squawk/` from its first use; preparation records its Git marker. An
 existing empty, tracked-only or unreadable legacy path keeps the normal P4 rules.
-Every other project, and every project with
-the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
+Every other project writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
 below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
 `isFallbackProjectPath` ask `projectPaths` too. Context `dataDir` is the write root.
-With the switch on, a stored checkout under an absent old project root is not read-only fallback
+A stored checkout under an absent old project root is not read-only fallback
 state. Continue and restart recovery keep the missing-checkout fallback to the current
 repository. A missing checkout under an existing project root still obeys the fallback
 write guard, including after migration.
@@ -107,7 +106,7 @@ plus start-token liveness and token-checked release.
 
 `packages/cezar/src/project-migration/` (P4b2, hearsay-tools/cezarion#3088) moves a
 project's runtime state from `.ai/cezar/` to `.ai/squawk/`. P4b3 wires `migrateProject`
-into the offline `migrate-project` (registered with the release switch on) and `resumeProjectMigration` into
+into the offline `migrate-project` and `resumeProjectMigration` into
 every project entry ([below](#project-migration-command-and-early-recovery)).
 
 - **Fence.** It runs only under a fence its own process holds (`holdsProjectFence`), and
@@ -143,7 +142,7 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
      settled before the journal goes). A commit, clone or pull cannot write inside the Git
      directory, so a repository cannot ship or forge it; a linked checkout registered as its own
      project has its own key. The plan refuses when `.git` does not lead to the directory Git
-     reports, so the reader (no Git call) and the writer agree. From then on, with the switch on, the project writes `.ai/squawk/`.
+     reports, so the reader (no Git call) and the writer agree. From then on the project writes `.ai/squawk/`.
 
   Steps 1 to 3 run inside one hold of the common directory's worktree mutation lock. The
   Git locks keep a `git worktree prune` from any checkout sharing the Git directory from
@@ -186,9 +185,9 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
 - **After a migration** `.ai/cezar/` keeps only tracked files (until the user runs the
   printed `git mv`) and the `cockpit.lock*` claims. It holds no `runs.db`, so P4a's reads
   find every run, artifact and handoff under `.ai/squawk/`; opening the store creates no
-  legacy database. With the switch on, the marker makes `.ai/squawk/` the write root: moved
+  legacy database. The marker makes `.ai/squawk/` the write root: moved
   runs are ordinary writable runs, not fallback runs, and new tasks, worktrees, worker
-  workspaces and previews write there. With the switch off they stay fallback runs. A
+  workspaces and previews write there. A
   second migration of a marked project plans nothing and writes no journal
   (`alreadyMoved`); it still prints the `git mv` commands for tracked files left in
   `.ai/cezar/`. A tracked `.ai/cezar/.gitignore` is not shadowed by a new file in
@@ -202,10 +201,8 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
 P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
 
 - **Command.** `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is
-  registered, advertised and dispatched exactly when `REBRAND_SWITCH` is true; with the
-  switch off it is an unknown command. Only the user runs it, with the cockpit stopped: it covers CLI-only
-  users and projects the automatic move left in place. Tests pass the switch as a parameter
-  (`loadSubcommand`, `main`); the constant never changes.
+  registered, advertised and dispatched. Only the user runs it, with the cockpit stopped: it covers CLI-only
+  users and projects the automatic move left in place.
 - **Offline run.** `migrateProjectOffline` (`project-migration/offline.ts`): refuse while
   anything is live (above), finish an unfinished journal (and report it as the migration),
   take `cockpit.lock` and the fence with the read-only live-task check, run `migrateProject`,
@@ -213,7 +210,7 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   passes admission and plans; when it finished an unfinished journal first, it reports what that
   recovery moved and rewrote before the plan of what remains. A plan with blockers or
   conflicts still prints on stdout, but the command exits 1, including with no planned moves.
-- **Automatic move.** With `REBRAND_SWITCH` true, the cockpit moves an idle legacy project
+- **Automatic move.** The cockpit moves an idle legacy project
   itself (`moveProjectWhenIdle`, `project-migration/auto.ts`): at start for the boot project,
   before the listener; right after the listener starts for every other registered project (the
   post-listen preparation below), or earlier when a request, a lazy build or the warm-up reaches
@@ -242,10 +239,7 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   and those starts are skipped, once the cockpit is closing), the automation coordinator's
   project list and a project added later, the ticks' project lists and the cold run index. A
   project whose automation lease this cockpit holds is not moved (the move waits for the next
-  start). With the switch false it is the journal recovery of before.
-  CLI entries recover journals but never start a move. The switch must not turn on before the
-  per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
-  runs are fallback runs.
+  start). CLI entries recover journals but never start a move.
 - **Leftover tasks** (owner decision A, hearsay-tools/cezarion#2778). The plan takes the ids
   of the tasks that can still resume at planning (`keep`, read under the fence by
   `projectKeptRunIds`): every live task and every task not archived, since a human can Continue
@@ -289,7 +283,7 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   alone no longer skips a project), the post-listen preparation of every registered project,
   the archive and completion ticks (`prepareBeforeTicks`: each tick's project list, before the
   tick's admission check), the cold workspace runs index and search (`prepareProjects` in
-  `projectRunSources`; a failure leaves the project out with a warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
+  `projectRunSources`; a failure leaves the project out with a warning), CLI `run` and `init` (`cli-dispatch.ts`,
   module loaded only when a journal exists), `artifact publish` (which then refuses a task
   context that names a moved path), `versions` checkout discovery (which lists the worktrees
   again from the main checkout after a recovery moved them), and `migrate-project` itself
@@ -299,7 +293,7 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
 
 One `{store, manager, dataDir, launchKey}` context per registered project, built on first touch or by the background warm-up after listen (`warmAll`, off with `HSQ_PROJECT_WARMUP=0` (`CEZ_PROJECT_WARMUP` fallback), hearsay-tools/cezarion#667), disposed on removal; a `missing` root is never instantiated (unknown id → 404, gone root → 409). Every project route is registered **once** in a chained family builder and mounted under both `/api/v1/<path>` (bound to the boot project) and `/api/v1/p/:projectId/<path>` — `route-parity.test.ts` walks the exported route manifest and asserts `/api/v1/x`, `/api/v1/p/<boot>/x` and `/api/v1/p/default/x` answer byte-identically, so a new scoped route without its alias fails the suite. `default` is the reserved boot alias and is never an allocated slug. Workspace-level routes (`/projects`, `/workspace/*`, `/fs/browse`) are single-mount and never scope-prefixed. The cockpit mirrors the split: every view lives under `/p/:projectId/`, flat legacy PAGE paths redirect to the boot project, and global settings sit outside the scope at `/settings/global`. Add each route to its family's chain ([the HTTP API](http-api.md)); `versioned-surface.test.ts` fails on any route outside `/api/v1`.
 
-**Warm-up is an owner-approved exception to [zero config](../../AGENTS.md#zero-config):** project warm-up is default-on (hearsay-tools/cezarion#667). After the server listens it builds every other registered project's context one at a time, which runs recovery and so may resume interrupted runs and spend tokens in projects not yet opened; it skips projects another live cockpit owns and single-project mode, claims each warmed project's `cockpit.lock` for the process lifetime, and `HSQ_PROJECT_WARMUP=0` (`CEZ_PROJECT_WARMUP` fallback) restores purely lazy builds.
+**Warm-up is an owner-approved exception to [zero config](../../AGENTS.md#zero-config):** project warm-up is default-on (hearsay-tools/cezarion#667). After the server listens it builds every other registered project's context one at a time, which runs recovery and so may resume interrupted runs and spend tokens in projects not yet opened; it skips projects another live cockpit owns, claims each warmed project's `cockpit.lock` for the process lifetime, and `HSQ_PROJECT_WARMUP=0` (`CEZ_PROJECT_WARMUP` fallback) restores purely lazy builds.
 
 Fresh project writes also require an absent or real `.ai/squawk` directory. A
 symlink or file keeps legacy writes and is never marked fresh. The destination

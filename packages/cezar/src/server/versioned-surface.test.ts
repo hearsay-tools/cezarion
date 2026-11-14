@@ -31,7 +31,7 @@ describe('the versioned API surface', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(testHome())});
     await registerProject(repoRoot, undefined, testHome());
     app = createApp({ home: testHome(),
       repoRoot,

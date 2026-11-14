@@ -1,10 +1,7 @@
 # Before a PR
 
-Use Squeal's one-shot changed-function gate. This local-first rollout replaces
-both daemon snapshot inspection and the bundled pre-PR fallback. CI and requested
-code statistics still use their existing paths until the remaining work in
-[hearsay-tools/squeal#167](https://github.com/hearsay-tools/squeal/issues/167) ships.
-CI passing does not replace this local check.
+Use Squeal's one-shot changed-function gate. It is the only local quality
+check; this skill has no bundled fallback. CI passing does not replace it.
 
 Run it beside the push, as the reviewer round runs: start it on the committed head, push,
 and read the report when it finishes. It does not gate the push, and `npm run prepr` does
@@ -45,13 +42,13 @@ Do not substitute per-path daemon reports or a filtered function selection.
 
 The command reads limits and exclusions from the base commit's configuration.
 The policy limits are complexity 20 and CRAP 30; equality passes. Do not loosen
-limits or add exclusions to get a pass. If the base policy differs, report the
-mismatch before claiming this repository's check passed.
+limits to get a pass. Change `coverage.exclude` only under the rule in §2. If the
+base policy differs, report the mismatch before claiming this repository's check
+passed.
 
 Collection has one 600-second default budget across the selected runners. The
 one-shot option `--timeout 900` sets a fifteen-minute budget, in **seconds**.
-It differs from the legacy collector's millisecond timeout flags. Use a larger
-budget only when needed to complete the selected evidence. Preserve configured
+Use a larger budget only when needed to complete the selected evidence. Preserve configured
 project timeouts; test failures remain blockers.
 
 This release performs a distinct coverage run; background passing tests do not
@@ -79,12 +76,15 @@ A local quality pass requires all of the following:
 - The report covers the full current change against the fetched target. Its
   head, source hashes and policy describe the tree being submitted. An affected
   source, test or policy edit after collection requires fresh evidence.
-- `verdict` is `pass`; every reported function is `pass`, with known complexity
-  and CRAP within the limits. `counts.skipped` and `counts.incomplete` are zero.
-  Skipped functions are not passing functions, even when Squeal exits 0.
-- Each function has matching `loaders.expected` and `loaders.measured` sets.
+- `verdict` is `pass`; every reported function is `pass` or `skipped`, with
+  known complexity within the limit, and CRAP within the limit for each `pass`.
+  `counts.incomplete` is zero. A `skipped` function passes only when its file
+  matches `base.policy.coverageExclude` in the report (see below).
+- Each `pass` function has matching `loaders.expected` and `loaders.measured` sets.
   A CRAP upper bound from partial loader coverage does not supply complete
   evidence, even when the function state is `pass`.
+- `omitted` lists only functions with reason `unchanged` or `moved`: the change
+  did not edit their bodies, so they need no evidence.
 - `uncounted` is empty and `budget.timedOut` is false. Every selected test file completed and no selected test
   failed: inspect `runs`, including `notFinished` and `failed`. Missing, stale,
   unknown, partial or unsupported required evidence cannot pass.
@@ -93,8 +93,32 @@ A report with no changed supported functions may pass, for example for a
 Markdown-only change. State the zero count; it is not a test-suite pass.
 Preserve useful measured rows on an incomplete run and state the exact gaps.
 No mapped test means unknown, not a fabricated zero-coverage measurement.
-Compile-only runtime callbacks, browser-only paths and child-process-only code
-can expose unsupported evidence in this release; do not exempt them by hand.
+
+### Code that only a child process runs
+
+Squeal measures coverage in the test's own process. A file that tests run only
+as a separate process, or only as a copy at another path, has no measurable
+coverage: its changed functions read `incomplete (no-loader)`, or get a CRAP from
+the 0% coverage of the functions only the child or copy calls. The `coverage.exclude`
+list in `squeal.config.json` names these files. The gate reads a changed function
+in a listed file as `skipped`: it keeps its complexity check, gets no CRAP and
+does not block. The list holds:
+
+- each native runner mock in `packages/cezar/scripts/` that tests start only as
+  the runner's binary. The list names each mock: the mocks that tests import
+  (`mock-controls`, `mock-lifecycle`, `mock-scenario`, `mock-publish`,
+  `mock-session-context`, `mock-failure-control`, `mock-delivery-control`) keep
+  their CRAP check, so a `mock-*.mjs` glob would be wrong.
+- the manual probe scripts, `.ai/scripts/probe-*.ts`, which no test runs.
+- `.ai/scripts/test-env-lease.mjs`, whose subcommands tests run only through a
+  copy in a fixture checkout, because the script finds the repository root from
+  its own location.
+
+A new mock that tests start only as a child process goes into this list in the
+same change, by name, so a later edit of it can pass the gate. Any other code
+that only a child process runs gets no entry: export its functions and call them
+from a test in the test's own process. Do not add an entry to pass one change,
+and do not exempt a function by hand.
 
 ## 3. Resolve findings
 
@@ -107,7 +131,7 @@ Squeal 0.1.423 does not implement inherited-refactor deferrals or owner-approved
 exceptions. A baseline comparison, linked issue, manual bound or CI growth
 approval cannot turn a local violation into a pass. Name the blocker and wait
 for the supported exception path or resolve the finding. Do not fall back to
-the bundled checker or combine partial results from different engines.
+another calculator or combine partial results from different engines.
 
 ## 4. Preserve reviewable evidence
 
@@ -124,6 +148,7 @@ When publication or an accessible origin is unavailable, put the verdict, counts
 versions, base/head identity and each finding with its action in the PR body.
 
 State that the **Squeal one-shot gate** supplied the local quality evidence.
-Do not call it a bundled-check pass or a daemon measurement. Only complete
+Do not call it a daemon measurement. Only complete
 passing evidence permits the PR to merge (auto-merge waits for it); it no longer gates opening it. CI and independent review remain
-separate gates. Keep hearsay-tools/cezarion#3096 open for the remaining migration.
+separate gates. Code that only the packaged CLI suite runs, such as
+`scripts/release.mjs`, has no loader in this gate yet (hearsay-tools/squawk#3096).

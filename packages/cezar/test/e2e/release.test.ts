@@ -73,21 +73,9 @@ async function makeFixture(version = '0.1.5'): Promise<string> {
     )}\n`,
   );
 
-  await mkdir(join(root, 'alias-cezarion'));
-  await writeFile(
-    join(root, 'alias-cezarion', 'package.json'),
-    `${JSON.stringify(
-      {
-        name: 'fake-alias',
-        version,
-        files: ['bin.js'],
-        dependencies: { '@scope/fake-root': `^${version}` },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  await writeFile(join(root, 'alias-cezarion', 'bin.js'), '#!/usr/bin/env node\n');
+  // The compatibility packages copy the built cockpit from the service.
+  await mkdir(join(root, 'packages', 'cezar', 'web', 'dist'), { recursive: true });
+  await writeFile(join(root, 'packages', 'cezar', 'web', 'dist', 'index.html'), 'cockpit\n');
   await execFile('git', ['init', '-b', 'main'], { cwd: root });
   await execFile('git', ['add', '.'], { cwd: root });
   await execFile('git', ['-c', 'user.name=Release test', '-c', 'user.email=release@example.test', 'commit', '-m', 'source'], { cwd: root });
@@ -114,7 +102,7 @@ function runScript(fixtureRoot: string, args: string[], extraEnv: Record<string,
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: '',
     ...extraEnv,
   };
-  return execFile(process.execPath, ['--import', new URL('../fixtures/release-switch-off.mjs', import.meta.url).href, script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
+  return execFile(process.execPath, [script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
 }
 
 async function writeNpmStub(root: string): Promise<{ stub: string; log: string }> {
@@ -136,27 +124,25 @@ test('a patch bump stamps every manifest, keeps the caret ranges, and emits the 
     const { stdout } = await runScript(root, ['patch', '--dry-run']);
     assert.match(stdout, /dist-tag latest/);
     // Dependency order: the client is published before the service that depends on it, and the
-    // alias last of all. A dependent published first would advertise a version that is not on
-    // the registry yet.
+    // compatibility packages last of all. A dependent published first would advertise a version
+    // that is not on the registry yet.
     assert.ok(
-      stdout.indexOf('@scope/fake-client') < stdout.indexOf('@scope/fake-root'),
+      stdout.indexOf('(@scope/fake-client)') < stdout.indexOf('(@hearsay-tools/squawk)'),
       'the api-client must be published before the service',
     );
     assert.ok(
-      stdout.indexOf('@scope/fake-root') < stdout.indexOf('fake-alias'),
-      'the alias must be published last',
+      stdout.indexOf('(@hearsay-tools/squawk)') < stdout.indexOf('(@wjarka/cezarion)')
+        && stdout.indexOf('(@wjarka/cezarion)') < stdout.indexOf('(cezarion)'),
+      'the compatibility packages must be published last',
     );
 
     const clientPkg = await readPkg(root, 'packages', 'api-client');
     const squawkPkg = await readPkg(root, 'packages', 'cezar');
     const webPkg = await readPkg(root, 'packages', 'web');
-    const aliasPkg = await readPkg(root, 'alias-cezarion');
     assert.equal(clientPkg.version, '0.1.6');
     assert.equal(squawkPkg.version, '0.1.6');
     assert.equal(webPkg.version, '0.1.6');
-    assert.equal(aliasPkg.version, '0.1.6');
     // Caret, not an exact pin — the stable-release contract, on both edges.
-    assert.deepEqual(aliasPkg.dependencies, { '@scope/fake-root': '^0.1.6' });
     assert.deepEqual(squawkPkg.devDependencies, { '@scope/fake-client': '^0.1.6' });
     assert.deepEqual(webPkg.dependencies, { '@scope/fake-client': '^0.1.6' });
     assert.deepEqual(webPkg.devDependencies, { '@scope/fake-root': '^0.1.6' });
@@ -199,11 +185,11 @@ test('a private package is stamped but never published', { timeout: 120_000 }, a
     );
     assert.match(stdout, /@scope\/fake-web is private — stamped to 0\.1\.6, not published/);
     // The other two still publish.
-    assert.match(stdout, /\(@scope\/fake-root\)/);
-    assert.match(stdout, /\(fake-alias\)/);
+    assert.match(stdout, /\(@hearsay-tools\/squawk\)/);
+    assert.match(stdout, /\(cezarion\)/);
 
     const output = await readFile(join(root, 'github-output.txt'), 'utf8');
-    assert.match(output, /^publishedNames=@scope\/fake-root,fake-alias$/m);
+    assert.match(output, /^publishedNames=@hearsay-tools\/squawk,@wjarka\/cezarion,cezarion$/m);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -238,7 +224,7 @@ test('a release candidate publishes under its own dist-tag with exact pins', { t
     const output = await readFile(join(root, 'github-output.txt'), 'utf8');
     assert.match(output, /^version=0\.1\.6-rc\.2$/m);
     assert.match(output, /^distTag=next$/m);
-    assert.match(output, /^installName=fake-alias$/m);
+    assert.match(output, /^installName=cezarion$/m);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -262,7 +248,7 @@ test('--stamp-only stamps the planned version and publishes nothing', { timeout:
     const { stub, log } = await writeNpmStub(root);
     await runScript(root, ['patch', '--stamp-only'], { npm_execpath: stub, NPM_STUB_LOG: log, RELEASE_VERSION: '0.1.9' });
     assert.equal((await readPkg(root, 'packages', 'cezar')).version, '0.1.9');
-    assert.deepEqual((await readPkg(root, 'alias-cezarion')).dependencies, { '@scope/fake-root': '^0.1.9' });
+    assert.deepEqual((await readPkg(root, 'packages', 'web')).devDependencies, { '@scope/fake-root': '^0.1.9' });
     await assert.rejects(readFile(log, 'utf8'), { code: 'ENOENT' });
     const output = await readFile(join(root, 'github-output.txt'), 'utf8');
     assert.match(output, /^published=false$/m);
@@ -340,19 +326,19 @@ test('a mid-set collision skips the already-published name and publishes the res
     const log = join(root, 'npm-stub.log');
     await writeFile(
       stub,
-      `const { appendFileSync } = require('node:fs');
+      `const { appendFileSync, readFileSync } = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 appendFileSync(process.env.NPM_STUB_LOG, \`\${process.cwd()} \${args.join(' ')}\\n\`);
 if (args[0] === 'view') {
   const spec = args[1] ?? '';
-  if (spec === '@scope/fake-root@0.1.6') {
+  if (spec === '@hearsay-tools/squawk@0.1.6') {
     process.stdout.write(JSON.stringify({ version: '0.1.6', gitHead: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() }));
     process.exit(0);
   }
   process.exit(1);
 }
-if (args[0] === 'publish' && process.cwd().includes('packages/cezar')) {
+if (args[0] === 'publish' && JSON.parse(readFileSync('package.json', 'utf8')).name === '@hearsay-tools/squawk') {
   process.stderr.write('npm error code E403\\n');
   process.exit(1);
 }
@@ -364,14 +350,14 @@ if (args[0] === 'publish' && process.cwd().includes('packages/cezar')) {
       npm_execpath: stub,
       NPM_STUB_LOG: log,
     });
-    assert.match(stdout, /@scope\/fake-root@0\.1\.6 already on the registry — skipping/);
+    assert.match(stdout, /@hearsay-tools\/squawk@0\.1\.6 already on the registry — skipping/);
     assert.match(stdout, /npm publish[^\n]*\(@scope\/fake-client\)/);
-    assert.match(stdout, /npm publish[^\n]*\(fake-alias\)/);
+    assert.match(stdout, /npm publish[^\n]*\(cezarion\)/);
     const output = await readFile(join(root, 'github-output.txt'), 'utf8');
     assert.match(output, /^published=true$/m);
-    assert.match(output, /^publishedNames=@scope\/fake-client,@scope\/fake-root,fake-alias$/m);
+    assert.match(output, /^publishedNames=@scope\/fake-client,@hearsay-tools\/squawk,@wjarka\/cezarion,cezarion$/m);
     const npmArgs = await readFile(log, 'utf8');
-    assert.match(npmArgs, /view @scope\/fake-root@0\.1\.6 version/);
+    assert.match(npmArgs, /view @hearsay-tools\/squawk@0\.1\.6 version/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -385,13 +371,13 @@ test('a publish failure that is not already on the registry still aborts', { tim
     const log = join(root, 'npm-stub.log');
     await writeFile(
       stub,
-      `const { appendFileSync } = require('node:fs');
+      `const { appendFileSync, readFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(process.env.NPM_STUB_LOG, \`\${process.cwd()} \${args.join(' ')}\\n\`);
 if (args[0] === 'view') process.exit(1);
-if (args[0] === 'publish' && process.cwd().includes('alias-cezarion')) {
+if (args[0] === 'publish' && JSON.parse(readFileSync('package.json', 'utf8')).name === 'cezarion') {
   process.stderr.write('npm error code E404\\n');
-  process.stderr.write('404 Not Found - PUT https://registry.npmjs.org/fake-alias - Not found\\n');
+  process.stderr.write('404 Not Found - PUT https://registry.npmjs.org/cezarion - Not found\\n');
   process.exit(1);
 }
 `,

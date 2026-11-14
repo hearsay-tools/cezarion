@@ -18,14 +18,13 @@ import { WorkspaceEventBus, createApp, type ServerDeps } from './server.ts';
 /**
  * The new-project routes (spec 2026-10-15-create-new-project): `POST /api/v1/projects/create`
  * and `GET /api/v1/projects/github-owners`, through the real app — validation middleware, the
- * single-project and hosted gates, the progress cache, and registration.
+ * hosted gate, the progress cache, and registration.
  */
 
 describe('new-project routes', () => {
   const saved = {
     home: process.env.CEZ_HOME,
     remote: process.env.CEZ_REMOTE,
-    single: process.env.CEZ_SINGLE_PROJECT,
     dryRun: process.env.CEZ_DRY_RUN,
   };
   let home: string;
@@ -48,7 +47,6 @@ describe('new-project routes', () => {
     projectsDir = join(home, 'projects');
     useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
-    delete process.env.CEZ_SINGLE_PROJECT;
     process.env.CEZ_DRY_RUN = '1';
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     calls = [];
@@ -67,7 +65,6 @@ describe('new-project routes', () => {
     };
     restore('CEZ_HOME', saved.home);
     restore('CEZ_REMOTE', saved.remote);
-    restore('CEZ_SINGLE_PROJECT', saved.single);
     restore('CEZ_DRY_RUN', saved.dryRun);
   });
 
@@ -114,15 +111,6 @@ describe('new-project routes', () => {
     }
     expect(calls).toEqual([]);
     expect(existsSync(projectsDir)).toBe(false);
-  });
-
-  it('single-project mode refuses before anything is created', async () => {
-    process.env.CEZ_SINGLE_PROJECT = '1';
-    const res = await create({ name: 'fresh' });
-    expect(res.status).toBe(409);
-    expect(res.body).toEqual({ error: 'single-project mode is enabled; adding projects is disabled' });
-    expect(calls).toEqual([]);
-    expect(existsSync(join(projectsDir, 'fresh'))).toBe(false);
   });
 
   it('hosted mode refuses GitHub creation before anything runs, and owners never call gh', async () => {

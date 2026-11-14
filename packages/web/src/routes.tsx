@@ -10,7 +10,6 @@ import {
   useParams,
 } from 'react-router'
 
-import type { HealthResponse } from '@open-mercato/cezar-api-client'
 
 import { useHealth, useProjects, useRunsIndex, useRunsSearch } from './api/queries'
 import { ProjectScopeProvider } from './api/project-scope-context'
@@ -201,7 +200,7 @@ function ProjectScopeRoute() {
   }
 
   // The BOOT project mounts UNSCOPED (projectId null): the step-3.1 invariant keeps its API
-  // requests byte-identical to the single-project cockpit — the protected legacy `/api/*`
+  // requests byte-identical to the pre-workspace cockpit — the protected legacy `/api/*`
   // surface — and its cache under the same `'default'`-led keys the shell chrome (which
   // renders outside this provider) already uses. Only non-boot projects pay the `/api/p/<id>`
   // prefix. Links carry the URL prefix either way (project-router falls back to the URL).
@@ -359,9 +358,9 @@ function LegacyPathRedirect() {
 export { pageTitleContext, type PageTitleContext } from './lib/page-title'
 
 /** The project-scoped route subtree, one definition for the router AND for `matchProjectRoute`,
- *  so the last-page restore agrees with what is actually routed (and with the settings sections
- *  the server's capabilities make visible). Only element TREES are built here; nothing renders. */
-function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefined) {
+ *  so the last-page restore agrees with what is actually routed. Only element TREES are built
+ *  here; nothing renders. */
+function projectScopeRoute() {
   return (
     <Route path="/p/:projectId" element={<ProjectScopeRoute />}>
       <Route index element={<TasksOverviewRoute />} />
@@ -599,20 +598,20 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           honest 404s until the section ships (notifications unhides in Step 1.7).
           Only the PROJECT-scoped sections live here (multi-project spec, step 3.5); the
           global ones are the top-level `/settings/global/*` block below. */}
-      <Route path="settings" element={<SettingsIndexRoute capabilities={capabilities} />} />
+      <Route path="settings" element={<SettingsIndexRoute />} />
       <Route path="settings/skills" element={<SettingsSkillsRedirect />} />
-      {visibleSettingsSections('project', capabilities).map((section) => (
+      {visibleSettingsSections('project').map((section) => (
         <Route
           key={section.id}
           path={`settings/${section.id}`}
-          element={<SettingsSectionRoute section={section} scope="project" capabilities={capabilities} />}
+          element={<SettingsSectionRoute section={section} scope="project" />}
         />
       ))}
       {/* A section that MOVED out of the project area keeps its old URL working: every
           pre-3.5 bookmark and every legacy flat `/settings/appearance` (which the redirect
           below turns into `/p/<boot>/settings/appearance`) lands on the global twin instead
           of a 404 — query and hash intact across both hops. */}
-      {visibleSettingsSections('global', capabilities).map((section) => (
+      {visibleSettingsSections('global').map((section) => (
         <Route
           key={section.id}
           path={`settings/${section.id}`}
@@ -628,9 +627,8 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
  *  and the decoded params. Null for the catch-all (not found) and for anything unrouted. */
 export function matchProjectRoute(
   pathname: string,
-  capabilities: HealthResponse['capabilities'] | undefined,
 ): { pattern: string; params: Record<string, string | undefined> } | null {
-  const matches = matchRoutes(createRoutesFromElements(projectScopeRoute(capabilities)), pathname)
+  const matches = matchRoutes(createRoutesFromElements(projectScopeRoute()), pathname)
   const leaf = matches?.at(-1)
   if (!matches || !leaf || leaf.route.path === '*') return null
   const pattern = matches
@@ -652,10 +650,9 @@ export function matchProjectRoute(
  *  stay stable — they are what teammates paste, and the legacy flat URLs redirect onto them.
  */
 export function AppRoutes() {
-  const capabilities = useHealth().data?.capabilities
   return (
     <Routes>
-      {projectScopeRoute(capabilities)}
+      {projectScopeRoute()}
 
       {/* The global Tasks page — the second cockpit area outside `/p/:projectId`, and outside it
           for the same reason global settings are: "every project's tasks" scoped to one project
@@ -692,11 +689,11 @@ export function AppRoutes() {
       {/* Settings → Skills (skill updates) was removed (hearsay-tools/cezarion#1494). Its
           bookmarks land on the Skills page, through the flat-path redirect into the boot project. */}
       <Route path="/settings/global/skills" element={<Navigate to="/skills" replace />} />
-      {visibleSettingsSections('global', capabilities).map((section) => (
+      {visibleSettingsSections('global').map((section) => (
         <Route
           key={section.id}
           path={settingsSectionPath('global', section.id)}
-          element={<SettingsSectionRoute section={section} scope="global" capabilities={capabilities} />}
+          element={<SettingsSectionRoute section={section} scope="global" />}
         />
       ))}
 

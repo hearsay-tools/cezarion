@@ -95,7 +95,6 @@ function packRuntime(root: string): { tarball: string; source: string; manifest:
   const pkg = JSON.parse(readFileSync(join(original, 'package.json'), 'utf8'));
   const manifest = { ...pkg, name: active.npmPackage, version: '0.18.0', scripts: {}, devDependencies: {}, bundleDependencies: Object.keys(pkg.dependencies) };
   writeFileSync(join(source, 'package.json'), JSON.stringify(manifest));
-  writeFileSync(join(source, 'dist/home/switch.js'), 'export const REBRAND_SWITCH = true;\n');
   const graph: BundleGraph = { modules: join(source, 'node_modules'), sources: new Map(), copied: new Set() };
   for (const name of Object.keys(pkg.dependencies)) {
     const dependency = dependencyRoot(original, name);
@@ -156,7 +155,7 @@ test('old forwarding tarballs and shipped installs cross the rename offline in g
     const address = server.address(); assert.ok(address && typeof address === 'object');
     const runtime = packRuntime(root);
     const bridges = withCompatibilityPackages(runtime.source, runtime.manifest,
-      packages => Object.values(packages).map(({ dir, manifest }) => ({ manifest, file: pack(dir, root) })), true);
+      packages => Object.values(packages).map(({ dir, manifest }) => ({ manifest, file: pack(dir, root) })));
     const cache = join(root, 'empty-cache');
     const registry = `http://127.0.0.1:${address.port}`;
     await cacheArchives(cache, registry, [{ file: runtime.tarball, manifest: runtime.manifest }, ...bridges]);

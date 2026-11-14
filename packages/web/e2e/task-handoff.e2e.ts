@@ -220,6 +220,7 @@ describe('Hand off to webhook', () => {
     settledShot('mobile-sheet.png')
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast).
   it('keeps AA contrast on the dialog text in light and dark', () => {
     browser.setViewport(360, 640)
     openThread('mobile')

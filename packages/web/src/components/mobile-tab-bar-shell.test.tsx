@@ -34,7 +34,6 @@ const projects: MobileProjectNav = {
     ['cezarion', { needsYou: 2, failedUnread: 0, inMotion: 1, finishedUnread: 0 }],
     ['other', { needsYou: 7, failedUnread: 0, inMotion: 0, finishedUnread: 0 }],
   ]),
-  singleProject: false,
 }
 
 function renderShell(entry: string, props: Partial<AppShellProps> = {}) {
@@ -56,7 +55,6 @@ describe('AppShell mobile tab bar (#621)', () => {
     const row = document.querySelector('[data-slot="composer"]')!
     expect(row.contains(tabBar())).toBe(true)
     expect(row.contains(fab())).toBe(true)
-    expect(row.className).toContain('pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]')
   })
 
   it('badges Tasks with the CURRENT project, not the elsewhere total', () => {

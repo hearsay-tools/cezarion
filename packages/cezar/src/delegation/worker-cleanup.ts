@@ -7,7 +7,11 @@ import { releaseThenRemoveOwnedWorkspace } from './owned-workspace-release.ts';
 import { collectWorkerEvidence } from './results.ts';
 import { DelegationPolicyError } from './policy.ts';
 import { gitCommonDir } from './workspace-git.ts';
+import { describeProcesses } from './process-liveness.ts';
 import { WorkspaceHeldError } from './workspace-removal.ts';
+import { runWorktreeTeardown } from './worktree-teardown.ts';
+import { resolveWorktreeSetup } from '../worktree-setup.ts';
+import { loadConfig } from '../config.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 import type { DelegationProject, WorkerCleanupFactory } from './service.ts';
@@ -123,7 +127,7 @@ export class WorkerCleanup {
       const seen = this.destroyObservations.get(project.id)?.get(workerId);
       const dataDir = projectPaths(project.root).write;
       const unchanged = !!seen && holdersStillHold({ store: project.store, dataDir, workerId, holders: seen.holders }) &&
-        seen.key === observeDestroy({ store: project.store, dataDir, commonDir: await this.commonDir(project), workerId });
+        seen.key === observeDestroy({ store: project.store, dataDir, commonDir: await this.commonDir(project), workerId, teardown: await this.teardownConfig(project) });
       // One automatic full attempt at a time per project: attempts that coincide (every pending destroy after a
       // restart) would otherwise contend for the worktree mutation lock and come back lock-busy, never skipped.
       if (!unchanged) await this.serialized(`destroy-retries:${project.id}`, () => this.destroyAttempt(project, workerId, check, 'scheduled')).catch(() => undefined);
@@ -135,6 +139,10 @@ export class WorkerCleanup {
         ...(attempts >= this.destroyAttentionAttempts ? { needsAttention: true as const } : {}) };
       project.store.commitDestroyRetry(workerId, retry);
     });
+  }
+  /** The project's raw `worktreeTeardown` value, read fresh at each attempt. */
+  private async teardownConfig(project: DelegationProject): Promise<unknown> {
+    return (await loadConfig(project.root, project.home)).worktreeTeardown;
   }
   private commonDir(project: DelegationProject): Promise<string | undefined> {
     let dir = this.commonDirs.get(project.id);
@@ -176,14 +184,15 @@ export class WorkerCleanup {
     if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion)) {
       throw new DelegationPolicyError('incompatible_state', 'Worker history deletion has begun; retry history deletion');
     }
-    const commonDir = await this.commonDir(project);
+    // The teardown this attempt runs is part of what it decides on: a hook added later is a change.
+    const [commonDir, teardown] = await Promise.all([this.commonDir(project), this.teardownConfig(project)]);
     assertAttached();
     worker = check();
     if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     // What this attempt decided on (hearsay-tools/cezarion#879): a later tick that would see the same skips its
     // work. Retaken where the attempt decides (after termination, at each holder proof), so its own writes up
     // to there (stopping the worker, the removal's checkpoint) are not a change, and anything later is.
-    const observe = () => observeDestroy({ store: project.store, dataDir: project.store.sourceDataDir(workerId), commonDir, workerId });
+    const observe = () => observeDestroy({ store: project.store, dataDir: project.store.sourceDataDir(workerId), commonDir, workerId, teardown });
     let key = observe();
     const workspace = worker.delegation.workspace;
     const requestedAt = worker.delegation.destroy?.requestedAt ?? new Date().toISOString();
@@ -201,8 +210,11 @@ export class WorkerCleanup {
      * failure. A complete destroy keeps nothing, and neither does a failure no key input or named
      * holder accounts for (lock contention, a failed Git step, an unnamed blocker): it can clear
      * without changing anything a tick could see, so the next tick attempts in full. */
+    // A tick that skips runs no teardown. With a hook configured, every tick runs in full, so a service
+    // the worker started after this attempt's teardown is stopped by the next one.
+    const skippable = resolveWorktreeSetup(teardown).kind === 'none';
     const observed = (result: WorkerDestroyResult, holders: readonly number[], explained: boolean) => {
-      this.observeAttempt(project, workerId, result.state === 'complete' || !explained ? undefined : { key, holders: recordHolders(holders) });
+      this.observeAttempt(project, workerId, result.state === 'complete' || !explained || !skippable ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
     const terminationFailure = (): WorkerDestroyResult => {
@@ -210,7 +222,7 @@ export class WorkerCleanup {
       const taken = project.manager.takeWorkerTerminationBlocker(workerId);
       const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
         : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live ${productName('cezar')} (pid ${taken.blocker.pid})`
-        : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
+        : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${describeProcesses(taken.blocker.pids)} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
       if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
       const result: WorkerDestroyResult = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
         : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
@@ -297,6 +309,11 @@ export class WorkerCleanup {
     try {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
+      // Before either holder scan: the termination proof of a crashed generation scans the worktree too.
+      const teardownError = await runWorktreeTeardown(project.root, teardown, workspace);
+      // A project replaced during the teardown keeps its old manager alive: never reap through it.
+      assertAttached();
+      if (teardownError) project.store.appendEvent(workerId, { type: 'lifecycle', message: `worktree teardown failed: ${teardownError}` });
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();
       key = observe();

@@ -48,7 +48,6 @@ function Rail() {
       projects={REGISTRY.projects}
       signals={new Map()}
       version="1"
-      singleProject={false}
       projectTarget={projectSwitch.target}
       onSwitchProject={(id) => void projectSwitch.go(id)}
     />

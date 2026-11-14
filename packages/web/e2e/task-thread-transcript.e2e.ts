@@ -83,6 +83,7 @@ describe('task thread', () => {
     expect(browser.count('[data-slot="assistant-message"] [data-streamdown="heading-2"]')).toBe(1)
   })
 
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast, focus).
   it('keeps transcript links AA-readable with a permanent affordance and visible focus across the QA matrix', () => {
     const link = '[data-slot="assistant-message"] [data-streamdown="link"]'
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)

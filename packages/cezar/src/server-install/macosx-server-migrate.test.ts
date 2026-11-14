@@ -14,7 +14,7 @@ import { getStrategy, supportsServerMigration } from './strategies.ts';
 import { createAutoUi } from './ui.ts';
 import { STEP_STATUSES, type CommandResult, type InstallContext, type PlatformStrategy, type Runner, type ServerState } from './types.ts';
 
-afterEach(() => { cleanStoreRoots(); vi.restoreAllMocks(); vi.doUnmock('../home/switch.ts'); vi.resetModules(); });
+afterEach(() => { cleanStoreRoots(); vi.restoreAllMocks(); });
 
 const done = STEP_STATUSES[1];
 const OLD = ['ai.cezar.cockpit', 'ai.cezar.ngrok'];
@@ -88,15 +88,18 @@ function inDirectory(base: PlatformStrategy, dir: string): PlatformStrategy {
   };
 }
 
-/** A completed pre-switch macOS install: both agents loaded and recorded, unless `ngrokRecorded` is false. */
+/** A plist as an install made before the rename wrote it: the old label. */
+const legacyLabel = (xml: string) => xml.replaceAll('tools.hearsay.squawk.', 'ai.cezar.');
+
+/** A completed pre-rename macOS install: both agents loaded and recorded, unless `ngrokRecorded` is false. */
 function macInstall({ ngrokRecorded = true } = {}) {
   const f = migrationFixture();
   const dir = join(f.directory, 'LaunchAgents');
   mkdirSync(dir, { recursive: true });
   const launchd = new FakeLaunchd();
   const plist = (label: string) => join(dir, `${label}.plist`);
-  writeFileSync(plist(OLD[0]!), squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], false), { mode: 0o600 });
-  writeFileSync(plist(OLD[1]!), launchdPlist(4321, 'ops:secret', 'cockpit.ngrok.app', '/opt/homebrew/bin/ngrok', false), { mode: 0o600 });
+  writeFileSync(plist(OLD[0]!), legacyLabel(squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'])), { mode: 0o600 });
+  writeFileSync(plist(OLD[1]!), legacyLabel(launchdPlist(4321, 'ops:secret', 'cockpit.ngrok.app', '/opt/homebrew/bin/ngrok')), { mode: 0o600 });
   for (const label of OLD) launchd.loaded.add(label);
   const agent = (label: string) => ({ kind: 'owned' as const, type: 'launchd', name: label, path: plist(label) });
   const state: ServerState = {
@@ -122,8 +125,8 @@ function snapshot(root: string): Array<[string, string]> {
     .map(path => [path, readFileSync(join(root, path), 'base64')]);
 }
 
-function serverMigrate(f: MacInstall, { dryRun = false, rebrand = true } = {}) {
-  const strategy = inDirectory(createMacosxNgrok({ rebrand }), f.dir);
+function serverMigrate(f: MacInstall, { dryRun = false } = {}) {
+  const strategy = inDirectory(createMacosxNgrok(), f.dir);
   return runServerMigrate({
     legacy: f.legacy, target: f.target, strategy: () => strategy, dryRun, assumeYes: true, repoRoot: '/repo',
     now: '2026-11-11T00:00:00.000Z', ui: createAutoUi({}, () => {}), runner: f.launchd, env: f.env,
@@ -191,7 +194,7 @@ describe('hsq server-migrate on macOS (launchd)', () => {
     const f = macInstall();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const homes: Array<[string, string]> = [];
-    f.launchd.onBootstrap = label => homes.push([label, prepareMigrationHome(f.target, f.env, { enabled: true, legacy: f.legacy }).kind]);
+    f.launchd.onBootstrap = label => homes.push([label, prepareMigrationHome(f.target, f.env, { legacy: f.legacy }).kind]);
     fail(f);
     await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'rolled-back' });
     expectOldAgents(f, { staged });
@@ -241,46 +244,22 @@ describe('hsq server-migrate on macOS (launchd)', () => {
     for (const label of OLD) expect(readFileSync(f.plist(label), 'utf8')).toBe(f.bytes[label]);
     expect(snapshot(f.target.root)).toEqual(before);
   });
-
-  it('with the switch off the strategy moves no label: the group keeps the old agents', async () => {
-    const f = macInstall();
-    await expect(serverMigrate(f, { rebrand: false })).resolves.toMatchObject({ status: 'migrated' });
-    expect(f.launchd.loaded).toEqual(new Set(OLD));
-    for (const label of NEW) expect(existsSync(f.plist(label))).toBe(false);
-    expect(loadServerState('default', f.target).steps.autostart!.created!.artifacts[0]!.name).toBe(OLD[0]);
-  });
 });
 
 describe('a legacy home that records an installed macOS server', () => {
-  it('supports group migration in both switch states', async () => {
+  it('supports group migration', () => {
     expect(supportsServerMigration(getStrategy('macosx-ngrok'))).toBe(true);
-    vi.resetModules();
-    vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: true }));
-    const strategies = await import('./strategies.ts');
-    expect(strategies.supportsServerMigration(strategies.getStrategy('macosx-ngrok'))).toBe(true);
   });
 
-  it('with the switch on, boot keeps the legacy home and prints the server-migrate notice', async () => {
+  it('boot keeps the legacy home and prints the server-migrate notice', () => {
     const f = macInstall();
     const before = snapshot(f.target.root);
-    vi.resetModules();
-    vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: true }));
-    const boot = await import('../home/migration-boot.ts');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(boot.prepareMigrationHome(f.target, f.env, { legacy: f.legacy })).toEqual({ kind: 'legacy', home: f.legacy });
+    expect(prepareMigrationHome(f.target, f.env, { legacy: f.legacy })).toEqual({ kind: 'legacy', home: f.legacy });
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Run hsq server-migrate.'));
     expect(snapshot(f.target.root)).toEqual(before);
     expect(readInstallMarker(f.target.config)?.state).toBeUndefined();
     expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
     expect(f.launchd.commands).toEqual([]);
-  });
-
-  it('with the switch off, boot leaves the legacy home as is without a notice', () => {
-    const f = macInstall();
-    const before = snapshot(f.target.root);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareMigrationHome(f.target, f.env, { enabled: false, legacy: f.legacy })).toEqual({ kind: 'ready' });
-    expect(warn).not.toHaveBeenCalled();
-    expect(snapshot(f.target.root)).toEqual(before);
   });
 });

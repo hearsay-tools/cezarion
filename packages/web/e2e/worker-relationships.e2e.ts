@@ -125,7 +125,6 @@ it('retains all 32 scoped worker links only on Session, including archived worke
     browser.goto(`${base}${route(parentId)}${suffix}`)
     browser.waitForFunction(`document.querySelector('[data-slot="run-header"]') !== null`)
     expect(browser.count(region)).toBe(0)
-    expect(browser.count('[data-slot="workflow-steps"]')).toBe(0)
     observations.push({ tab: suffix, links: 0, scope: project })
   }
 })

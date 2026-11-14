@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build, type Plugin, type Rollup } from 'vite'
 import { describe, expect, it, vi } from 'vitest'
@@ -12,7 +11,6 @@ vi.mock('node:child_process', async importOriginal => {
 })
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
-const legacy = readFileSync(new URL('./fixtures/index-legacy.html', import.meta.url), 'utf8')
 
 /** Keep the real HTML shell, but isolate its build from unrelated application chunks. */
 const shellEntry: Plugin = {
@@ -40,15 +38,8 @@ describe('product identity in the HTML build', () => {
     expect(() => productIdentityPlugin()).toThrow('invalid display metadata')
   })
 
-  it('keeps the legacy source and built shell byte-identical with the switch off', async () => {
-    expect(readFileSync(`${root}index.html`, 'utf8')).toBe(legacy)
-    const off = await builtHtml([productIdentityPlugin(false)])
-    expect(off).toBe(await builtHtml([]))
-    expect(off).toContain('<title>cezar</title>')
-  })
-
-  it('builds the switched title from the shared metadata', async () => {
-    const identity = readProductIdentity(true)
-    expect(await builtHtml([productIdentityPlugin(true)])).toContain(`<title>${identity.displayName}</title>`)
+  it('builds the title from the shared metadata', async () => {
+    const identity = readProductIdentity()
+    expect(await builtHtml([productIdentityPlugin()])).toContain(`<title>${identity.displayName}</title>`)
   })
 })

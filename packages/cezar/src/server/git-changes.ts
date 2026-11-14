@@ -1,6 +1,6 @@
 import { fallbackProjectWriteError } from '../project-paths.ts';
 import { imageMimeType } from '@open-mercato/cezar-contract/image-path';
-import { execFile } from 'node:child_process';
+import { git, GIT_OVERFLOW_REASON, type GitResult } from '../git-command.ts';
 import { rmSync } from 'node:fs';
 import { lstat, open, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -23,32 +23,11 @@ import { isSafeGitRef } from '../git-refs.ts';
  * never a 500 for a predictable git failure).
  */
 
-interface GitResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-}
-
-/** Run git, never throw — degradation is the caller's policy. `env` overrides (e.g. a scratch
- *  `GIT_INDEX_FILE`) merge over the process env. */
-function git(cwd: string, args: string[], env?: Record<string, string>): Promise<GitResult> {
-  return new Promise((resolvePromise) => {
-    execFile(
-      'git',
-      args,
-      {
-        cwd,
-        maxBuffer: 32 * 1024 * 1024,
-        encoding: 'utf8',
-        ...(env ? { env: { ...process.env, ...env } } : {}),
-      },
-      (err, stdout, stderr) => resolvePromise({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
-    );
-  });
-}
-
-/** First line of git's stderr (or stdout) as a one-line human reason. */
-function gitReason(res: GitResult, fallback: string): string {
+/** First line of git's stderr (or stdout) as a one-line human reason; an output over the buffer
+ *  cap says so, because its stdout is only the start of a patch (hearsay-tools/squawk#1843).
+ *  Exported for tests. */
+export function gitReason(res: GitResult, fallback: string): string {
+  if (res.overflow) return GIT_OVERFLOW_REASON;
   const text = (res.stderr.trim() || res.stdout.trim()).split('\n')[0]?.trim();
   return text || fallback;
 }
@@ -305,8 +284,8 @@ export async function collectChanges(
   const scratchIndex = join(tmpdir(), `cez-scratch-index-${process.pid}-${scratchSeq++}`);
   const env = { GIT_INDEX_FILE: scratchIndex };
   try {
-    await git(dir, ['read-tree', 'HEAD'], env); // seed with tracked files; harmless if no HEAD
-    return await read((args) => git(dir, args, env));
+    await git(dir, ['read-tree', 'HEAD'], { env }); // seed with tracked files; harmless if no HEAD
+    return await read((args) => git(dir, args, { env }));
   } finally {
     rmSync(scratchIndex, { force: true });
   }

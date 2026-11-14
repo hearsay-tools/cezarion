@@ -11,8 +11,7 @@ import { HomeStore } from './store.ts';
 import { json, migrationFixture, rawJson } from './migration.testkit.ts';
 import { cleanStoreRoots } from './store.testkit.ts';
 import { listBackups } from '../workspace/backups.ts';
-import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
-import { REBRAND_SWITCH } from './switch.ts';
+import { loadSubcommand } from '../subcommands.ts';
 import * as migrationPlan from './migration-plan.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
@@ -27,14 +26,14 @@ it.each([
   if (reason === 'reset') new HomeStore(legacy).writeJson(legacy.workspaceConfig, { projects: [] });
   else rawJson(legacy.workspaceConfig, { projects: [], outside: true });
   const current = readFileSync(legacy.workspaceConfig);
-  expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy }))
+  expect(() => prepareOperatorHome(target, 'serve', env, { legacy }))
     .toThrow(`config.json (${reason}). Run ${LEGACY_RECOVERY_COMMAND}.`);
   expect(existsSync(target.workspaceConfig)).toBe(false);
   const output = vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runMigrationCommand(['--resolve-legacy', 'config.json', action], env, target, legacy)).toBe(0);
   expect(JSON.parse(String(output.mock.calls[0]![0]))).toEqual({ file: 'config.json', action });
   expect(readFileSync(legacy.workspaceConfig)).toEqual(action === 'restore' ? pinned : current);
-  expect(getHomeRecovery(legacy, false)).toEqual({ files: [] });
+  expect(getHomeRecovery(legacy)).toEqual({ files: [] });
   expect(readInstallMarker(target.config)?.state).toBeUndefined();
   expect(existsSync(target.workspaceConfig)).toBe(false);
   if (action === 'restore') {
@@ -45,11 +44,11 @@ it.each([
   expect(readFileSync(target.workspaceConfig)).toEqual(action === 'restore' ? pinned : current);
 });
 
-it('the enabled dispatcher resolves the legacy home, not HSQ_HOME or the target factory', async () => {
+it('the dispatcher resolves the legacy home, not HSQ_HOME or the target factory', async () => {
   const { legacy, target, env } = migrationFixture();
   rawJson(legacy.workspaceConfig, { outside: true });
   const targetFactory = vi.fn(() => target);
-  const run = await loadSubcommand('migrate', targetFactory, true);
+  const run = await loadSubcommand('migrate', targetFactory);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await run!(['--resolve-legacy', 'config.json', 'restore'], { ...env, CEZ_HOME: legacy.root, HSQ_HOME: target.root })).toBe(0);
   expect(json(legacy.workspaceConfig).saved).toBe('original');
@@ -62,15 +61,15 @@ it.each(['restore', 'accept'])('resolves a backup-derived reset with %s after a 
   rawJson(`${legacy.workspaceConfig}.bak`, { projects: [{ id: 'kept', root: '/kept' }] });
   const pinned = readFileSync(`${legacy.workspaceConfig}.bak`);
   const current = readFileSync(legacy.workspaceConfig);
-  expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toThrow('config.json (reset)');
+  expect(() => prepareOperatorHome(target, 'serve', env, { legacy })).toThrow('config.json (reset)');
   expect(existsSync(join(legacy.config, '.versions/config.json/RESET'))).toBe(false);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runMigrationCommand(['--resolve-legacy', 'config.json', action], env, target, legacy)).toBe(0);
   expect(readFileSync(legacy.workspaceConfig)).toEqual(action === 'restore' ? pinned : current);
-  expect(getHomeRecovery(legacy, false)).toEqual({ files: [] });
+  expect(getHomeRecovery(legacy)).toEqual({ files: [] });
   expect(await runMigrationCommand([], env, target, legacy)).toBe(0);
   expect(readInstallMarker(target.config)?.state).toBe('committed');
-  expect(getHomeRecovery(target, false)).toEqual({ files: [] });
+  expect(getHomeRecovery(target)).toEqual({ files: [] });
 });
 
 it.each(['agent-accounts.json', 'remote-settings/4321.json'])
@@ -151,18 +150,6 @@ it('lists recovery help without creating a home', async () => {
   expect(existsSync(root)).toBe(false);
 });
 
-it('keeps migration unregistered and the outside legacy bytes untouched with the shipped switch off', async () => {
-  const { legacy, target, env } = migrationFixture();
-  rawJson(legacy.workspaceConfig, { outside: true });
-  const bytes = readFileSync(legacy.workspaceConfig);
-  expect(REBRAND_SWITCH).toBe(false);
-  expect(SUBCOMMAND_NAMES).not.toContain('migrate');
-  expect(await loadSubcommand('migrate')).toBeUndefined();
-  prepareOperatorHome(legacy, 'serve', env);
-  expect(readFileSync(legacy.workspaceConfig)).toEqual(bytes);
-  expect(existsSync(target.workspaceConfig)).toBe(false);
-});
-
 it('keeps migration error text literal while formatting the invoked command prefix', async () => {
   const { legacy, target, env } = migrationFixture();
   const argv = [...process.argv];
@@ -177,6 +164,3 @@ it('keeps migration error text literal while formatting the invoked command pref
     expect(output).not.toHaveBeenCalled();
   } finally { process.argv = argv; }
 });
-
-// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
-vi.mock('./switch.ts', () => ({ REBRAND_SWITCH: false }));

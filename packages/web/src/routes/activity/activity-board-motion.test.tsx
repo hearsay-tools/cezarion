@@ -33,6 +33,7 @@ const B = run({ runId: 'b', title: 'Fixing flaky shard 3' })
 const projectId = 'cezarion'
 
 describe('the board in motion', () => {
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('pulses a running dot, breathes a waiting shape and sweeps the running now box', () => {
     const waiting = run({ runId: 'w', status: RUN_STATUS.waiting, rung: 'waiting-for-merge', wait: { kind: ACTIVITY_WAIT_KIND.pr, since: iso(-1_000), deadline: iso(60_000), detail: { number: 3, target: 'merge' } } })
     renderBoard(project({ tasks: [A, waiting] }), EMPTY_MOTION)
@@ -51,6 +52,7 @@ describe('the board in motion', () => {
     expect(document.querySelectorAll('[data-activity-card]')).toHaveLength(1)
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('flashes a card in its new tone and slides its main line in', () => {
     renderBoard(project({ tasks: [A] }), motionOf({ kind: 'rung-changed', projectId, task: A, from: 'queued' }, { kind: 'tool-started', projectId, runId: 'a' }))
     expect(document.querySelector('[data-activity-card="a"] [data-slot="activity-flash"]')?.getAttribute('data-tone')).toBe('running')
@@ -64,6 +66,7 @@ describe('the board in motion', () => {
     expect(document.querySelector('[data-slot="activity-finished"]')).toBeNull()
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('flashes a check that just passed', () => {
     const ci = run({ runId: 'c', status: RUN_STATUS.waiting, rung: 'waiting-for-ci', wait: { kind: ACTIVITY_WAIT_KIND.pr, since: iso(-1_000), deadline: iso(60_000), detail: { number: 7, target: 'checks', checks: [{ name: 'lint', bucket: 'pass' }, { name: 'test', bucket: 'pending' }], counts: { pass: 1, fail: 0, pending: 1, skipping: 0, cancel: 0 } } } })
     renderBoard(project({ tasks: [ci] }), motionOf({ kind: 'check-passed', projectId, runId: 'c', pr: 7, name: 'lint' }))
@@ -71,6 +74,7 @@ describe('the board in motion', () => {
     expect(document.querySelector('[data-bucket="pending"]')?.classList.contains('activity-breathe-fast')).toBe(true)
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('folds the rail entry of a closed request while the reply comet travels back', () => {
     const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
     renderBoard(project({ tasks: [A, B] }), motionOf({ kind: 'request-closed', projectId, request: peer, status: 'replied' }))
@@ -92,6 +96,7 @@ describe('the board in motion', () => {
     expect(screen.getByText('No task waits for a reply.')).toBeTruthy()
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('marches open lines and fades a new one in behind its comet', () => {
     const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
     renderBoard(project({ tasks: [A, B], requests: [peer] }), motionOf({ kind: 'request-opened', projectId, request: peer }))
@@ -108,6 +113,7 @@ describe('the board in motion', () => {
     expect(feed.textContent).toMatch(/Watching since \d{2}:\d{2}/)
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it('bumps a chip whose count changed', () => {
     const motion = motionOf({ kind: 'chip-changed', chip: 'working', from: 0, to: 1 })
     render(<MemoryRouter><SummaryChips summary={summarize([project({ tasks: [A] })])} tasksTo="/" bumps={motion.bumps} /></MemoryRouter>)

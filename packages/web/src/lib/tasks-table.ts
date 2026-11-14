@@ -87,9 +87,7 @@ export function workflowLabel(run: Pick<RunSummary, 'workflow'> & { workflowLabe
  * displayed title (`runTitle`: the auto-summary when one exists, per R2 #389), branch and
  * workflow (both the raw name and the label the column prints). Not the task prompt, and not a
  * raw `title` hidden behind a summary: matching on text the table never displays makes rows
- * appear for no visible reason. `matchesRunSearch` decides, in its `shown` scope; this list reads
- * the whole query as ONE phrase, which the other lists do not (`mode: 'phrase'`; kept as on `main`,
- * hearsay-tools/cezarion#1884).
+ * appear for no visible reason. `matchesRunSearch` decides, in its `shown` scope.
  */
 export function filterRuns(
   runs: readonly RunSummary[],
@@ -102,7 +100,6 @@ export function filterRuns(
   return listed.filter((run) =>
     matchesRunSearch(run, query, {
       scope: 'shown',
-      mode: 'phrase',
       extras: { displayTitle: runTitle(run), automation: extraText(run), references: () => shownReferenceNumbers(run) },
     }),
   )
@@ -206,7 +203,7 @@ export interface TaskReference {
  * hide the other's (review round 6). With a URL the key carries its host and `owner/repo`
  * (lower-cased, so `github.com/O/R` and `github.com/o/r` agree); an unparseable URL counts as
  * itself; a number-only reference uses its project identity. The default scope is local to
- * a single-project caller; cross-project callers must supply projectId. The group row's line 2 and
+ * a one-project caller; cross-project callers must supply projectId. The group row's line 2 and
  * every variant's own-reference filter use this one key.
  */
 export function referenceKey(reference: { kind: string; number?: number | undefined; url?: string | undefined; projectId?: string | undefined }): string {

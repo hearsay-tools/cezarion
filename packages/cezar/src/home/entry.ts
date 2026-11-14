@@ -9,7 +9,6 @@ import { underTestRunner } from './install-marker.ts';
 import { prepareMigrationHome, type MigrationBootOptions } from './migration-boot.ts';
 import { holdCockpitLease } from './leases.ts';
 import { HomeStore, readHomeFile } from './store.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 import { authorizeHomeEntry, registryFiles } from './entry-authorization.ts';
 import { isValidRestore } from '../workspace/backups.ts';
 
@@ -69,8 +68,8 @@ export function serverInstanceForPort(home: Home, port: number): string {
 }
 
 /** Refuse a changed Home before server consumers read; hold presence for the listener's lifetime. */
-export function prepareHomeLifecycle(home: Home, instance?: string, { rebrand = REBRAND_SWITCH } = {}): (server: ServerType) => void {
-  const preparedHome = prepareOperatorHome(home, 'serve', process.env, { enabled: rebrand });
+export function prepareHomeLifecycle(home: Home, instance?: string): (server: ServerType) => void {
+  const preparedHome = prepareOperatorHome(home, 'serve', process.env);
   if (preparedHome !== home) {
     throw new Error(commandText(`[hsq] refusing to serve home ${home.root}: preparation selected ${preparedHome.root}. Prepare the home before starting the server.`));
   }
@@ -79,7 +78,7 @@ export function prepareHomeLifecycle(home: Home, instance?: string, { rebrand = 
       const address = server.address();
       if (!address || typeof address !== 'object') return;
       try {
-        const name = instance ?? (rebrand ? serverInstanceForPort(preparedHome, address.port) : 'default');
+        const name = instance ?? serverInstanceForPort(preparedHome, address.port);
         const release = holdCockpitLease(preparedHome, address.port, name);
         server.once('close', () => { try { release(); } catch { /* Presence is advisory. */ } });
       } catch { /* A read-only home must not stop the cockpit. */ }

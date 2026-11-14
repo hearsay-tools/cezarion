@@ -71,7 +71,7 @@ function expectVerifiableRelease(release, tag, body, context) {
 
 function collectBumpTree() {
   command('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--no-frozen-lockfile']);
-  // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
+  // Use Git pathspecs, not a shell. Stage all stamped workspaces and the lockfile.
   git('add', ...releaseBumpPaths());
   const changed = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
   if (changed.some((file) => !isReleaseBumpFile(file))) {

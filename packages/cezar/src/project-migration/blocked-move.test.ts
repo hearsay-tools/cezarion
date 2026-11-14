@@ -10,12 +10,11 @@ beforeEach(() => {
   execFileSync('git', ['init', '-q', root]);
   mkdirSync(join(root, '.ai/cezar'), { recursive: true });
   writeFileSync(join(root, '.ai/cezar/config.json'), '{}');
+  // Fresh modules per test: the legacy-project notice is printed once per process.
   vi.resetModules();
-  vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: true }));
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
-  vi.doUnmock('../home/switch.ts');
   vi.resetModules();
 });
 
@@ -32,7 +31,7 @@ function blockDestination(kind: string): string {
   return `${join(root, '.ai/cezar/config.json')} would replace an existing path`;
 }
 
-describe.each(['symlink', 'conflict'])('blocked project migration (%s, switch on)', kind => {
+describe.each(['symlink', 'conflict'])('blocked project migration (%s)', kind => {
   it('prints one reason notice even when no moves remain', async () => {
     const reason = blockDestination(kind);
     const { moveProjectWhenIdle } = await import('./auto.ts');

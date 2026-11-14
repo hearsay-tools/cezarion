@@ -41,15 +41,30 @@ a subset. The complete body has a 50,000-byte limit; exceeding it fails before
 summary creation or routing. Do not remove members to fit the limit. User notes
 outside the managed block survive reporter retries.
 
+A summary lists one report per cause, not per job. A test failure groups by test file,
+test name and diagnostic; another recognized error by stage, step and error line; an
+unrecognized failure by workflow, job (matrix digits ignored) and step. A `Require every …`
+gate job that fails beside another failed job is no member: the failed job carries the
+cause ([matching](../failure-reporting.md#matching-and-duplicate-handling)).
+
 Replaying an attempt whose summary is closed leaves it closed and does not route
 it. A different attempt gets a separate summary, even when it reuses signature
 reports. The reporter never reopens a closed report. It changes no Squawk run state
 and adds no database or required configuration.
 
-## Escalation after 60 minutes
+## Closing and escalation
 
 The scheduled workflow `main-ci-escalation.yml` runs every 10 minutes on the default
-branch (and on dispatch). It lists open issues with `main-ci-failure`. For each summary
+branch (and on dispatch). It lists open issues with `main-ci-failure`.
+
+It first reads the newest passing CI push run on `main`. A summary whose run attempt
+that run follows (a later run, or a later attempt of the same run) gets a comment that
+links the passing run, and closes as completed. The comment carries the marker
+`<!-- cez-main-ci-green:v1 -->`, so a retry after a failed close posts no second comment. Its member reports stay open: they
+record causes, and a passing run does not resolve a cause. A legacy report without the
+summary marker, or a summary labeled `do-not-close`, is never closed this way.
+
+For each summary still open
 open 60 minutes or longer, it posts one comment that mentions the repository's admins
 (the collaborators with the admin role, read from the API) and carries the marker
 `<!-- cez-main-ci-escalation:v1 -->`. A later run finds the marker and writes nothing, so a
@@ -58,8 +73,8 @@ request never gets one.
 
 - The 60 minutes count from the summary's creation, not from the label.
 - With no admin to mention, the run fails before any write, and the next run tries again.
-- It changes no label, closes nothing and starts no task. The repair automation runs as before.
-- It holds `issues: write` and `contents: read`, and it runs trusted default-branch code only.
+- It changes no label, closes only summaries of attempts a passing run follows, and starts no task. The repair automation runs as before.
+- It holds `issues: write`, `actions: read` and `contents: read`, and it runs trusted default-branch code only.
   The concurrency group `main-ci-escalation` is the write lock.
 
 `.github/scripts/main-ci-escalation.test.cjs` pins these rules.
@@ -115,7 +130,7 @@ member: issue, remaining cause, fixing evidence, and closure or open action owne
 | Fixed by the new repair PR | Give every fully resolved report a repository-qualified closing reference in the PR body. Keep it open until merge. A plain link or `Refs` does not close it. |
 | Aggregate report | Close or give it a closing reference only when every cause it reflects is resolved or covered by that PR. |
 | Retired scenario or false report | Explain why no required work remains and close as not planned. Do not claim an unproven root cause was fixed. |
-| Duplicate of an unresolved cause | Link its occurrence evidence from the canonical open issue first, verify that issue is open, then close only the duplicate as not planned. The defect remains unresolved. |
+| Duplicate of an unresolved cause | Link its occurrence evidence from the canonical open issue first, verify that issue is open, and add the duplicate's `cez-failure-signature:v1` marker to that issue's body, so later occurrences go there ([refining matches](../failure-reporting.md#refining-matches)). Then close only the duplicate as not planned. The defect remains unresolved. |
 | Unresolved cause, missing evidence, protected issue or competing claim | Keep it open with an explicit action owner or blocker. Respect `do-not-close` and the existing competing-work decision. |
 
 Reconcile the summary after every cause is resolved, covered by the new PR, or

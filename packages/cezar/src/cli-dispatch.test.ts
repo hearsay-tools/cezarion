@@ -1,6 +1,4 @@
 import { productName } from './home/display.ts';
-import { REBRAND_SWITCH } from './home/switch.ts';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { defaultCliDeps, main, type CliDeps } from './cli-dispatch.ts';
 import { testHome } from './home/test-home.testkit.ts';
@@ -14,7 +12,6 @@ function fixture(args: string[] = []) {
     process: processStub,
     console: { log: vi.fn(), error: vi.fn() },
     parseArgs: vi.fn(defaultCliDeps.parseArgs),
-    productEnv: vi.fn(() => undefined as string | undefined),
     operatorHomeEntry: vi.fn(defaultCliDeps.operatorHomeEntry),
     resolveCliHome: vi.fn(() => home),
     prepareOperatorHome: vi.fn(() => home),
@@ -26,7 +23,6 @@ function fixture(args: string[] = []) {
     serverCommand: vi.fn().mockResolvedValue(undefined),
     runCommand: vi.fn().mockResolvedValue(undefined),
     initCommand: vi.fn(),
-    initWorkspace: vi.fn().mockResolvedValue('boot-id'),
   };
   const run = () => main(deps as unknown as CliDeps);
   return { home, processStub, deps, run };
@@ -111,28 +107,12 @@ describe('main dispatch', () => {
     expect(f.deps.initCommand).toHaveBeenCalledExactlyOnceWith('/work');
   });
 
-  it.each([{ args: [] }, { args: ['list'] }])('registers the boot project for a single-project listing: $args', async ({ args: projectArgs }) => {
+  it.each([{ args: [] }, { args: ['list'] }, { args: ['add', '/other'] }, { args: ['remove', 'project-id'] }])('forwards projects $args to the registry command', async ({ args: projectArgs }) => {
     const f = fixture(['projects', ...projectArgs]);
-    f.deps.productEnv.mockReturnValue('1');
     f.deps.runProjectsCommand.mockResolvedValue(3);
     await f.run();
-    expect(f.deps.productEnv).toHaveBeenCalledWith('SINGLE_PROJECT');
-    expect(f.deps.initWorkspace).toHaveBeenCalledWith('/work', f.home);
-    expect(f.deps.initWorkspace).toHaveBeenCalledBefore(f.deps.runProjectsCommand);
-    expect(f.deps.runProjectsCommand).toHaveBeenCalledWith(projectArgs, { defaultRoot: '/work', bootProjectId: 'boot-id', home: f.home });
+    expect(f.deps.runProjectsCommand).toHaveBeenCalledWith(projectArgs, { defaultRoot: '/work', home: f.home });
     expect(f.processStub.exitCode).toBe(3);
-  });
-
-  it.each([
-    { mode: undefined, args: [] },
-    { mode: '1', args: ['add', '/other'] },
-    { mode: '1', args: ['remove', 'project-id'] },
-  ])('leaves registration to normal guards for projects $args in mode $mode', async ({ mode, args }) => {
-    const f = fixture(['projects', ...args]);
-    f.deps.productEnv.mockReturnValue(mode);
-    await f.run();
-    expect(f.deps.initWorkspace).not.toHaveBeenCalled();
-    expect(f.deps.runProjectsCommand).toHaveBeenCalledWith(args, { defaultRoot: '/work', bootProjectId: undefined, home: f.home });
   });
 
   it('forwards all server-install flags and distinguishes an omitted port from its default', async () => {
@@ -171,7 +151,7 @@ describe('main dispatch', () => {
     await unknown.run();
     await help.run();
     expect(unknown.deps.console.error.mock.calls).toEqual([
-      ...(REBRAND_SWITCH ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []),
+      ["[cez] 'cez' is deprecated; use 'hsq' instead."],
       ['unknown command: nonsense\n'],
     ]);
     expect(unknown.deps.console.log.mock.calls).toEqual(help.deps.console.log.mock.calls);
@@ -188,67 +168,56 @@ describe('main dispatch', () => {
 });
 
 describe('binary help and notices', () => {
-  it.each([false, true])('uses legacy help and one gated notice for an npm target entry (switch %s)', async rebrand => {
+  it('uses the invoked name in help and prints one notice for an npm target entry', async () => {
     const f = fixture(['--help']);
     f.processStub.argv[1] = String.raw`C:\npm\node_modules\@wjarka\cezarion\dist\index.js`;
-    await main(f.deps as unknown as CliDeps, rebrand);
+    await main(f.deps as unknown as CliDeps);
     expect(f.deps.console.log.mock.calls[0]![0]).toContain('  cez run "<task>"');
-    expect(f.deps.console.error.mock.calls).toEqual(rebrand ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []);
-  });
-  it('keeps legacy help spelling and paths with the additive version option', async () => {
-    const expected = readFileSync(new URL('./home/fixtures/cli-help-legacy.txt', import.meta.url), 'utf8');
-    for (const name of ['cez', 'cezarion']) {
-      const f = fixture(['--help']);
-      f.processStub.argv[1] = `/pkg/dist/${name}.js`;
-      await main(f.deps as unknown as CliDeps, false);
-      expect(f.deps.console.log).toHaveBeenCalledWith(expected);
-      expect(f.deps.console.error).not.toHaveBeenCalled();
-    }
+    expect(f.deps.console.error.mock.calls).toEqual([["[cez] 'cez' is deprecated; use 'hsq' instead."]]);
   });
 
-  it.each([false, true])('keeps JSON subcommands separate from old-name notices (switch %s)', async rebrand => {
+  it('keeps JSON subcommands separate from old-name notices', async () => {
     for (const name of ['cez', 'cezarion', 'hsq']) {
       const f = fixture(['automation', 'schema']);
       f.processStub.argv[1] = `/pkg/dist/${name}.js`;
       f.deps.runSubcommand.mockResolvedValue(0);
-      await main(f.deps as unknown as CliDeps, rebrand);
-      expect(f.deps.console.error.mock.calls).toEqual(rebrand && name !== 'hsq'
+      await main(f.deps as unknown as CliDeps);
+      expect(f.deps.console.error.mock.calls).toEqual(name !== 'hsq'
         ? [[`[${name}] '${name}' is deprecated; use 'hsq' instead.`]] : []);
       expect(f.deps.console.log).not.toHaveBeenCalled();
       expect(f.deps.runSubcommand).toHaveBeenCalled();
       expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
     }
   });
-  it.each([false, true])('uses the allowed help identity (switch %s)', async rebrand => {
+  it('uses the invoked name and the new product names in help', async () => {
     for (const name of ['cez', 'cezarion', 'hsq']) {
       const f = fixture(['--help']);
       f.processStub.argv[1] = `/pkg/dist/${name}.js`;
-      await main(f.deps as unknown as CliDeps, rebrand);
-      const expected = rebrand || name === 'hsq' ? name : 'cez';
+      await main(f.deps as unknown as CliDeps);
       const help = f.deps.console.log.mock.calls[0]![0] as string;
-      expect(help).toContain(`  ${expected} run "<task>"`);
-      expect(help.includes(`  ${expected} migrate [--dry-run]`)).toBe(rebrand);
-      expect(help).toContain(`${rebrand ? 'Squawk' : 'cezar'} — local cockpit`);
-      expect(help).toContain(`host ${rebrand ? 'Squawk' : 'cezar'} on a server`);
-      expect(help).toContain(`resume ${rebrand ? 'Squawk' : 'Cezar'} workers`);
-      expect(help).toContain(`scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/`);
-      expect(help).toContain(`"skillsRepos" in .ai/${rebrand ? 'squawk' : 'cezar'}/config.json`);
-      expect(help).toContain(`workflows in .ai/${rebrand ? 'squawk' : 'cezar'}/workflows/.`);
-      expect(help.includes('A project also reads .ai/cezar/')).toBe(rebrand);
+      expect(help).toContain(`  ${name} run "<task>"`);
+      expect(help).toContain(`  ${name} migrate [--dry-run]`);
+      expect(help).toContain('Squawk — local cockpit');
+      expect(help).toContain('host Squawk on a server');
+      expect(help).toContain('resume Squawk workers');
+      expect(help).toContain('scaffold .ai/squawk/');
+      expect(help).toContain('"skillsRepos" in .ai/squawk/config.json');
+      expect(help).toContain('workflows in .ai/squawk/workflows/.');
+      expect(help).toContain('A project also reads .ai/cezar/');
     }
   });
 });
 
 
-describe.each([false, true])('CLI metadata (switch %s)', rebrand => {
+describe('CLI metadata', () => {
   it.each(['cez', 'cezarion', 'hsq'])('prints only the package version on stdout for %s', async name => {
     for (const flag of ['--version', '-v']) {
       const f = fixture([flag]);
       f.processStub.argv[1] = `/bin/${name}`;
-      await main(f.deps as unknown as CliDeps, rebrand);
+      await main(f.deps as unknown as CliDeps);
       expect(f.deps.console.log.mock.calls).toEqual([['1.2.3']]);
       expect(f.processStub.exitCode ?? 0).toBe(0);
-      expect(f.deps.console.error).toHaveBeenCalledTimes(rebrand && name !== 'hsq' ? 1 : 0);
+      expect(f.deps.console.error).toHaveBeenCalledTimes(name !== 'hsq' ? 1 : 0);
       expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
       expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
     }
@@ -258,7 +227,7 @@ describe.each([false, true])('CLI metadata (switch %s)', rebrand => {
     const f = fixture(['--help']);
     f.processStub.argv[1] = '/bin/hsq';
     f.deps.resolveCliHome.mockImplementation(() => { throw new Error('No home directory'); });
-    await main(f.deps as unknown as CliDeps, rebrand);
+    await main(f.deps as unknown as CliDeps);
     expect(f.deps.console.log.mock.calls[0]?.[0]).toContain('Usage:');
     expect(f.processStub.exitCode ?? 0).toBe(0);
     expect(f.deps.resolveCliHome).not.toHaveBeenCalled();

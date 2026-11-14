@@ -676,11 +676,9 @@ start_app() {
 
 # ---- 7. descriptor write ----------------------------------------------------
 write_descriptor() {
-  SINGLE_PROJECT=false
-  [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, start, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv, watch, inputsSha] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, start, cmd, bInstalled, bCmd, bVer, bNotes, desc, platform, launchPath, servedRoot, serverEnv, watch, inputsSha] = process.argv.slice(1);
     let launch = {};
     try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
     const browser = {
@@ -707,7 +705,7 @@ write_descriptor() {
       app: { startCommand: cmd, port: Number(port), healthPath: "/api/v1/health", pid: Number(pid), ...(start ? { start } : {}) },
       services: [],
       credentials: [],
-      environment: { singleProject: singleProject === "true", serverEnv, watch, serverHome: ".ai/qa/server-home", serverUserProfile: ".ai/qa/server-home" },
+      environment: { serverEnv, watch, serverHome: ".ai/qa/server-home", serverUserProfile: ".ai/qa/server-home" },
       inputs: { file: ".ai/scripts/test-env.inputs.json", sha256: inputsSha },
       browser,
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
@@ -718,7 +716,7 @@ write_descriptor() {
   ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" "$APP_START" \
     "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home HOME=.ai/qa/server-home USERPROFILE=.ai/qa/server-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
-    "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
+    "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
     "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY" "$WATCH_KEY" "$INPUTS_SHA"
 }
 

@@ -40,7 +40,6 @@ export function useProjectSwitch(): {
   if (matchRoute === null) throw new Error('useProjectSwitch needs a ProjectRouteMatcherContext provider (App provides matchProjectRoute)')
   const registry = useProjects().data
   const health = useHealth().data
-  const capabilities = health?.capabilities
   // `useProjectRepoBase`, for a project other than the routed one.
   const repoBaseOf = React.useCallback(
     (projectId: string) =>
@@ -60,15 +59,15 @@ export function useProjectSwitch(): {
     (projectId: string): ProjectSwitchTarget =>
       projectId === currentProjectId
         ? { href: currentHref, verify: false }
-        : projectSwitchTarget(projectId, readStoredProjectLocation(projectId), { registry, capabilities, matchRoute }),
-    [registry, capabilities, matchRoute, currentProjectId, currentHref],
+        : projectSwitchTarget(projectId, readStoredProjectLocation(projectId), { registry, matchRoute }),
+    [registry, matchRoute, currentProjectId, currentHref],
   )
   const go = React.useCallback(
     async (projectId: string) => {
       if (projectId === currentProjectId) return supersedeProjectSwitch()
-      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, capabilities, repoBaseOf, matchRoute })
+      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, repoBaseOf, matchRoute })
     },
-    [registry, capabilities, repoBaseOf, matchRoute, currentProjectId],
+    [registry, repoBaseOf, matchRoute, currentProjectId],
   )
   return { target, go }
 }

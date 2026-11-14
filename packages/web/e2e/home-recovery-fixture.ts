@@ -64,8 +64,8 @@ export async function createHomeRecoveryFixture() {
           uiState: JSON.parse(store.read(home.workspaceUiState)) as { recoveryFixture: string } }
       },
       async reset() {
-        for (const incident of getHomeRecovery(home, true).files) {
-          if (incident.reason === 'legacy-change') acceptHomeRecovery(home, incident.file, incident.detectedAt, true)
+        for (const incident of getHomeRecovery(home).files) {
+          if (incident.reason === 'legacy-change') acceptHomeRecovery(home, incident.file, incident.detectedAt)
         }
         // Each case starts from an explicitly accepted, then reseeded private home.
         for (const path of [home.workspaceConfig, `${home.workspaceConfig}.bak`, home.workspaceUiState]) store.acceptOutsideWrite(path)

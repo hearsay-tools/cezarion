@@ -48,7 +48,7 @@ it('refreshes the semaphore from the selected Home', async () => {
 it('lists, registers and removes projects without changing the ambient registry', async () => {
   const { root, selected, ambient } = runtimeHomes();
   const before = readFileSync(ambient.workspaceConfig, 'utf8');
-  expect((await listProjects(undefined, selected)).map(project => project.id)).toEqual(['selected']);
+  expect((await listProjects(selected)).map(project => project.id)).toEqual(['selected']);
   const added = await registerProject(join(root, 'new-project'), 'local', selected);
   expect(await registryEntry(added.id, added.root, selected)).toMatchObject({ id: added.id });
   expect(await removeProject(added.id, selected)).toBe(true);

@@ -8,7 +8,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { waitForSettledSample as rawSettledSample } from './visual-ready'
+import { clickInView, waitForSettledSample as rawSettledSample } from './visual-ready'
 import { normalizeColorExpression, normalizeColorSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
@@ -343,8 +343,7 @@ describe('selection and control states (#171)', () => {
       const model = 'button[data-slot="model-pill"]'
       browser.waitForFunction(`document.querySelector('${model}')?.disabled === false`)
       applyContrastQaVariant(browser, variant)
-      colorSample(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
-      browser.click('[data-slot="execution-options"] summary')
+      clickInView(browser, '[data-slot="execution-options"] summary')
       browser.moveTo(0, 0)
       const bounds = () => waitForSettledSample(browser, `(() => {
         const r = document.querySelector('${model}').getBoundingClientRect(); return { width: r.width, height: r.height }
@@ -389,6 +388,7 @@ describe('selection and control states (#171)', () => {
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })
   }
+  // Rule: docs/areas/web-ui.md § Accessibility rules (contrast, focus).
   it('keeps the same selection cue in the multi-project navigation', () => {
     const home = Home.sandbox(join(root, '.cez-home'))
     const config = JSON.parse(new HomeStore(home).read(home.workspaceConfig))

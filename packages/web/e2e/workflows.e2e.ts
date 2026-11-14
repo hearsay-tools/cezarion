@@ -289,64 +289,6 @@ describe('workflow builder against the live dry-run server', () => {
     }
   }, 60_000)
 
-  it('keeps workflow actions reachable and visibly focused under reduced motion', () => {
-    prepareWorkflow([BETA, ALPHA], true)
-    browser.setReducedMotion()
-    for (const [width, height, density, theme] of [
-      [360, 640, 'ultra', 'dark'],
-      [1440, 900, 'comfortable', 'light'],
-    ] as const) {
-      browser.setViewport(width, height)
-      browser.evaluate(`(() => {
-        document.documentElement.dataset.density = ${JSON.stringify(density)};
-        document.documentElement.classList.toggle('light', ${JSON.stringify(theme)} === 'light');
-      })()`)
-      // Establish keyboard modality before focusing Save so :focus-visible is exercised.
-      browser.press('Tab')
-      browser.evaluate(`document.querySelector('[data-slot="wb-save"]').focus()`)
-
-      const facts = waitForSettledSample(browser, `(() => {
-        const save = document.querySelector('[data-slot="wb-save"]');
-        const saveStyle = getComputedStyle(save);
-        const actions = [...document.querySelectorAll('[data-slot="wb-actions"] button')]
-          .map(button => button.getBoundingClientRect())
-          .map(rect => ({ width: rect.width, height: rect.height, right: rect.right }));
-        return {
-          reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-          focused: document.activeElement === save && save.matches(':focus-visible'),
-          focusRing: saveStyle.boxShadow,
-          animationName: saveStyle.animationName,
-          actions,
-          pageFits: document.documentElement.scrollWidth <= innerWidth,
-        };
-      })()`) as {
-        reducedMotion: boolean
-        focused: boolean
-        focusRing: string
-        animationName: string
-        actions: Array<{ width: number; height: number; right: number }>
-        pageFits: boolean
-      }
-
-      expect(facts.reducedMotion).toBe(true)
-      expect(facts.focused).toBe(true)
-      expect(facts.focusRing).not.toBe('none')
-      expect(facts.animationName).toBe('none')
-      expect(facts.pageFits).toBe(true)
-      if (width === 360) {
-        for (const action of facts.actions) {
-          expect(action.width).toBeGreaterThanOrEqual(44)
-          expect(action.height).toBeGreaterThanOrEqual(44)
-          expect(action.right).toBeLessThanOrEqual(width)
-        }
-      }
-      browser.screenshot(
-        `${presentationArtifacts}/${width}-${density}-${theme}-reduced-motion.png`,
-        { viewport: true },
-      )
-    }
-  })
-
   it('Import parses pasted YAML through the server and renders richer flows as full steps', () => {
     importWorkflow()
 

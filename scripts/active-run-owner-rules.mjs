@@ -39,8 +39,8 @@ export const ownerGroups = {
   usage: {
     owner: 'usage-accounting.ts', factory: 'createUsageGroup',
     types: ['UsageGroup', 'UsageInvocation', 'ReadonlyMapView', 'ReadonlySetView'],
-    getters: ['reportedClaudeCost', 'usageInvocation', 'startedTurns', 'recordedTurns'],
-    fields: ['usage', 'reportedClaudeCost', 'usageInvocation', 'observed', 'epoch', 'stepId', 'startedTurns', 'recordedTurns', 'size'],
+    getters: ['cumulativeSessionCost', 'usageInvocation', 'startedTurns', 'recordedTurns'],
+    fields: ['usage', 'cumulativeSessionCost', 'usageInvocation', 'observed', 'epoch', 'stepId', 'startedTurns', 'recordedTurns', 'size'],
   },
   skills: {
     owner: 'run-skills.ts', factory: 'createSkillsGroup',

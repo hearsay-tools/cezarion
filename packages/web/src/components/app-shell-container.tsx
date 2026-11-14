@@ -87,7 +87,6 @@ function shellViewSidebar(
     <SettingsSidebar
       projectId={sidebarProjectId}
       projectName={registry?.projects.find((project) => project.id === sidebarProjectId)?.name ?? (sidebarBoot ? repoChipOf(health)?.name ?? null : null)}
-      capabilities={health?.capabilities}
     />
   ) : /^\/github(?:\/|$)/.test(flatPathname) && forgeAvailable ? (
     // Explicit scope, not `queryScope()`: this subtree sits above the ProjectScopeProvider.

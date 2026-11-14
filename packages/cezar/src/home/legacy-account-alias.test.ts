@@ -26,8 +26,8 @@ function aliasFixture(internal: boolean) {
 it('keeps relocation for an external alias into the legacy home after a label-only Import', () => {
   const { legacy, home, account } = aliasFixture(true);
   writeFileSync(legacy.agentAccounts, JSON.stringify({ accounts: [{ ...account, label: 'Imported' }] }));
-  const incident = getHomeRecovery(home, true).files.find(file => file.reason === 'legacy-change')!;
-  importHomeRecovery(home, 'agent-accounts.json', incident.detectedAt, true);
+  const incident = getHomeRecovery(home).files.find(file => file.reason === 'legacy-change')!;
+  importHomeRecovery(home, 'agent-accounts.json', incident.detectedAt);
   expect(JSON.parse(readFileSync(home.agentAccounts, 'utf8')).accounts).toEqual([
     { ...account, label: 'Imported', configDir: join(home.data, 'accounts', account.id) },
   ]);
@@ -36,8 +36,8 @@ it('keeps relocation for an external alias into the legacy home after a label-on
 it('keeps an alias inside the legacy home that resolves to external credentials', () => {
   const { legacy, home, account } = aliasFixture(false);
   writeFileSync(legacy.agentAccounts, JSON.stringify({ accounts: [{ ...account, label: 'Imported' }] }));
-  const incident = getHomeRecovery(home, true).files.find(file => file.reason === 'legacy-change')!;
-  importHomeRecovery(home, 'agent-accounts.json', incident.detectedAt, true);
+  const incident = getHomeRecovery(home).files.find(file => file.reason === 'legacy-change')!;
+  importHomeRecovery(home, 'agent-accounts.json', incident.detectedAt);
   expect(JSON.parse(readFileSync(home.agentAccounts, 'utf8')).accounts).toEqual([{ ...account, label: 'Imported' }]);
 });
 
@@ -51,6 +51,6 @@ it('refuses a new external alias into the legacy home when no relocation exists'
   const configDir = join(profiles.root, 'new-alias');
   symlinkSync(credentials, configDir, process.platform === 'win32' ? 'junction' : 'dir');
   writeFileSync(legacy.agentAccounts, JSON.stringify({ accounts: [{ id: 'new', provider: 'claude', configDir }] }));
-  const incident = getHomeRecovery(home, true).files.find(file => file.reason === 'legacy-change')!;
-  expect(() => importHomeRecovery(home, 'agent-accounts.json', incident.detectedAt, true)).toThrow(/account new.*no completed relocation/);
+  const incident = getHomeRecovery(home).files.find(file => file.reason === 'legacy-change')!;
+  expect(() => importHomeRecovery(home, 'agent-accounts.json', incident.detectedAt)).toThrow(/account new.*no completed relocation/);
 });

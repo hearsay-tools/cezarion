@@ -17,19 +17,19 @@ The app icons reuse the Squawk parrot artwork from
 
 Native IDs and display names come from `packages/cezar/src/home/identity.ts`.
 `node packages/cezar/scripts/product-identity.mjs` prints that identity as JSON.
-The default follows `REBRAND_SWITCH`; this change leaves the switch off.
+The default is the new identity; `--rebrand off` selects the old identity.
 Android needs Node 24.21.0 or later on PATH and reads JSON during Gradle configuration.
 Its Java namespace stays unchanged; the install ID and launcher name change together.
 
 Xcode cannot import TypeScript. It reads the checked-in `ios/ProductIdentity.xcconfig`
 snapshot. `home/mobile-metadata.test.ts` rejects a snapshot that differs from the
-shared identity. Regenerate it when the release switch changes:
+shared identity. Regenerate it when the identity changes:
 
 ```sh
 node packages/mobile/scripts/build-metadata.mjs --write-ios
 ```
 
-For a local switch-on build (without changing the release switch):
+For a local build with the new identity:
 
 ```sh
 cd packages/mobile/android
@@ -46,14 +46,14 @@ xcodegen generate --spec packages/mobile/ios/project.yml
 Use `--rebrand off` / `-Prebrand=off` to test the old identity. Restore the default
 snapshot with `--write-ios` before committing. The Xcode target, scheme and Swift
 module names stay stable; bundle IDs, display names and permission text use the metadata.
-CI builds and tests switch off, switch on and the final old-app mode on each platform.
+CI builds and tests the old identity, the new identity and the final old-app mode on each platform.
 It also checks IDs and names in the built APKs and iOS bundles.
 
 The **final old-app** mode is a separate release input. It forces the old IDs even
 with `--rebrand on`. It shows only a move screen. The move screen does not read the
 saved connection, create a WebView, copy data or clear data. On Android, a data wipe
 the user requested before the update still runs at app start. Without a pending
-wipe, the old data stays unchanged. Ordinary switch-off builds keep the connection
+wipe, the old data stays unchanged. Ordinary old-identity builds keep the connection
 flow. The owner must supply each platform's actual HTTPS store URL:
 
 ```sh
@@ -81,8 +81,8 @@ app-local defaults and WKWebView's app-local website data store.
 
 On an Android device and an iPhone, check the following before store submission:
 
-1. Install an ordinary switch-off build. Connect to an HTTPS cockpit and complete sign-in.
-2. Install a switch-on build beside it. On Android, use the same build type for both
+1. Install an ordinary old-identity build. Connect to an HTTPS cockpit and complete sign-in.
+2. Install a new-identity build beside it. On Android, use the same build type for both
    (debug adds `.debug` to each ID). Confirm both app icons remain installed.
 3. Open the new app. Confirm both connection fields are empty. Enter the same server
    and confirm that sign-in is required. A system browser or identity provider can

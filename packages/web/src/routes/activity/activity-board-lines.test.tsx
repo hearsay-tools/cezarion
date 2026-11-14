@@ -145,6 +145,7 @@ describe('peer labels', () => {
     expect(label(peer.requestId)?.querySelector('span[style]')).toBeNull()
   })
 
+  // Rule: docs/areas/web-ui.md § Activity view (reduced motion, motion cost).
   it.each([
     { phase: 'reply', replied: true, title: 'Request', bar: true, dashed: true, fading: false },
     { phase: 'replied', replied: true, title: 'Replied', bar: false, dashed: false, fading: false },

@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-import { groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup, leaseIdentity, leaseGroupLive, reclaimTestEnvHolders } from '../../packages/cezar/src/detached-process.ts';
+import { exitedStat, groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
 
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
 function windowsProbe(mode, payload, timeout = 15_000) {
@@ -26,6 +26,102 @@ function windowsCommand(args) {
   return args.map(arg => '"' + arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"').join(' ');
 }
 const windowsPayload = value => Buffer.from(JSON.stringify(value)).toString('base64');
+
+function readHolder(row) {
+  if (typeof row.id !== 'string' || typeof row.token !== 'string' ||
+      typeof row.pid !== 'number' || !Number.isSafeInteger(row.pid) || row.pid <= 0 ||
+      (row.start !== null && typeof row.start !== 'string')) throw new Error('Invalid lease holder identity');
+  if (row.pgid !== undefined && row.pgid !== null &&
+      !(typeof row.pgid === 'number' && Number.isSafeInteger(row.pgid) && row.pgid > 0) &&
+      !(typeof row.pgid === 'string' && row.pgid.length > 0)) throw new Error('Invalid lease holder group');
+  return row;
+}
+
+/** A process's start identity, `{ start }`, or `{ dead: true }`, or `{}` when it cannot be read.
+ * qa-fixture.mjs uses it through `identity`, so it never signals a reused pid. */
+export function leaseIdentity(pid, timeout = 15_000, probe = windowsProbe) {
+  try { process.kill(pid, 0); }
+  catch (error) { return error.code === 'ESRCH' ? { dead: true } : {}; }
+  if (process.platform === 'win32') {
+    const start = probe('identity', String(pid), timeout);
+    if (start === 'gone') return { dead: true };
+    return start && /^\d+$/.test(start) ? { start } : {};
+  }
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+      if (exitedStat(fields)) return { dead: true };
+      const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      if (boot && /^\d+$/.test(fields[19] ?? '')) return { start: `${boot}:${fields[19]}` };
+    } catch { /* Unreadable identity is not proof of death. */ }
+  } else if (process.platform === 'darwin') {
+    const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8', timeout: Math.min(2000, timeout), env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+    });
+    if (ps.status === 0 && ps.stdout.trim()) return { start: ps.stdout.trim() };
+  }
+  return {};
+}
+// A shell can die before its build/clone child. Retain its group claim until the
+// last non-zombie member exits. Returns true (live), false (dead), or undefined
+// (unknown). On Linux, unrelated process starts/exits can change the two /proc
+// listings, so unknown is common under churn, even for a zombie-only group.
+// Callers must retain ownership and retry on unknown, never treat it as stopped.
+// Sustained churn can prevent reclamation until acquisition times out. One scan
+// seeing only zombies cannot exclude a live member that forked an unseen child
+// and exited during enumeration; a dead leader alone does not remove that race.
+export function leaseGroupLive(pgid, probe = windowsProbe) {
+  if (process.platform === 'win32') {
+    const live = probe('live', String(pgid));
+    return live === 'true' ? true : live === 'false' ? false : undefined;
+  }
+  try { process.kill(-Number(pgid), 0); }
+  catch (error) { if (error.code === 'ESRCH') return false; }
+  if (process.platform === 'linux') {
+    let unknown = false;
+    try {
+      const snapshot = readdirSync('/proc').filter(name => /^\d+$/.test(name)).sort();
+      let sawMember = false;
+      for (const pid of snapshot) {
+        try {
+          const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+          const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+          if (Number(fields[2]) === Number(pgid)) {
+            sawMember = true;
+            if (!exitedStat(fields)) return true;
+          }
+        } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ESRCH') unknown = true; }
+      }
+      // A member can fork and exit between enumeration and stat. A changing
+      // process list cannot prove that its successor is absent. Retry later.
+      const after = readdirSync('/proc').filter(name => /^\d+$/.test(name)).sort();
+      if (snapshot.join(',') !== after.join(',') || !sawMember) return undefined;
+      return unknown ? undefined : false;
+    } catch { return undefined; }
+  }
+  if (process.platform === 'darwin') {
+    const ps = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2000 });
+    if (ps.status !== 0) return undefined;
+    return ps.stdout.split('\n').some(line => {
+      const [group, state] = line.trim().split(/\s+/);
+      return Number(group) === Number(pgid) && state && !state.startsWith('Z');
+    });
+  }
+  return undefined;
+}
+
+/** Called inside the caller's write transaction. Unknown identity/group evidence retains the row. */
+export function reclaimTestEnvHolders(db, readIdentity, groupLive) {
+  return db.prepare('SELECT * FROM holders').all().map(row => readHolder(row)).filter(holder => {
+    const current = readIdentity(holder.pid);
+    holder.diagnosticVerified = Boolean(holder.start && !current.dead && current.start === holder.start);
+    const reused = holder.start && current.start && holder.start !== current.start;
+    const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
+    if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
+    return !dead;
+  });
+}
 
 export const identity = (pid, timeout) => leaseIdentity(pid, timeout, windowsProbe);
 // The app's start identity. `identity` reads a zombie as dead and gives no start, but a zombie app
@@ -134,8 +230,7 @@ export function describeTestEnvHolders(holders, {
   return { owners, guidance: squeal ? `\n${SQUEAL_GUIDANCE}` : '' };
 }
 
-const groupLive = pgid => leaseGroupLive(pgid, windowsProbe);
-const liveHolders = db => reclaimTestEnvHolders(db, identity, groupLive);
+const liveHolders = db => reclaimTestEnvHolders(db, identity, leaseGroupLive);
 
 function openLeaseDb(root, { create = true } = {}) {
   const dir = resolve(root, '.ai/qa');

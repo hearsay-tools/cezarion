@@ -96,8 +96,9 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
   // Replaces recorded empty-log causes with merged evidence, or with the
   // previously recorded causes when this step's own log matches them.
   function effectiveCausesFor(causes,fallback,recorded) {
-    if(fallback && recorded.has(fallback.signature)) {
-      return [{...fallback,excerpt:causes.map(cause=>cause.excerpt).join('\n').slice(0,4000)}];
+    const unknown=[fallback?.signature,fallback?.legacySignature].find(signature=>recorded.has(signature));
+    if(unknown) {
+      return [{...fallback,signature:unknown,excerpt:causes.map(cause=>cause.excerpt).join('\n').slice(0,4000)}];
     }
     if(fallback && causes[0]?.signature===fallback.signature && recorded.size) {
       return [...recorded].map(([signature,issue])=>({...fallback,signature,title:sanitize(issue.title)}));
@@ -144,11 +145,13 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
     return {issue:target,cause,reported:true};
   }
 
-  async function reportStep({run,job,step,causes:found,labels=['area-ci'],bodyFor=defaultBodyFor}) {
+  // `onlyRecorded` reports a step only when an earlier pass recorded it, so a replay keeps it.
+  async function reportStep({run,job,step,causes:found,labels=['area-ci'],bodyFor=defaultBodyFor,onlyRecorded=false}) {
     const runUrl=`https://github.com/${owner}/${repo}/actions/runs/${run.id}/attempts/${run.run_attempt}`;
     const prefix=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:`;
     const failureIssues=issues.filter(issue=>/<!-- cez-failure-signature:v1:[a-f0-9]{64} -->/.test(issue.body||''));
     const recorded=await recordedSignatures(failureIssues,prefix,run);
+    if(onlyRecorded && !recorded.size) return [];
     const causes=selectCauses(found,recorded);
     if(causes.suppressed) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
     if(!causes.length) return [];

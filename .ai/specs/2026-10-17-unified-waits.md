@@ -1417,8 +1417,8 @@ The supervisor polls every 5 s and resolves the first of:
 
 | Outcome | When | Wake text says |
 | --- | --- | --- |
-| `exit_file` | the exit file exists | `exited with code N`, or `exit file present, not an exit code` |
-| `exited` | the PID is gone, a zombie, or its start token differs | `exited, code unknown` |
+| `exit_file` | the exit file exists and is not empty; an empty file is not written yet, and it is read again once the process is gone (hearsay-tools/squawk#2904) | `exited with code N`, or `exit file present, not an exit code` |
+| `exited` | the PID is gone, a zombie, or its start token differs, and its exit file is still absent or empty | `exited, code unknown` |
 | `exited`, found at registration | the PID was already gone when the wait was registered, and no exit file exists | `PID N was not running when this wait was registered. If the command should still run, this is not its PID: find the command before you start it again.` |
 | `deadline` | the deadline passed with the process still running | `still running at the deadline` (distinct from an exit) |
 | `error` | the probe threw | `could not be checked` with a short diagnostic; never reads as success |

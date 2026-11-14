@@ -740,7 +740,7 @@ function PaletteContent({
   const registry = projects.data
   const multiProject = registry !== undefined && registry.projects.length > 1
   // The cross-project index answers "which project is this task in", so it is only worth asking
-  // when that question has more than one answer. A single-project cockpit issues no request.
+  // when that question has more than one answer. A one-project cockpit issues no request.
   const runsIndex = useRunsIndex(multiProject)
 
   // The hand-picked project order (hearsay-tools/cezarion#438), read from the same cached
@@ -759,7 +759,7 @@ function PaletteContent({
   // one, else the boot project, which is what an unscoped API client always reaches.
   const runsProjectId = activeProjectId ?? registry?.bootProject ?? null
   // What the server finds for the query (hearsay-tools/cezarion#864), a beat after typing stops: every project's runs,
-  // at any age, including the ones past each run list's window. In a single-project cockpit too,
+  // at any age, including the ones past each run list's window. In a one-project cockpit too,
   // since its own run list is windowed as well.
   const [searched, setSearched] = React.useState('')
   React.useEffect(() => {

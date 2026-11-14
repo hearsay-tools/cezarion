@@ -2,58 +2,55 @@
 
 Measure the requested scope and report the result. This path gathers stats;
 code changes, GitHub issues and PR work require a request for that work.
-Resolve `<skill>` to the skill directory's absolute path.
+Squeal supplies the numbers. Under Codex, replace `squeal` with the absolute
+launcher named in the session's SQUEAL message.
 
 ## 1. Select the scope
 
 Use the named file or function. Resolve a function name to its defining file.
 For a module spanning several files, list the source files within the requested
-module and measure those files. Keep the scope in the result. A source file
-outside a Git repository can also be measured; this path needs no base ref.
+module, or name its directory. Keep the scope in the result.
 
-Done when the files and any function selector identify the requested code.
+Done when the paths and any function name identify the requested code.
 
 ## 2. Get the stats
 
-Start with the existing source and available coverage:
+Run from the repository root:
 
 ```sh
-node <skill>/scripts/metrics.mjs <file> --json
-node <skill>/scripts/metrics.mjs <file> --function <name> --json
-node <skill>/scripts/metrics.mjs <file> --line <line> --json
+squeal code <path>... --json
 ```
 
-Choose the matching command. Use `--line` to disambiguate a repeated function
-name. A line alone selects the innermost function on it, so when a nested
-function starts on the same line, add `--column <column>` (1-based, where the
-function starts) to select the function that starts there. The complexity gate
-prints both with every function it names. Add `--breakdown` to list the decision points behind each complexity as
-`line kind` rows, for example `1091 LogicalExpression ??`. The rows plus one
-equal the complexity, and a nested function's points appear only under that
-function. For several files, run one measurement per file. The command reports
-complexity immediately and discovers existing Istanbul coverage. It runs no tests
-without `--test`. A known current report can be selected with `--coverage <path>`.
+The command lists every function in those files or directories, with
+`qualifiedName`, `line`, `complexity` and `decisions` (the decision points by
+kind). With coverage on, each function also has `coverage.crap`: an `outcome`
+and a `value`, or a `reason` when the outcome is `pending` or `unknown`. Select
+the requested function by `qualifiedName` and `line`. Drop `--json` for one
+line per function.
 
-Missing, stale or unmatched coverage leaves CRAP unavailable. Report that limit
-with the complexity result. If the user explicitly requested fresh coverage or
-CRAP that the existing report cannot supply, collect focused coverage following
-[Bundled tool](tool.md); the standalone CLI's `--test` option uses Vitest.
-Use the repository's test instructions. Keep coverage collection within the
-requested scope and state any remaining measurement blocker.
+The numbers come from this worktree's Squeal daemon. CRAP reads `pending` until
+every test file that loads the file has run with coverage. When the user asked
+for CRAP and it stays `pending`, wait for it with `squeal status --wait 60000`
+and run the command again. A file that only a child process runs, or that
+`coverage.exclude` lists, has complexity and no CRAP; [Before a PR](pre-pr.md)
+says why.
 
-Done when every requested function has a complexity score and either a measured
-CRAP score or its exact coverage limit. Missing CRAP is a measurement limit here;
-it is an incomplete gate only in the pre-PR path.
+For a complete, fresh measurement of the functions a branch changed, use the
+one-shot gate: `squeal code --base origin/main <path>... --json`. It runs the
+tests that load those files with coverage and needs no daemon.
+
+Done when every requested function has a complexity score and either a CRAP
+score or its exact reason. Missing CRAP is a measurement limit here; it is an
+incomplete gate only in the pre-PR path.
 
 ## 3. Report and finish
 
-Show `file:function | complexity | body line coverage | CRAP`. For a larger module,
-lead with the file/function count and highest scores, then the relevant rows.
-State unavailable coverage explicitly. CRAP uses function body line coverage,
-the line-coverage variant identified by the tool.
+Show `file:function | complexity | CRAP`. For a larger module, lead with the
+file/function count and highest scores, then the relevant rows. State
+unavailable CRAP and its reason explicitly.
 
-Identify values strictly above the skill's policy limits of complexity 20 or
-CRAP 30; equality is within the limits. Scores above a limit are observations in
-this path. End with the stats unless the user also requested fixes or issue filing.
+Identify values strictly above the policy limits of complexity 20 or CRAP 30;
+equality is within the limits. Scores above a limit are observations in this
+path. End with the stats unless the user also requested fixes or issue filing.
 
 Done when the user has the requested stats, the measured scope and any limits.

@@ -98,13 +98,13 @@ describe('autosave cwd-holder proof', () => {
     candidates = [101, 202]; tokens.set(202, 'brief'); owners.set(202, 'gone');
     expect(await pending()).toBe(false);
   });
-  it.each([false, true])('reads the same Darwin owner marker with rebrand=%s and fails closed when ps hides the environment', async rebrand => {
+  it('reads the same Darwin owner marker and fails closed when ps hides the environment', async () => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' });
     vi.spyOn(process, 'kill').mockReturnValue(true);
-    const generated = autosaveOwnerEnv('marker', {HSQ_AUTOSAVE_OWNER: 'inherited', CEZ_AUTOSAVE_OWNER: 'old', PATH: '/bin'}, rebrand);
+    const generated = autosaveOwnerEnv('marker', {HSQ_AUTOSAVE_OWNER: 'inherited', CEZ_AUTOSAVE_OWNER: 'old', PATH: '/bin'});
     expect(generated[AUTOSAVE_OWNER_ENV]).toBe('marker');
     expect(generated.PATH).toBe('/bin');
-    expect(generated.HSQ_AUTOSAVE_OWNER).toBe(rebrand ? 'marker' : undefined);
+    expect(generated.HSQ_AUTOSAVE_OWNER).toBe('marker');
     let scans = 0;
     const environment: Record<number, string> = {
       303: `1 node squeal.js PATH=/usr/bin HOME=/Users/a\n`,

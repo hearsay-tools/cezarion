@@ -101,7 +101,7 @@ describe('Settings → Appearance: project order', () => {
     expect(document.querySelector(RESET)).toBeNull()
   })
 
-  it('stays absent in a single-project workspace, order or no order', async () => {
+  it('stays absent in a one-project workspace, order or no order', async () => {
     // One project cannot be reordered, so there is no order to undo.
     serve({ sidebar: { projectOrder: ['cezar'] } })
     renderSection(['cezar'])

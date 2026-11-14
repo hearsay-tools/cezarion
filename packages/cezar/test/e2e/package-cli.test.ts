@@ -1,5 +1,4 @@
 import { projectPaths } from '../../src/project-paths.ts';
-import { REBRAND_SWITCH } from '../../src/home/switch.ts';
 import { productName } from '../../src/home/display.ts';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { CiProbeScenario } from '../fixtures/installed-ci-probe.ts';
@@ -106,7 +105,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
       assert.match(workerHelp.stdout, /Usage:/);
       assert.match(workerHelp.stdout, /cez worker/);
       assert.match(workerHelp.stdout, /--baseline/);
-      assert.equal(workerHelp.stderr, REBRAND_SWITCH ? "[cez] 'cez' is deprecated; use 'hsq' instead.\n" : '');
+      assert.equal(workerHelp.stderr, "[cez] 'cez' is deprecated; use 'hsq' instead.\n");
     }
 
 

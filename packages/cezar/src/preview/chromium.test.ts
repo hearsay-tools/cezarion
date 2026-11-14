@@ -35,6 +35,7 @@ import {
   launchChromium,
   realFs,
   resolveChromium,
+  stopChromium,
   type ChromiumFs,
 } from './chromium.ts';
 
@@ -539,6 +540,30 @@ setInterval(()=>{},1000);`,
     expect(existsSync(record)).toBe(false);
   });
 
+  // A helper the fake forks before it answers on its pipe or exits. It shares the fake's group
+  // only when Chromium is spawned as a group leader.
+  it.skipIf(process.platform !== 'linux').each([
+    { when: 'it is stopped', leader: `${ANSWER_PIPE}\nsetInterval(()=>{},1000);` },
+    { when: 'its leader exits before the handshake', leader: 'process.exit(3);' },
+  ])('ends the helpers Chromium forked too when $when (hearsay-tools/squawk#2458)', async ({ leader }) => {
+    const helperFile = join(dir, 'helper.pid');
+    const bin = script(
+      'fake-chrome-helper',
+      `const fs=require('fs');const {spawn}=require('child_process');
+const helper=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+fs.writeFileSync(${JSON.stringify(helperFile)}, String(helper.pid));
+${leader}`,
+    );
+    const launched = await launchChromium(bin, join(dir, 'profile'), {}).catch((error: unknown) => ({ error }));
+    if ('proc' in launched) await stopChromium(launched.proc);
+    else expect(launched.error).toMatchObject({ kind: 'exited' });
+    // The fake writes the pid before it answers or exits. A killed helper may stay a zombie
+    // until it is reaped; it runs no more code.
+    const helper = Number(readFileSync(helperFile, 'utf8'));
+    const state = (() => { try { return readFileSync(`/proc/${helper}/stat`, 'utf8').split(') ')[1]?.[0]; } catch { return undefined; } })();
+    expect(state === undefined || state === 'Z').toBe(true);
+  });
+
   it.skipIf(!posix)('does not trust a DevToolsActivePort left by an earlier launch', async () => {
     const profile = join(dir, 'profile');
     mkdirSync(profile, { recursive: true });
@@ -720,13 +745,13 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
   const posix = process.platform !== 'win32';
   let dir: string;
   let server: Server | undefined;
-  const procs: Array<{ kill: (signal?: NodeJS.Signals) => boolean }> = [];
+  const procs: ChildProcess[] = [];
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'cez-chromium-real-'));
   });
   afterEach(async () => {
-    for (const proc of procs.splice(0)) proc.kill('SIGKILL');
+    for (const proc of procs.splice(0)) await stopChromium(proc);
     await new Promise<void>(resolve => (server ? server.close(() => resolve()) : resolve()));
     server = undefined;
     rmSync(dir, { recursive: true, force: true });

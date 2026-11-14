@@ -226,8 +226,9 @@ const matchesTags = (task: GlobalTask, selected: readonly string[]): boolean => 
 
 /**
  * What one row prints, for the shared search (`matchesRunSearch`, shown scope): the displayed
- * title, the project name, the workflow, the tags — and the branch, which is the one thing here
- * the table does NOT print.
+ * title, the project name, the workflow, the tags — and the branch, which the table does NOT
+ * print. The workflow label is searched too, as the per-project table prints it: a row here
+ * shows `(inbox)` raw, yet its agent step's name finds it in both lists (hearsay-tools/squawk#1884).
  *
  * The rule it bends is a real one (matching on text the table never shows makes rows appear for
  * no visible reason, which is why the run id and a title hidden behind a summary stay out), but
@@ -269,11 +270,8 @@ export function filterGlobalTasks(
     if (!matchesFacet(filters.statuses, [task.run.status])) return false
     if (!matchesFacet(filters.workflows, [task.run.workflow])) return false
     if (!matchesTags(task, filters.tags)) return false
-    // Its rows and its workflow facet use the raw workflow name, so a search does not read the label
-    // of a placeholder workflow (`omit`); the per-project table prints that label and searches it
-    // (kept as on `main`, hearsay-tools/cezarion#1884).
     return !searching || matchesRunSearch(task.run, filters.query, {
-      scope: 'shown', omit: ['workflowLabel'], extras: searchExtras(task, automationName),
+      scope: 'shown', extras: searchExtras(task, automationName),
     })
   })
 }

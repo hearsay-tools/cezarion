@@ -532,6 +532,16 @@ jobs:
     if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
     runs-on: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     timeout-minutes: 15
+    env:
+      # Workflow lint pins. actionlint 1.7.10 is the first release that reads YAML
+      # anchors such as `*resolve-dispatch`. shellcheck is pinned too, so a
+      # runner-image update cannot change which findings fail the gate; warning
+      # level keeps info and style findings out.
+      ACTIONLINT_VERSION: '1.7.12'
+      ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+      SHELLCHECK_VERSION: '0.11.0'
+      SHELLCHECK_SHA256: 'b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6'
+      SHELLCHECK_OPTS: '--severity=warning'
 
     permissions:
       contents: read
@@ -554,30 +564,41 @@ jobs:
       # Lint the merge result's workflows, so an unknown input or secret on a
       # `uses: ./.github/workflows/…` caller, or a bad expression, fails here in
       # seconds instead of in a live PR run (hearsay-tools/cezarion#1130).
-      # actionlint 1.7.10 is the first release that reads YAML anchors such as
-      # `*resolve-dispatch`. shellcheck is pinned too, so a runner-image update
-      # cannot change which findings fail the gate; warning level keeps info and
-      # style findings out.
+      # The pinned tarballs come from the Actions cache, keyed on their hashes, so a
+      # release-download outage does not fail the gate (hearsay-tools/squawk#3017).
+      - name: Restore workflow lint tools
+        id: workflow-lint-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/workflow-lint
+          key: workflow-lint-${{ env.ACTIONLINT_SHA256 }}-${{ env.SHELLCHECK_SHA256 }}
+
       - name: Lint workflows
-        env:
-          ACTIONLINT_VERSION: '1.7.12'
-          ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
-          SHELLCHECK_VERSION: '0.11.0'
-          SHELLCHECK_SHA256: 'b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6'
-          SHELLCHECK_OPTS: '--severity=warning'
         run: |
           tools="$RUNNER_TEMP/workflow-lint"
           mkdir -p "$tools"
-          curl -fsSL --retry 3 -o "$tools/actionlint.tar.gz" \
+          # A tarball is downloaded only when the cache lacks it or its hash does not match.
+          fetch() {
+            if ! printf '%s  %s\n' "$2" "$tools/$1" | sha256sum -c --status - 2>/dev/null; then
+              curl -fsSL --retry 3 -o "$tools/$1" "$3"
+              printf '%s  %s\n' "$2" "$tools/$1" | sha256sum -c -
+            fi
+          }
+          fetch actionlint.tar.gz "$ACTIONLINT_SHA256" \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -fsSL --retry 3 -o "$tools/shellcheck.tar.gz" \
+          fetch shellcheck.tar.gz "$SHELLCHECK_SHA256" \
             "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
-          printf '%s  %s\n' \
-            "$ACTIONLINT_SHA256" "$tools/actionlint.tar.gz" \
-            "$SHELLCHECK_SHA256" "$tools/shellcheck.tar.gz" | sha256sum -c -
           tar -xzf "$tools/actionlint.tar.gz" -C "$tools" actionlint
           tar -xzf "$tools/shellcheck.tar.gz" -C "$tools" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           "$tools/actionlint" -shellcheck="$tools/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" -pyflakes=
+
+      # Save before any step runs checked-out code; every run re-verifies the hashes.
+      - name: Save workflow lint tools
+        if: steps.workflow-lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/workflow-lint
+          key: workflow-lint-${{ env.ACTIONLINT_SHA256 }}-${{ env.SHELLCHECK_SHA256 }}
 
       - name: Set up pnpm
         if: hashFiles('pnpm-lock.yaml') != ''

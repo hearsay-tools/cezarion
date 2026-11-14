@@ -50,7 +50,7 @@ const HEALTH = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, automations: false },
   projects: [{ id: BOOT, name: 'cezar' }],
   bootProject: BOOT,
 }
@@ -408,14 +408,6 @@ describe('the global settings area (/settings/global)', () => {
     expect(screen.getByText('Loading automations…')).not.toBeNull()
     expect(document.querySelector('#automation-name')).toBeNull()
     expect(screen.queryByText('Automations are off')).toBeNull()
-  })
-
-  it('omits the Projects route when single-project mode is active', () => {
-    renderAt('/settings/global/projects', {
-      health: { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
-    })
-    expect(routeName()).not.toBe('settings-global-projects')
-    expect(screen.queryByRole('heading', { level: 1, name: 'Projects' })).toBeNull()
   })
 
   // A moved section's old URL, in both spellings a bookmark can have it.

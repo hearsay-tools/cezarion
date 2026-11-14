@@ -64,7 +64,7 @@ function wire(options: { boot: RunRecord[]; docs?: RunRecord[] }) {
     bootContext: boot,
     contexts: { peek: (id) => (id === 'docs' ? docs : undefined) },
     workspaceProjects: {
-      listVisibleProjects: async () => { await gate; return [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }] as never; },
+      listProjects: async () => { await gate; return [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }] as never; },
       resolveBootProject: async () => 'boot',
       projectFailure: () => ({ error: 'unavailable', status: 503 }),
       resolveLiveProject: async (id: string) => {

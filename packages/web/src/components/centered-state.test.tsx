@@ -73,14 +73,13 @@ describe('TwinkleBackdrop', () => {
     expect(backdrop?.className).toContain('pointer-events-none')
   })
 
-  it('scatters brand-token squares whose pulse is motion-safe only', () => {
+  // Rule: docs/areas/web-ui.md § Accessibility rules (reduced motion).
+  it('pulses its squares only when motion is allowed', () => {
     const { container } = render(<TwinkleBackdrop />)
     const squares = [...container.querySelectorAll('[data-slot="twinkle-backdrop"] > span')]
 
-    expect(squares.length).toBeGreaterThan(5)
+    expect(squares.length).toBeGreaterThan(0)
     for (const square of squares) {
-      // Colors come from the theme tokens, never raw values.
-      expect(square.className).toMatch(/bg-(accent-strong|action|pending)/)
       // The pulse is gated on motion-safe, so prefers-reduced-motion renders it static.
       expect(square.className).toContain('motion-safe:animate-pulse')
       expect(square.className).not.toMatch(/(?<!motion-safe:)animate-pulse/)

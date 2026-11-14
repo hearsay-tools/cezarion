@@ -5,21 +5,20 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { resolveHome } from './resolve.ts'; // test-home-read: entry tests need unresolved scratch paths without a sandbox marker.
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 import { rawJson } from './migration.testkit.ts';
+import { operatorHomeEntry, prepareOperatorHome } from './entry.ts';
 
-afterEach(() => { vi.doUnmock('./switch.ts'); vi.resetModules(); vi.restoreAllMocks(); cleanStoreRoots(); });
+afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 
-async function fixture(enabled: boolean, nested = false) {
-  vi.resetModules();
-  vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: enabled }));
+function fixture(nested = false) {
   const dir = storeRoot();
   const env = { CEZ_HOME: join(dir, 'legacy'), HSQ_HOME: join(dir, nested ? 'legacy' : 'new') };
   const legacy = resolveHome({ purpose: 'cli', env, layout: 'legacy' }); // test-home-read: both overrides are scratch paths.
-  const home = resolveHome({ purpose: 'cli', env, layout: enabled ? 'split' : 'legacy' }); // test-home-read: absent-home behavior requires no marker.
-  return { dir, env, legacy, home, ...await import('./entry.ts') };
+  const home = resolveHome({ purpose: 'cli', env, layout: 'split' }); // test-home-read: absent-home behavior requires no marker.
+  return { dir, env, legacy, home, prepareOperatorHome, operatorHomeEntry };
 }
 
-it.each([false, true])('leaves absent homes untouched for conditional reads and invalid commands (switch %s)', async enabled => {
-  const f = await fixture(enabled, true);
+it('leaves absent homes untouched for conditional reads and invalid commands', () => {
+  const f = fixture(true);
   for (const command of ['projects', 'remote-settings', 'install', 'update', 'use', 'link', 'unlink', 'server-install', 'server-deploy', 'server-uninstall', 'backup-read', 'unknown']) {
     f.prepareOperatorHome(f.home, command, f.env);
     expect(readdirSync(f.dir)).toEqual([]);
@@ -27,7 +26,7 @@ it.each([false, true])('leaves absent homes untouched for conditional reads and 
 });
 
 it.each(['serve', 'init', 'run', 'backup', 'projects'])('only the %s writer prepares a fresh split home', async command => {
-  const f = await fixture(true);
+  const f = fixture();
   f.prepareOperatorHome(f.home, command, f.env);
   if (command === 'projects') {
     expect(readdirSync(f.dir)).toEqual([]);
@@ -42,11 +41,11 @@ it.each(['serve', 'init', 'run', 'backup', 'projects'])('only the %s writer prep
   f.prepareOperatorHome(f.home, 'serve', f.env);
   expect(existsSync(f.home.workspaceConfig) ? readFileSync(f.home.workspaceConfig, 'utf8') : '').not.toContain('oldWriter');
   const { getHomeRecovery } = await import('./recovery.ts');
-  expect(getHomeRecovery(f.home, true).files.some(file => file.reason === 'legacy-change')).toBe(true);
+  expect(getHomeRecovery(f.home).files.some(file => file.reason === 'legacy-change')).toBe(true);
 });
 
-it.each([false, true])('lists unmigrated legacy backups without writing (switch %s)', async enabled => {
-  const f = await fixture(enabled);
+it('lists unmigrated legacy backups without writing', async () => {
+  const f = fixture();
   mkdirSync(f.legacy.root, { recursive: true }); // Intentional old-binary fixture.
   writeFileSync(`${f.legacy.workspaceConfig}.bak`, '{"projects":[]}'); // Intentional pre-migration fixture.
   const before = readdirSync(f.legacy.root);
@@ -56,25 +55,25 @@ it.each([false, true])('lists unmigrated legacy backups without writing (switch 
   expect(await run!(['list'], f.env)).toBe(0);
   expect(JSON.parse(output.mock.calls[0]![0])).toEqual(expect.arrayContaining([expect.objectContaining({ file: 'config.json' })]));
   expect(readdirSync(f.legacy.root)).toEqual(before);
-  if (enabled) expect(existsSync(f.home.config)).toBe(false);
+  expect(existsSync(f.home.config)).toBe(false);
 });
 
-it('keeps the existing-empty legacy decision and MOVED canary publication', async () => {
-  const f = await fixture(true);
+it('keeps the existing-empty legacy decision and MOVED canary publication', () => {
+  const f = fixture();
   mkdirSync(f.legacy.root, { recursive: true }); // Intentional empty legacy install.
   f.prepareOperatorHome(f.home, 'projects', f.env);
   expect(JSON.parse(readFileSync(join(f.home.config, 'install.json'), 'utf8'))).toMatchObject({ state: 'committed', migratedFrom: f.legacy.root });
   expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(true);
 });
 
-it('does not mistake the new nested split directories for a pre-existing legacy install', async () => {
-  const f = await fixture(true, true);
+it('does not mistake the new nested split directories for a pre-existing legacy install', () => {
+  const f = fixture(true);
   f.prepareOperatorHome(f.home, 'serve', f.env);
   expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
 });
 
 it('consumes deferred preparation before it writes through the same store', async () => {
-  const f = await fixture(true);
+  const f = fixture();
   const { HomeStore } = await import('./store.ts');
   const { authorizeHomeEntry } = await import('./entry-authorization.ts');
   // Deferred accounts finish through a store transaction; that write must not run the preparation again.
@@ -85,7 +84,7 @@ it('consumes deferred preparation before it writes through the same store', asyn
 });
 
 it('keeps a refusing deferred preparation armed for the next write', async () => {
-  const f = await fixture(true);
+  const f = fixture();
   const { HomeStore } = await import('./store.ts');
   const { authorizeHomeEntry } = await import('./entry-authorization.ts');
   const prepare = vi.fn(() => { throw new Error('refused'); });
@@ -98,7 +97,7 @@ it('keeps a refusing deferred preparation armed for the next write', async () =>
 });
 
 it.each(['installed', 'rolled-back'])('refuses the deferred split write when an %s legacy server appears first', async state => {
-  const f = await fixture(true);
+  const f = fixture();
   f.prepareOperatorHome(f.home, 'projects', f.env);
   expect(readdirSync(f.dir)).toEqual([]);
   // Another binary installs a server in the legacy home before this command's first write.
@@ -115,8 +114,8 @@ it.each(['installed', 'rolled-back'])('refuses the deferred split write when an 
   expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
 });
 
-it.each([false, true])('invalid backup restore input prepares nothing (switch %s)', async enabled => {
-  const f = await fixture(enabled, true);
+it('invalid backup restore input prepares nothing', async () => {
+  const f = fixture(true);
   const invalid = [['restore'], ['restore', 'invalid.json'], ['restore', 'config.json', 'extra'],
     ['restore', 'config.json', '--at', 'yesterday'], ['restore', 'config.json', '--unknown'], ['restore', '--help']];
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -135,7 +134,7 @@ it.each([false, true])('invalid backup restore input prepares nothing (switch %s
 });
 
 it('lists only legacy backups inside the legacy home', async () => {
-  const f = await fixture(true);
+  const f = fixture();
   const outside = join(f.dir, 'outside');
   mkdirSync(outside); // Intentional escape target.
   const snapshot = (content: string) => `2026-11-10T00-00-00.000Z-${createHash('sha256').update(content).digest('hex').slice(0, 8)}.json`;
@@ -158,7 +157,7 @@ it('lists only legacy backups inside the legacy home', async () => {
 });
 
 it('takes the fresh decision before seeding split files that have no marker', async () => {
-  const f = await fixture(true);
+  const f = fixture();
   // A split home whose install.json was deleted: registry data, no marker, no legacy home.
   rawJson(f.home.workspaceConfig, { projects: [], saved: 'split' });
   f.prepareOperatorHome(f.home, 'projects', f.env);
@@ -170,11 +169,11 @@ it('takes the fresh decision before seeding split files that have no marker', as
   f.prepareOperatorHome(f.home, 'serve', f.env);
   expect(readFileSync(f.home.workspaceConfig, 'utf8')).not.toContain('oldWriter');
   const { getHomeRecovery } = await import('./recovery.ts');
-  expect(getHomeRecovery(f.home, true).files.some(file => file.reason === 'legacy-change')).toBe(true);
+  expect(getHomeRecovery(f.home).files.some(file => file.reason === 'legacy-change')).toBe(true);
 });
 
 it('lists the split home when its install marker is unreadable', async () => {
-  const f = await fixture(true);
+  const f = fixture();
   mkdirSync(f.home.config, { recursive: true }); // Intentional corrupt-marker fixture.
   writeFileSync(join(f.home.config, 'install.json'), '{corrupt'); // Intentional corrupt marker.
   mkdirSync(f.legacy.root, { recursive: true }); // Intentional pre-migration fixture.
@@ -188,7 +187,7 @@ it('lists the split home when its install marker is unreadable', async () => {
 });
 
 it('refuses the deferred split write when another process stages a server group first', async () => {
-  const f = await fixture(true);
+  const f = fixture();
   f.prepareOperatorHome(f.home, 'projects', f.env);
   expect(readdirSync(f.dir)).toEqual([]);
   // hsq server-migrate stages the copy (commit:false) before this command's first write.
