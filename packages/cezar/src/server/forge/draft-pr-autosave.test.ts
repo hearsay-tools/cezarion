@@ -7,6 +7,17 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDraftPr } from './github.ts';
+
+// Runs inside the pre-PR autosave, before its first Git call: a checkout there comes after any
+// HEAD read that publish makes before the save.
+const duringAutosave = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>) }));
+vi.mock('../../autosave-commit.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../autosave-commit.ts')>();
+  return { ...actual, autosaveCommit: async (...args: Parameters<typeof actual.autosaveCommit>) => {
+    await duringAutosave.hook?.();
+    return actual.autosaveCommit(...args);
+  } };
+});
 import type { RunRecord } from '../../runs/store.ts';
 
 const run = promisify(execFile);
@@ -41,6 +52,7 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
   });
 
   afterEach(() => {
+    duringAutosave.hook = undefined;
     warn.mockRestore();
     vi.unstubAllEnvs();
     rmSync(repo, { recursive: true, force: true });
@@ -116,10 +128,12 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
     expect((await git(['status', '--porcelain'])).stdout.trim()).toBe('M a.txt');
   });
 
-  it('refuses to publish when the final work is committed on another branch and the tree is clean', async () => {
-    await git(['checkout', '-q', '-b', 'agent-branch']);
-    writeFileSync(join(repo, 'a.txt'), 'final work\n');
-    await git([...GIT_ID, 'commit', '-qam', 'final work']);
+  it('refuses to publish when the final work is committed on another branch during the save, leaving the tree clean', async () => {
+    duringAutosave.hook = async () => {
+      await git(['checkout', '-q', '-b', 'agent-branch']);
+      writeFileSync(join(repo, 'a.txt'), 'final work\n');
+      await git([...GIT_ID, 'commit', '-qam', 'final work']);
+    };
     const outcome = await createDraftPr(input());
     expect(outcome.ok === false && outcome.error).toMatch(/^Worktree HEAD is on agent-branch, not on its task branch cez\/abc123\./);
   });
