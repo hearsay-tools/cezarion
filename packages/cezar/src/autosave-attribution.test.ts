@@ -287,6 +287,44 @@ setTimeout(() => process.exit(0), 50);
     expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
   });
 
+  // Review round 3 of hearsay-tools/squawk#3545: the caller does more work after its last Git
+  // command (the conflict-marker reads), so the save scans again once `run` returns.
+  it('waits for a holder that appears after the last Git command\'s check', async () => {
+    let held = false;
+    const late = { pid: 4343, startToken: 'after-the-last-command' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [late.pid] : [], processes: held ? [late] : [], inspectionFailed: false }) }));
+    const blocked = vi.fn();
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => {
+      await git(['status', '--porcelain']);
+      held = true;
+      return 'refused';
+    });
+    jobs.push(job);
+    await until(() => blocked.mock.calls.length > 0, 'the save to report the late holder');
+    expect(blocked.mock.calls[0]![1]).toMatchObject({ processes: [late] });
+    held = false;
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
+  // Review round 3 of hearsay-tools/squawk#3545: the proof is compared after the holders are
+  // merged in, so a new incarnation of the same PID and executable reaches the evidence.
+  it('reports a new incarnation of the same holder PID', async () => {
+    let held = true;
+    let holder = { pid: 4444, startToken: 'first' };
+    vi.spyOn(holders, 'watchAutosaveHolders').mockResolvedValue(Object.assign(async () => held,
+      { diagnostics: () => ({ pids: held ? [holder.pid] : [], processes: held ? [holder] : [], inspectionFailed: false }) }));
+    const blocked = vi.fn();
+    const job = withAutosaveGit(repo, { timeoutMs: 100, killGraceMs: 20, confirmMs: 20, onBlocked: blocked }, 'unsuccessful', async git => (await git(['status'])).ok ? 'saved' : 'failed');
+    jobs.push(job);
+    const tokens = () => blocked.mock.calls.flatMap(([, proof]) => (proof as { processes: { startToken?: string }[] }).processes.map(entry => entry.startToken));
+    await until(() => tokens().includes('first'), 'a proof naming the first incarnation');
+    holder = { pid: 4444, startToken: 'second' };
+    await until(() => tokens().includes('second'), 'a proof naming the second incarnation');
+    held = false;
+    expect(await Promise.race([job, delay(HANG_CEILING_MS).then(() => 'still waiting')])).toBe('unsuccessful');
+  });
+
   it('bounds cleanup warnings while the retained descendants keep changing PIDs', async () => {
     const descendant = join(bin, 'churn.cjs');
     const release = join(bin, 'release');
