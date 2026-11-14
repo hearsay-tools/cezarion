@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentRunResult, InputDelivery } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
-import { createActiveRun, type ActiveRun } from './active-run.ts';
+import { createActiveRun } from './active-run.ts';
 import type { InputGroup } from './run/input-delivery.ts';
 import { commitBundledDelivery } from './run/input-receipts.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -104,16 +104,16 @@ for (const consumption of ['observable', 'unobservable'] as const) {
 for (const consumption of ['observable', 'unobservable'] as const) {
   it(`consumption '${consumption}' decides whether messages bundled with an answer await their read`, () => {
     const commitOutcome = vi.fn();
-    const bundleInputs = vi.fn();
     const context = { store: { commitOutcome } } as unknown as RunModuleContext;
-    const state = { inputState: { inputDelivery: { ...STEER, consumption }, bundleInputs } } as unknown as ActiveRun;
+    const state = createActiveRun({ cwd: f.repoRoot, pendingHumanAsk: false, autonomous: false });
+    state.inputState.declareDelivery({ ...STEER, consumption });
     expect(commitBundledDelivery(context, 'run-1', state, ['bundled-1'], [{ kind: 'answered' }])).toBeUndefined();
     const [, outcomes] = commitOutcome.mock.calls[0]!;
     expect(outcomes).toEqual([{ kind: 'answered' }, {
       kind: 'delivered', inputIds: ['bundled-1'], at: expect.any(String),
       ...(consumption === 'observable' ? { awaitingRead: true } : {}),
     }]);
-    expect(bundleInputs).toHaveBeenCalledWith(['bundled-1']);
+    expect(state.inputState.bundledInputIds).toEqual(['bundled-1']);
   });
 }
 
