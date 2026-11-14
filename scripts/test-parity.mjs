@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { globSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, matchesGlob, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export function selectFiles(cwd) {
@@ -91,14 +91,6 @@ export function reportVerdicts(files, status, log) {
 // squeal.config.json's check group that holds the parity files until the agent pauses.
 const PARITY_GROUP = 'run-loop';
 
-// The files that `status --wait` does not start: they wait for the group's moment.
-export function groupFiles(config, files) {
-  const group = config.checks?.find(check => check.name === PARITY_GROUP && !check.lint);
-  if (!group) return [];
-  const globs = group.tests ?? ['**'];
-  return files.filter(file => globs.some(glob => matchesGlob(file, glob)));
-}
-
 function askGroupRun(command, files, { cwd, run, platform }) {
   const result = launchCommand(command, ['run', PARITY_GROUP, ...files], {
     cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
@@ -116,11 +108,12 @@ function waitForVerdicts(command, files, { cwd, run, log, now, platform }) {
     throw new Error('squeal.config.json must give runner.timeoutMs as a positive integer');
   }
   const deadline = now() + cap + 5 * 60 * 1000;
-  const held = groupFiles(config, files);
+  // `status --wait` does not start a group's files; they wait for the group's moment.
+  const held = config.checks?.some(check => check.name === PARITY_GROUP);
   let round = 0;
   while (true) {
     // Asked each round: an edit during the wait makes the group's files wait for a pause again.
-    if (held.length) askGroupRun(command, held, { cwd, run, platform });
+    if (held) askGroupRun(command, files, { cwd, run, platform });
     const wait = Math.max(1, Math.min(60000, deadline - now()));
     const result = launchCommand(command, ['status', '--wait', String(wait), '--json', ...files], {
       cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
