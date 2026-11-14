@@ -3148,11 +3148,11 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /** Archive a root with its workers when no member is live or mid-destroy. Each member is marked
-   *  dirty, so the next debounced save writes the whole family in one transaction. */
+  /** Archive a root with its workers unless a member is live, mid-destroy or pinned, or a history
+   *  deletion is under way. Each member is marked dirty: the next save writes the family at once. */
   private archiveSettledFamily(root: RunRecord): void {
-    const workers = this.listWorkersOf(root.id);
-    if ([root, ...workers].some(isLiveRecord)) return;
+    const workers = this.listWorkersOf(root.id), family = [root, ...workers];
+    if (family.some((run) => isLiveRecord(run) || run.pinned) || (root.delegation?.role === 'root' && root.delegation.historyDeletion)) return;
     for (const member of [root, ...workers.flatMap((worker) => this.record(worker.id) ?? [])]) {
       if (member.archived) continue;
       this.applyArchived(member, true);

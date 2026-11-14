@@ -920,6 +920,17 @@ describe('the branch classifier (issue 08 §A)', () => {
       expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch], refused: [] });
     });
 
+    it('lists the unlanded branch of an ended worker still at review', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      await commit(workspace.path, 'work.txt', 'unlanded');
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = owners([runRecord(workerId, 'review', { branch: workspace.branch })])[0]!;
+      const { payload } = await classifyBranches({ ...input(), runs: [{ ...owner, endedWorker: true as const }] });
+      expect(payload.branches.find((row) => row.name === workspace.branch)?.class).toBe('not-landed');
+    });
+
     it('keeps an ended worker family branch in use while its reflog holds a commit no other ref keeps', async () => {
       const base = await git(root, 'rev-parse', 'HEAD');
       const workerId = randomUUID();

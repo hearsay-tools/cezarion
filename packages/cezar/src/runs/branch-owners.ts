@@ -56,21 +56,29 @@ function branchOwnerOfRow(row: BranchOwnerRow, summary: ReturnType<typeof parseS
   };
 }
 
+/** A stored row as a branch owner. A live worker row names its family in `live`; a settled
+ *  worker row names its parent in `parents`. */
+function readOwnerRow(row: BranchOwnerRow, parents: Map<string, string>, live: Set<string>): BranchOwner {
+  const summary = parseStoredSummary(row.summary);
+  const delegation = summary?.delegation;
+  if (row.live && delegation?.role === 'worker') live.add(delegation.parentRunId);
+  const parent = !row.live && summary && settledWorkerParent({ status: row.status as RunStatus, delegation });
+  if (parent) parents.set(row.id, parent);
+  return branchOwnerOfRow(row, summary);
+}
+
 /**
  * The branch owners of the stored `rows` (rows no held run replaces) and of the `held` runs, which
  * answer from memory. A settled worker is marked `endedWorker` once its root is archived and settled
- * and no worker of the family is live: live runs are all held. `getRun` finds a root.
+ * and no worker of the family is live, held or in a row another process keeps live. `getRun` finds
+ * a root.
  */
 export function listBranchOwners(rows: readonly BranchOwnerRow[], held: readonly RunRecord[],
   getRun: (id: string) => RunRecord | undefined): BranchOwner[] {
   const owners = new Map<string, BranchOwner>();
   const parents = new Map<string, string>();
-  for (const row of rows) {
-    const summary = parseStoredSummary(row.summary);
-    const parent = summary && settledWorkerParent({ status: row.status as RunStatus, delegation: summary.delegation });
-    if (parent) parents.set(row.id, parent);
-    owners.set(row.id, branchOwnerOfRow(row, summary));
-  }
+  const live = new Set<string>();
+  for (const row of rows) owners.set(row.id, readOwnerRow(row, parents, live));
   for (const run of held) {
     const owner = branchOwnerOf(run);
     if (!owner) continue;
@@ -78,7 +86,7 @@ export function listBranchOwners(rows: readonly BranchOwnerRow[], held: readonly
     const parent = isLiveRecord(run) ? undefined : settledWorkerParent(run);
     if (parent) parents.set(run.id, parent);
   }
-  const live = new Set(held.flatMap((run) => isLiveRecord(run) && run.delegation?.role === 'worker' ? [run.delegation.parentRunId] : []));
+  for (const run of held) if (isLiveRecord(run) && run.delegation?.role === 'worker') live.add(run.delegation.parentRunId);
   const ended = new Map<string, boolean>();
   for (const [id, parent] of parents) {
     if (!ended.has(parent)) { const root = getRun(parent); ended.set(parent, !!root && isEndedRoot(root) && !live.has(parent)); }

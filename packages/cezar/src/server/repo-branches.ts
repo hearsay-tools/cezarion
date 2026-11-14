@@ -233,7 +233,7 @@ async function reflogWitnesses(root: string, branch: string, tip: string): Promi
 }
 
 function isFinished(run: BranchOwner): boolean {
-  return FINISHED.has(run.status) || run.archived === true;
+  return FINISHED.has(run.status) || run.archived === true || run.endedWorker === true;
 }
 
 function creationSha(sha: string, subject: string): string | null {
