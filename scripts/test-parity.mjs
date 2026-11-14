@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { globSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, matchesGlob, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export function selectFiles(cwd) {
@@ -88,6 +88,27 @@ export function reportVerdicts(files, status, log) {
   return rows.every(row => row.label === 'PASS') ? 0 : 1;
 }
 
+// squeal.config.json's check group that holds the parity files until the agent pauses.
+const PARITY_GROUP = 'run-loop';
+
+// The files that `status --wait` does not start: they wait for the group's moment.
+export function groupFiles(config, files) {
+  const group = config.checks?.find(check => check.name === PARITY_GROUP && !check.lint);
+  if (!group) return [];
+  const globs = group.tests ?? ['**'];
+  return files.filter(file => globs.some(glob => matchesGlob(file, glob)));
+}
+
+function askGroupRun(command, files, { cwd, run, platform }) {
+  const result = launchCommand(command, ['run', PARITY_GROUP, ...files], {
+    cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+  }, run, platform);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`squeal run ${PARITY_GROUP} failed: ${(result.stderr || result.stdout || '').trim()}`);
+  }
+}
+
 function waitForVerdicts(command, files, { cwd, run, log, now, platform }) {
   const config = JSON.parse(readFileSync(join(cwd, 'squeal.config.json'), 'utf8'));
   const cap = config.runner?.timeoutMs;
@@ -95,8 +116,11 @@ function waitForVerdicts(command, files, { cwd, run, log, now, platform }) {
     throw new Error('squeal.config.json must give runner.timeoutMs as a positive integer');
   }
   const deadline = now() + cap + 5 * 60 * 1000;
+  const held = groupFiles(config, files);
   let round = 0;
   while (true) {
+    // Asked each round: an edit during the wait makes the group's files wait for a pause again.
+    if (held.length) askGroupRun(command, held, { cwd, run, platform });
     const wait = Math.max(1, Math.min(60000, deadline - now()));
     const result = launchCommand(command, ['status', '--wait', String(wait), '--json', ...files], {
       cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,

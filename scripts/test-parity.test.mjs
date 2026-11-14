@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { detectDaemon, reportVerdicts, runParity, selectFiles } from './test-parity.mjs';
+import { detectDaemon, groupFiles, reportVerdicts, runParity, selectFiles } from './test-parity.mjs';
 
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'test-parity-'));
@@ -79,6 +79,42 @@ test('uses Squeal wait with every selected file and never starts npm', t => {
   assert.equal(runParity({ cwd, args: [], run, log() {} }), 0);
   assert.deepEqual(calls, [['squeal', ['status', '--json']],
     ['squeal', ['status', '--wait', '60000', '--json', ...selectFiles(cwd)]]]);
+});
+
+test('asks the run-loop group to run its files before each wait round', t => {
+  const cwd = fixture(t);
+  writeFileSync(join(cwd, 'squeal.config.json'), JSON.stringify({ runner: { timeoutMs: 2345 },
+    checks: [{ name: 'run-loop', runner: 'vitest', tests: ['packages/cezar/src/**/*parity*.test.ts'], at: 'pause' }] }));
+  const calls = [];
+  let waits = 0;
+  const run = (command, args) => {
+    calls.push(args);
+    if (args[0] === 'run') return { status: 0, stdout: '' };
+    if (!args.includes('--wait')) return alive(cwd);
+    const state = ++waits === 1 ? 'pending' : 'current';
+    return result({ selection: { testFiles: selectFiles(cwd).map(path => ({ path, state, verdict: 'pass' })) } });
+  };
+  assert.equal(runParity({ cwd, args: [], run, log() {} }), 0);
+  const ask = ['run', 'run-loop', 'packages/cezar/src/core/a-parity.test.ts'];
+  const wait = ['status', '--wait', '60000', '--json', ...selectFiles(cwd)];
+  assert.deepEqual(calls.slice(1), [ask, wait, ask, wait]);
+});
+
+test('a failed group run stops the parity run with its message', t => {
+  const cwd = fixture(t);
+  writeFileSync(join(cwd, 'squeal.config.json'), JSON.stringify({ runner: { timeoutMs: 2345 },
+    checks: [{ name: 'run-loop', runner: 'vitest', at: 'pause' }] }));
+  const run = (command, args) => args[0] === 'run' ? { status: 2, stderr: 'no such group' } : alive(cwd);
+  assert.throws(() => runParity({ cwd, args: [], run, log() {} }), /squeal run run-loop failed: no such group/);
+});
+
+test('group files are those its globs select; a lint group or no group selects none', () => {
+  const files = ['packages/cezar/src/a-parity.test.ts', 'packages/cezar/src/x/worker-b.test.ts', 'packages/new/c-parity.test.ts'];
+  const tests = ['packages/cezar/src/**/*parity*.test.ts', 'packages/cezar/src/**/worker-*.test.ts'];
+  assert.deepEqual(groupFiles({ checks: [{ name: 'run-loop', tests }] }, files), files.slice(0, 2));
+  assert.deepEqual(groupFiles({ checks: [{ name: 'run-loop' }] }, files), files);
+  assert.deepEqual(groupFiles({ checks: [{ name: 'run-loop', lint: true }] }, files), []);
+  assert.deepEqual(groupFiles({}, files), []);
 });
 
 test('without a daemon invokes npm test with explicit files and propagates failure', t => {

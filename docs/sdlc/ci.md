@@ -88,7 +88,9 @@ or a committed file diff over the per-file patch limit or with a NUL byte.
   `npm run test:changed` (unless its selection is the full suite, which is left to CI) and
   `npm run lint`.
 - Local `npm run test:parity`, local browser specs and coverage runs are not duties
-  before a PR. CI runs them. Run one only to debug a failure.
+  before a PR. CI runs them. Run one only to debug a failure. With a daemon,
+  `npm run test:parity` asks `squeal run run-loop` for the parity files and waits for
+  their verdicts.
 - The changed-function quality check ([`check-code-quality`](../../.ai/skills/check-code-quality/SKILL.md))
   runs beside the push, not before it, and reuses Squeal's stored results.
 - Regression proof ([regression-proof.md](regression-proof.md)) stays: it is part of
@@ -105,6 +107,17 @@ browser E2E in the slow tier. It does not run packaged CLI E2E
 Squeal. Pass repo-root paths; the command builds missing or stale outputs. Otherwise use affected tests and
 focused browser specs. `npm test` and `npm run test:watch` select only the four
 unit projects; Squeal also discovers the browser project from the root config.
+
+Squeal does not run every unit file after each edit. The `run-loop` check group in
+`squeal.config.json` owns the parity tests (`packages/cezar/src/**/*parity*.test.ts`) and
+the worker tests (`packages/cezar/src/**/worker-*.test.ts`). It runs at `"pause"`: Squeal
+runs these files when the agent ends its turn, and their verdicts arrive with the next
+prompt. Between edits, no message about these files is not a pass, and
+`squeal status --wait` does not hold for them. `squeal run run-loop <path>... --wait 60000`
+runs the group's files that the paths select now. `npm run prepr` names these files
+as files with no result when the agent has not paused since the change; CI runs them.
+`squeal code --base` still runs the group's files that load a changed function. This is a
+three-day trial (hearsay-tools/squawk#3551); revert the group to return to edit-time runs.
 
 The final six-command gate and full-suite runs belong in CI. Do not run the
 complete local gate just to commit, open a PR, or complete a review. Record

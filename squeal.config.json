@@ -23,6 +23,15 @@
   },
   "checks": [
     {
+      "name": "run-loop",
+      "runner": "vitest",
+      "tests": [
+        "packages/cezar/src/**/*parity*.test.ts",
+        "packages/cezar/src/**/worker-*.test.ts"
+      ],
+      "at": "pause"
+    },
+    {
       "name": "browser",
       "runner": "vitest",
       "project": "e2e",
