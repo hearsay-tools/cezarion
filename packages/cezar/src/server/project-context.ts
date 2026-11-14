@@ -543,7 +543,8 @@ export class ProjectContexts {
         await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
         // In the background: the sweep may ask GitHub (hearsay-tools/cezarion#2268). Never over a
         // store that could not open: its runs are unknown, and every branch would look ownerless.
-        if (!store.unavailable) this.sweep(store, { root: project.root, store, manager, home: this.deps.home }, { keep });
+        // Not from a build that disposal overtook: nothing would abort or await its sweep.
+        if (!store.unavailable && !stale()) this.sweep(store, { root: project.root, store, manager, home: this.deps.home }, { keep });
       }
       await manager.recover();
       // Archived transcripts left plain (or both-present after a crash) — fire-and-forget,
