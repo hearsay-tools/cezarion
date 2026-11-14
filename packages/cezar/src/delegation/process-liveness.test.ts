@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasLinuxPython, singleThreadZombie, threadHoldingPort } from '../linux-zombie.testkit.ts';
 import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
-import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, describeProcesses, incrementalCwdScan, scanProcessCwds, sharedCwdScan, processCwdUnder } from './process-liveness.ts';
+import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, describeProcesses, scanProcessCwds, sharedCwdScan, processCwdUnder } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns, so host processes never enter a scan.
 // Keep cwd/stat/token reads real, including ENOENT after our child has exited;
@@ -262,23 +262,6 @@ describe('shared cwd snapshot (hearsay-tools/cezarion#879)', () => {
     expect(scanProcessCwds('linux', proc)).toBe('unknown');
     expect(processesWithCwdUnder('/worker', 'linux', undefined, undefined, 'unknown')).toBe('unknown');
     expect(inspectGeneration({ paths: ['/worker'], cwds: () => 'unknown' }).liveness).toBe('unknown');
-  });
-
-  // hearsay-tools/squawk#1694: autosave checks after every Git command, so only a new PID costs a read.
-  it('an incremental scan reads each PID\'s cwd once, and only while it stays listed', () => {
-    let pids = ['7', '8', 'self'];
-    const reads: string[] = [];
-    const scan = incrementalCwdScan({ readdir: () => pids, readlink: pid => { reads.push(pid); if (pid === '8') throw Error('EACCES'); return `/cwd/${pid}`; } });
-    expect(scan()).toEqual(new Map([[7, '/cwd/7']]));
-    pids = ['7', '8', '9'];
-    expect(scan()).toEqual(new Map([[7, '/cwd/7'], [9, '/cwd/9']]));
-    pids = ['9', '7'];
-    expect(scan()).toEqual(new Map([[9, '/cwd/9'], [7, '/cwd/7']]));
-    expect(reads).toEqual(['7', '8', '9']);
-    pids = ['8'];
-    scan();
-    expect(reads).toEqual(['7', '8', '9', '8']);
-    expect(incrementalCwdScan({ readdir: () => { throw Error('unreadable /proc'); }, readlink: () => '/x' })()).toBe('unknown');
   });
 
   it('win32 has an empty snapshot, darwin builds one from a single lsof, and this process is never in it', () => {

@@ -128,6 +128,15 @@ describe('durable autosave cleanup', () => {
     }
   });
 
+  it('a macOS start token proves nothing after controller death: its wall clock can step back', () => {
+    const { dataDir, id, deadOwner } = fixture();
+    retainAutosaveCleanup(dataDir, id, dataDir, 'held', { processes: [], groups: [], uncertain: false, since: 'Tue Sep 29 10:00:00 2026' });
+    deadOwner();
+    vi.spyOn(liveness, 'processesWithCwdUnder').mockReturnValue([123]);
+    vi.spyOn(liveness, 'processStartToken').mockReturnValue('Mon Sep 28 10:00:00 2026');
+    expect(autosaveCleanupBlocker(dataDir, id)).toContain('123');
+  });
+
   it('an unreadable cwd scan cannot retire a dead controller proof', () => {
     const { dataDir, id, deadOwner } = fixture();
     retainAutosaveCleanup(dataDir, id, dataDir, 'inspection pending', { processes: [], groups: [], uncertain: false });

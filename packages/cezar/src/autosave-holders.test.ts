@@ -141,6 +141,13 @@ describe('autosave cwd-holder proof', () => {
     tokens.set(101, 'replacement');
     expect(await pending()).toBe(true);
   });
+  it('attributes a new incarnation that reuses a PID first seen outside the worktree', async () => {
+    tokens.set(303, 'outside');
+    const pending = (await watch())!;
+    candidates = [101, 303]; tokens.set(303, 'reused-by-git-child');
+    expect(await pending()).toBe(true);
+    expect((pending as unknown as { diagnostics: () => { pids: number[] } }).diagnostics().pids).toEqual([303]);
+  });
   it('retains an observed holder after it leaves the working directory', async () => {
     const pending = (await watch())!;
     candidates = [101, 202]; tokens.set(202, 'child');

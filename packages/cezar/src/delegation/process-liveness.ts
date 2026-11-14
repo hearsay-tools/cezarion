@@ -94,28 +94,6 @@ export function scanProcessCwds(platform: NodeJS.Platform = process.platform, pr
   return found;
 }
 
-/** Linux cwd snapshots for one short window, such as one autosave. The first call reads every other
- * process's cwd; each later call lists `/proc` and reads only the PIDs absent from the previous
- * listing, keeping the earlier answer for the rest. So a process that enters the directory after
- * its first reading is not seen, and a PID reused between two listings keeps its predecessor's
- * answer: reuse needs the kernel to cycle through its whole PID space between the two calls. */
-export function incrementalCwdScan(proc: ProcReader = realProc): () => CwdSnapshot {
-  let previous = new Map<number, string | undefined>();
-  return () => {
-    let entries: string[];
-    try { entries = proc.readdir(); } catch { return 'unknown'; }
-    const next = new Map<number, string | undefined>();
-    for (const entry of entries) {
-      if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
-      const pid = Number(entry);
-      if (previous.has(pid)) { next.set(pid, previous.get(pid)); continue; }
-      try { next.set(pid, proc.readlink(entry)); } catch { next.set(pid, undefined); /* unreadable: no evidence */ }
-    }
-    previous = next;
-    return new Map([...next].flatMap(([pid, cwd]) => cwd === undefined ? [] : [[pid, cwd] as const]));
-  };
-}
-
 /** One lazy `scan`, memoized for the life of the returned source. */
 export function sharedCwdScan(scan: () => CwdSnapshot = scanProcessCwds): CwdSource {
   let snapshot: CwdSnapshot | undefined;

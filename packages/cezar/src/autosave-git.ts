@@ -47,6 +47,8 @@ interface AutosaveSave {
   stopping: boolean;
   /** A blocked report went out: every later change is reported at once. */
   blocked: boolean;
+  /** The check after the last command found no holder, and no command started since. */
+  clear: boolean;
   warn(label: string, message: string): void;
   report(label: string, message: string, proof: Omit<AutosaveCleanupProof, 'since'>): void;
 }
@@ -75,13 +77,13 @@ async function groupAlive(pid: number, diagnostic: (message: string) => void): P
 
 /**
  * Runs one save's Git commands under one owner marker and one cwd-holder watch
- * (hearsay-tools/squawk#1694). The watch reads every process's cwd once, before the first
- * command; the check after each command reads only the processes born since the previous
- * one, so a Git descendant is observed, and stays tracked if it later leaves the worktree.
- * Each command waits until its process group is gone; the save then waits for the observed
- * descendants that left the group. The caller holds the worktree for the whole save, so no
- * other writer starts while one of them runs. Returns `unsuccessful` when no Git command may
- * start, or when a descendant outlives the budget.
+ * (hearsay-tools/squawk#1694): one baseline scan before the first command, and one scan
+ * after each command, which observes that command's descendants while they hold the
+ * worktree and keeps tracking them if they leave it. Before, every command took its own
+ * baseline and scanned again at each poll. Each command waits until its process group is
+ * gone; the save then waits for the observed descendants that left the group. The caller
+ * holds the worktree for the whole save, so no other writer starts while one of them runs.
+ * Returns `unsuccessful` when no Git command may start, or when a descendant outlives the budget.
  */
 export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, unsuccessful: T,
   run: (git: (args: string[]) => Promise<AutosaveGitResult>) => Promise<T>): Promise<T> {
@@ -89,7 +91,7 @@ export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, 
   let blockedWarnings = 0;
   let lastBlocker = '';
   const save: AutosaveSave = {
-    cwd, marker, options, holders: NO_HOLDERS, stopping: false, blocked: false,
+    cwd, marker, options, holders: NO_HOLDERS, stopping: false, blocked: false, clear: false,
     warn: (label, message) => {
       const text = `${label} in ${cwd}: ${message}`;
       console.warn(`${logPrefix()} ${text}`);
@@ -116,8 +118,9 @@ export async function withAutosaveGit<T>(cwd: string, options: AutosaveOptions, 
     save.holders = holders;
   }
   const result = await run(async args => {
+    save.clear = false;
     const ran = await runAutosaveGit(save, args);
-    await save.holders(); // Observes this command's descendants; the save waits for them below.
+    save.clear = !await save.holders(); // Observes this command's descendants; the save waits for them below.
     return ran;
   });
   return await settleHolders(save) ? result : unsuccessful;
@@ -129,12 +132,14 @@ export function autosaveGit(cwd: string, args: string[], options: AutosaveOption
 }
 
 /**
- * Waits until no Git descendant holds the worktree: one scan when none does. A holder is
+ * Waits until no Git descendant holds the worktree; no scan when the check after the last
+ * command found none. A holder is
  * never signalled; it may have left Git's group on purpose. Past the budget the save is
  * unsuccessful, and then blocked until the holders exit. False when the save is unsuccessful.
  */
 function settleHolders(save: AutosaveSave): Promise<boolean> {
   const { options } = save;
+  if (save.clear) return Promise.resolve(!save.stopping);
   const timeoutMs = save.stopping ? 0 : options.timeoutMs ?? 30_000;
   const confirmMs = (options.killGraceMs ?? 1_000) + (options.confirmMs ?? 2_000);
   let timedOut = save.stopping;

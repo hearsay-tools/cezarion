@@ -48,20 +48,15 @@ export function autosaveCleanupIds(dataDir: string): string[] | undefined {
   }), ...legacyRunsBeside(dataDir).filter(id => autosaveCleanupBlocker(dataDir, id))]; } catch { return undefined; }
 }
 
-/** A Linux start token: the boot id, when readable, and `starttime` in clock ticks. */
-const LINUX_START = /^(?:([0-9a-f-]{36}):)?(\d+)$/;
+/** A Linux start token: the boot id and `starttime`, clock ticks since that boot. */
+const LINUX_START = /^([0-9a-f-]{36}):(\d+)$/;
 /** Whether a process with start token `token` cannot be the save's: it started before the save's
- *  first Git leader (`since`), or the save ran in an earlier boot. Darwin tokens count whole
- *  seconds, so a process from the same second may be the save's. Unknown is false. */
+ *  first Git leader (`since`), or the save ran in an earlier boot. Only Linux boot-relative ticks
+ *  are monotonic; macOS `lstart` follows the wall clock, which can step back. Unknown is false. */
 function predatesSave(token: string | undefined, since: string): boolean {
-  if (token === undefined) return false;
-  const holder = LINUX_START.exec(token), first = LINUX_START.exec(since);
-  if (holder || first) {
-    if (!holder || !first || (holder[1] === undefined) !== (first[1] === undefined)) return false;
-    return holder[1] !== first[1] || Number(holder[2]) < Number(first[2]);
-  }
-  const started = Date.parse(`${token} UTC`), saved = Date.parse(`${since} UTC`);
-  return Number.isFinite(started) && Number.isFinite(saved) && started < saved;
+  const holder = token === undefined ? null : LINUX_START.exec(token), first = LINUX_START.exec(since);
+  if (!holder || !first) return false;
+  return holder[1] !== first[1] || Number(holder[2]) < Number(first[2]);
 }
 
 /** Synchronous admission/cleanup proof, with no signalling or invented timeout release. */
@@ -83,7 +78,8 @@ export function autosaveCleanupBlocker(dataDir: string, id: string): string | un
   const groups = processPredatesCurrentBoot(record.controller) ? [] : record.groups.filter(autosaveGroupAliveSync);
   // A process in the worktree that started before the save is not the save's (hearsay-tools/squawk#963).
   // Any later one may be: without the dead controller's observation of ancestry, an environment
-  // without the save's marker is no proof. Evidence without `since` blocks on every holder.
+  // without the save's marker is no proof. Without a Linux `since` (older evidence, macOS) every
+  // holder blocks.
   const scan = processesWithCwdUnder(record.cwd);
   const since = record.since;
   const holders = scan === 'unknown' || since === undefined ? scan : scan.filter(pid => !predatesSave(processStartToken(pid), since));

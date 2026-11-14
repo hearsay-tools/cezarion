@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
-import { incrementalCwdScan, processesWithCwdUnder, processStartToken, recordedProcessLive, type CwdSnapshot, type RecordedProcess } from './delegation/process-liveness.ts';
+import { processesWithCwdUnder, processStartToken, recordedProcessLive, type RecordedProcess } from './delegation/process-liveness.ts';
 
 type Snapshot = Map<number, string | undefined> | 'unknown';
 
@@ -19,16 +19,16 @@ function inspect(command: string, args: string[], timeout: number) {
   });
 }
 
-async function snapshot(cwd: string, linuxCwds: () => CwdSnapshot): Promise<Snapshot> {
-  if (process.platform === 'linux') return linuxSnapshot(cwd, linuxCwds());
+async function snapshot(cwd: string): Promise<Snapshot> {
+  if (process.platform === 'linux') return linuxSnapshot(cwd);
   // No process-tree proof exists on other platforms. Refuse before spawning,
   // rather than start work whose shutdown could retain the guard forever.
   if (process.platform !== 'darwin') return 'unknown';
   return darwinSnapshot(cwd);
 }
 
-function linuxSnapshot(cwd: string, cwds: CwdSnapshot): Snapshot {
-  const pids = processesWithCwdUnder(cwd, undefined, undefined, undefined, cwds);
+function linuxSnapshot(cwd: string): Snapshot {
+  const pids = processesWithCwdUnder(cwd);
   return pids === 'unknown' ? pids : new Map(pids.map(pid => [pid, processStartToken(pid)]));
 }
 
@@ -166,16 +166,14 @@ export interface AutosaveOwner {
  */
 export async function watchAutosaveHolders(cwd: string, owner: AutosaveOwner,
   probe: OwnerProbe = process.platform === 'darwin' ? darwinOwnerProbe : linuxOwnerProbe) {
-  // After the baseline, a Linux check reads only the processes born since the previous one (hearsay-tools/squawk#1694).
-  const linuxCwds = incrementalCwdScan();
-  const baseline = await snapshot(cwd, linuxCwds);
+  const baseline = await snapshot(cwd);
   if (baseline === 'unknown') return undefined;
   const observed = new Map<number, RecordedProcess>();
   // Per incarnation, so an unrelated process is read once and never tracked.
   const unrelated = new Set<string>();
   let diagnostics: { pids: number[]; processes: RecordedProcess[]; inspectionFailed: boolean } = { pids: [], processes: [], inspectionFailed: false };
   const alive = async () => {
-    const current = await snapshot(cwd, linuxCwds);
+    const current = await snapshot(cwd);
     if (current === 'unknown') { diagnostics = { ...diagnostics, inspectionFailed: true }; return true; }
     const pending = new Map<number, { startToken?: string | undefined; parent?: number | undefined }>();
     for (const [pid, startToken] of current) {
