@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { conversationAttributionSchema, conversationStateSchema, requestOutcomeSchema } from './conversations.ts';
 import { effortFieldSchema } from './effort.ts';
+import { runStatusSchema } from './run-status.ts';
 import { runnerSchema } from './runner.ts';
 import { modelChoicesSchema } from './workspace.ts';
 
@@ -155,7 +156,7 @@ const workerArtifactSchema = z.discriminatedUnion('state', [
 ]);
 export const workerCollectedResultSchema = z.object({
   workerId: z.uuid(), parentRunId: z.uuid(), revision: z.number().int().nonnegative(), observedAt: z.iso.datetime(),
-  status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+  status: runStatusSchema,
   outcome: z.enum(['running', 'review-ready', 'completed', 'failed', 'cancelled', 'destroyed']),
   lastExecutionOutcome: executionOutcomeSchema, partial: z.boolean(), settled: z.boolean(), error: errorSchema.optional(),
   backend: workerBackendSchema.optional(), model: z.string().max(512).optional(), baselineSha: commitShaSchema,
