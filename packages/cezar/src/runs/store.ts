@@ -12,7 +12,7 @@ export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
-import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
+import { WorkerAdmissionRefusal, workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
@@ -51,7 +51,7 @@ import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { describeProcesses, inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey } from './pull-requests.ts';
@@ -2792,8 +2792,8 @@ export class RunStore extends EventEmitter {
 
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
    * Synchronous, fresh and generation/resource fenced; callers hold admission off across awaits. */
-  workerResourcesSafe(id: string, generation: string, resourceId: string, admittingQueued = false): boolean {
-    return this.workerResourceHolders(id, generation, resourceId, { admittingQueued }) === 'safe';
+  workerResourcesSafe(id: string, generation: string, resourceId: string): boolean {
+    return this.workerResourceHolders(id, generation, resourceId) === 'safe';
   }
 
   /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
@@ -2843,14 +2843,19 @@ export class RunStore extends EventEmitter {
 
   commitWorkerExecutionStart(id: string): string {
     const run = this.peek(id);
-    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
+    const spawn = 'spawn a new worker with the instruction';
+    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new WorkerAdmissionRefusal('the worker is being destroyed', spawn);
     const prior = this.readWorkerExecution(id);
-    if (prior?.abandoned) throw new Error('Worker execution was abandoned; spawn a new worker instead of resuming it');
+    if (prior?.abandoned) throw new WorkerAdmissionRefusal('the worker execution was abandoned', spawn);
     if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
-      throw new Error('Worker execution checkpoint does not prove safe admission');
+      throw new WorkerAdmissionRefusal(`the previous execution is not proven finished (checkpoint ${prior?.phase ?? 'missing'})`,
+        `retry the same command after it ends; if this repeats, ${spawn}`);
     }
-    if (!this.workerResourcesSafe(id, prior.generation, run.delegation.workspace.resourceId, true)) {
-      throw new Error('Worker resources may still be held by a process; reuse is not proven safe');
+    const holders = this.workerResourceHolders(id, prior.generation, run.delegation.workspace.resourceId, { admittingQueued: true });
+    if (holders !== 'safe') {
+      throw holders.length
+        ? new WorkerAdmissionRefusal(`processes ${describeProcesses(holders)} still hold the worker's worktree or scratch`, 'end them, then retry the same command')
+        : new WorkerAdmissionRefusal("the worker's worktree or scratch is not proven free of processes", `retry the same command; if this repeats, ${spawn}`);
     }
     const generation = randomUUID();
     // #469: the controller is durable before `starting`, so a crash leaves a provable generation.

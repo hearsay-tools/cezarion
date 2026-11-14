@@ -36,7 +36,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     const waits = structuredClone(store.getRun(f.w.id)?.waits);
     const outcomes = conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId);
     const fail = vi.spyOn(store, 'commitWorkerContinuation').mockImplementationOnce(() => { throw Error('disk full'); });
-    expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: false, error: 'worker execution checkpoint unavailable' });
+    expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: false, error: 'the resume could not be saved (disk full)', next: 'retry the same command' });
     expect(fail).toHaveBeenCalledTimes(1);
     expectFallbackIntact(f, waits, outcomes, true);
     await until(() => !manager.isActive(f.w.id));

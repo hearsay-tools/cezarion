@@ -1,7 +1,9 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { parent, restart, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
+import { manager, parent, restart, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 /**
  * A restart finds an owned worker `waiting` with no ask and no wait: its session closed, and a
@@ -42,5 +44,25 @@ describe('restart recovery of a closed waiting worker', { timeout: 30_000 }, () 
     await until(() => store.getRun(id)?.status === RUN_STATUS.done);
     expect(store.getRun(id)?.steps.map(step => step.status)).toEqual([STEP_STATUS.done]);
     expect(store.readEvents(id).some(event => event.type === 'lifecycle' && event.message === 'cezar restarted — the open worker session was settled')).toBe(true);
+  });
+});
+
+// hearsay-tools/squawk#868: a worker that runs mid-turn when the server stops is resumed by recovery
+// (`RunRecovery.recoverInterruptedRun`), and its uncommitted worktree changes stay.
+describe('restart recovery of a running worker', { timeout: 30_000 }, () => {
+  useWorkerWaitFixture();
+
+  it('resumes an owned worker interrupted mid-turn, keeping its uncommitted worktree changes', async () => {
+    const p = await parent(); const w = await worker(p.id, 'mock:slow'); manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === RUN_STATUS.running && !!store.getRun(w.id)?.steps[0]?.sessionId);
+    const delegation = store.getRun(w.id)!.delegation;
+    if (delegation?.role !== 'worker') throw new Error('expected a worker');
+    const edit = join(delegation.workspace.path, 'uncommitted.txt');
+    writeFileSync(edit, 'kept across the restart');
+    await restart();
+    await until(() => store.readEvents(w.id).some(event => event.type === 'lifecycle' && event.message === 'cezar restarted — resuming the interrupted task from its last session'));
+    await until(() => store.getRun(w.id)?.status === RUN_STATUS.running && manager.isActive(w.id));
+    expect(store.getRun(w.id)?.delegation).toMatchObject({ executionRevision: 1 });
+    expect(readFileSync(edit, 'utf8')).toBe('kept across the restart');
   });
 });

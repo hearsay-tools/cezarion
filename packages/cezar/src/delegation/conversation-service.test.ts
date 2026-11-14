@@ -11,7 +11,8 @@ import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
@@ -223,6 +224,22 @@ describe('durable conversations', () => {
     rmSync(delegation.workspace.path, { recursive: true, force: true });
     expect(await f.service.send(f.caller, request)).toMatchObject({ effect: 'unchanged', message: { id: sent.message.id, resumed: true } });
   });
+  // hearsay-tools/squawk#867: the refusal names what holds the worker and the command that gets past it.
+  it.runIf(process.platform !== 'win32')('refuses --resume while a process holds the worker worktree, naming it; the exact retry is accepted after it ends', async () => {
+    const w = await completedWorker('done');
+    await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
+    const delegation = f.store.getRun(w.id)!.delegation;
+    if (delegation?.role !== 'worker') throw new Error('expected a worker');
+    const holder = spawn('sleep', ['60'], { cwd: delegation.workspace.path, stdio: 'ignore' });
+    const exited = once(holder, 'exit');
+    try {
+      const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Finish the parser change', timeoutSeconds: 600, resume: true };
+      await expect(f.service.send(f.caller, request)).rejects.toMatchObject({ code: 'incompatible_state',
+        message: `Worker was not resumed: processes ${holder.pid} (sleep) still hold the worker's worktree or scratch. No message was accepted; end them, then retry the same command` });
+      holder.kill(); await exited;
+      expect(await f.service.send(f.caller, request)).toMatchObject({ message: { state: 'accepted', resumed: true } });
+    } finally { holder.kill(); }
+  });
   it('refuses --resume of a cancelled worker whose branch ref is gone, accepting nothing', async () => {
     const w = await completedWorker('cancelled');
     await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
@@ -350,7 +367,8 @@ describe('durable conversations', () => {
     const w = await completedWorker();
     const before = structuredClone(f.store.getRun(w.id));
     vi.spyOn(runPersistence(f.store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
-    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Retry work', timeoutSeconds: 600, resume: true })).rejects.toThrow(/checkpoint/);
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Retry work', timeoutSeconds: 600, resume: true }))
+      .rejects.toThrow('Worker was not resumed: the resume could not be saved (disk unavailable). No message was accepted; retry the same command');
     expect(f.store.getRun(w.id)).toEqual(before);
     expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
   });

@@ -38,3 +38,15 @@ function evidenceIdsIn(dir: string): string[] | undefined {
     });
   } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : undefined; }
 }
+
+/** Why a worker execution may not start, and the command that gets past it (hearsay-tools/squawk#867). */
+export class WorkerAdmissionRefusal extends Error {
+  constructor(cause: string, readonly next: string) { super(cause); }
+}
+
+/** The refusal a failed admission returns: its own cause and next step. Only an error without
+ *  a message falls back to `fallback`. */
+export function admissionRefusal(error: unknown, fallback: string): { ok: false; error: string; next?: string } {
+  if (error instanceof WorkerAdmissionRefusal) return { ok: false, error: error.message, next: error.next };
+  return { ok: false, error: error instanceof Error && error.message ? error.message : fallback };
+}

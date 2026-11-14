@@ -36,7 +36,9 @@ export type ContinueRunOptions = {
   providerRetry?: true;
 };
 
-export type ContinuationRefusal = { ok: false; error: string };
+/** `next` names the command that gets past a refusal, when retrying the same one is not it. */
+export type ContinuationRefusal = { ok: false; error: string; next?: string };
+export type ContinuationResult = { ok: boolean; error?: string; next?: string };
 export type ContinuationConversation = Parameters<RunStore['commitWorkerContinuation']>[4];
 
 export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions, home: Home): ContinuationRefusal | undefined {
@@ -73,7 +75,7 @@ export function identityRefusal(identity: WorkerStepIdentity | undefined, opts: 
 
 export function workerRefusal(run: RunRecord): ContinuationRefusal | undefined {
   if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) {
-    return { ok: false, error: 'worker cannot continue' };
+    return { ok: false, error: 'worker cannot continue', next: 'spawn a new worker with the instruction' };
   }
 }
 

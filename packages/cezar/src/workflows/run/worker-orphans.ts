@@ -2,8 +2,9 @@ import type { RunModuleContext, WorkerTerminationBlocker } from './types.ts';
 import { agentTmpDirLocationEvidence } from '../../runs/agent-tmpdir.ts';
 import { processGroupAlive, processGroupOf, signalProcessGroup } from '../../core/session-process.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../../delegation/retry-backoff.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../../delegation/process-liveness.ts';
+import { describeProcesses, inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../../delegation/process-liveness.ts';
 import { productName } from '../../home/display.ts';
+import { WorkerAdmissionRefusal } from '../../runs/worker-execution.ts';
 
 /** How long a non-gone orphan probe stands before the next scan. */
 const ORPHAN_PROBE_CACHE_MS = 2_000;
@@ -150,14 +151,18 @@ export class WorkerOrphans {
     return { blocker, changed };
   }
 
-  /** Continue over a live orphan names what still runs; other refusals keep the generic text. */
-  orphanAdmissionRefusal(runId: string): string | undefined {
+  /** Continue over a live orphan names what still runs and how to get past it. */
+  orphanAdmissionRefusal(runId: string): WorkerAdmissionRefusal | undefined {
     const orphan = this.orphanedWorkerGeneration(runId, true);
     const probe = orphan && this.orphanProbes.get(runId);
     if (!probe || probe.generation !== orphan.generation) return undefined;
-    if (probe.probe.controller !== undefined) return `the worker is still controlled by a live ${productName('Cezar')} (pid ${probe.probe.controller})`;
-    const pid = probe.probe.pids[0];
-    return pid === undefined ? undefined : `a process of the previous execution is still running (pid ${pid})`;
+    if (probe.probe.controller !== undefined) {
+      return new WorkerAdmissionRefusal(`the worker is still controlled by a live ${productName('Cezar')} (pid ${probe.probe.controller})`,
+        `retry the same command after that ${productName('Cezar')} ends the worker's execution`);
+    }
+    const { pids } = probe.probe;
+    return pids.length ? new WorkerAdmissionRefusal(`processes ${describeProcesses(pids)} of the previous execution still run`,
+      'end them, then retry the same command') : undefined;
   }
 
   /** Destroy only (#469): signal the recorded, token-verified survivors of a generation whose
@@ -241,6 +246,3 @@ export class WorkerOrphans {
 
 }
 
-/** #469: admission refused because a process of the previous generation still runs. */
-export class WorkerOrphanAliveError extends Error {}
-export const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;
