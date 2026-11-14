@@ -1,30 +1,30 @@
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { PARITY_EXEMPTIONS, type ScenarioName } from './harness-parity-core.testkit.ts';
-import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
+import type { RunnerFacts } from './runner-facts.ts';
 
 /**
- * Which runners each parity family runs on (hearsay-tools/cezarion#2991).
+ * Which runners each parity family runs on (hearsay-tools/cezarion#2991, `docs/adr/0063-one-scenario-runner.md`).
  *
  * - `every-runner`: the cells branch on a runner's own code, or read a narrow fact (native ask,
  *   native subagents, the native timer tool, cumulative cost). Every runner in `RUNNER_IDS`.
- * - `shared`: the cells test Squawk's logic above the seam, which sees a runner only through its
- *   turn-path facts. The derived `SHARED_RUNNERS` show every value of those facts once. A row of
- *   a shared family still runs on every runner when the family lists it in `everyRunner`, when
- *   `PARITY_EXEMPTIONS` exempts any runner from it, or when its cell title carries no row id
- *   and its kit passes no row key to `parityRunners`. A kit that passes a key (for example a
- *   mode name) runs that cell as a shared row.
- * - `no-session`: the cells start no runner session. Once, on `NO_SESSION_RUNNER`.
+ * - `shared`: the cells test Squawk's logic above the seam. They run on `SCENARIO_RUNNER` only.
+ *   A row of a shared family still runs on every runner when the family lists it in
+ *   `everyRunner`, when `PARITY_EXEMPTIONS` exempts any runner from it, or when its cell title
+ *   carries no row id and its kit passes no row key to `parityRunners`. A kit that passes a key
+ *   (for example a mode name) runs that cell as a shared row.
+ * - `no-session`: the cells start no runner session. Once, on `SCENARIO_RUNNER`.
  *
- * `parity-classes.test.ts` checks that the derived set covers every declared value, and that every
- * parity test file belongs to a family here. `cez/runner-fact-combination` keeps shared code from
- * combining two facts, which one runner per value could not show.
+ * Shared code sees a runner through its turn-path facts. The scenario runner shows one value of
+ * each. Every other declared value names the unit tests that drive shared code with it
+ * (`FACT_VALUE_TESTS`), and the seam contract (S36–S44, every runner) holds each runner to the
+ * values it declares. `parity-classes.test.ts` checks both tables and that every parity test file
+ * belongs to a family here. `cez/runner-fact-combination` keeps shared code from combining two
+ * facts, which one test per value could not show.
  */
 
 /**
  * The turn-path facts (hearsay-tools/cezarion#2991): the declared facts that decide how Squawk's
- * shared logic above the seam sees a turn and its input. A shared parity row runs on the runners
- * that together show every value of each of these facts; `cez/runner-fact-combination` keeps
- * shared code from combining two of them, so one runner per value is enough.
+ * shared logic above the seam sees a turn and its input.
  */
 export const TURN_PATH_FACTS = {
   'inputDelivery.mode': facts => facts.inputDelivery.mode,
@@ -34,42 +34,42 @@ export const TURN_PATH_FACTS = {
   systemPromptOnResume: facts => facts.systemPromptOnResume,
 } as const satisfies Record<string, (facts: RunnerFacts) => string>;
 
-type FactTable = Readonly<Record<string, RunnerFacts>>;
+export type TurnPathFact = keyof typeof TURN_PATH_FACTS;
 
 /** Each turn-path fact with every value the given runners declare for it. */
-export function turnPathValues<Id extends string>(ids: readonly Id[], facts: Readonly<Record<Id, RunnerFacts>>): Record<string, Set<string>> {
-  return Object.fromEntries(Object.entries(TURN_PATH_FACTS).map(([fact, read]) => [fact, new Set(ids.map(id => read(facts[id])))]));
+export function turnPathValues<Id extends string>(ids: readonly Id[], facts: Readonly<Record<Id, RunnerFacts>>): Record<TurnPathFact, Set<string>> {
+  return Object.fromEntries(Object.entries(TURN_PATH_FACTS).map(([fact, read]) => [fact, new Set(ids.map(id => read(facts[id])))])) as Record<TurnPathFact, Set<string>>;
 }
-
-const covers = (values: Record<string, Set<string>>, all: Record<string, Set<string>>) =>
-  Object.entries(all).every(([fact, every]) => [...every].every(value => values[fact]!.has(value)));
 
 /**
- * The smallest set of runners that shows every declared value of every turn-path fact. Among sets
- * of that size it takes the first in `ids` order: it compares the sets runner by runner, by each
- * runner's position in `ids`. The result keeps `ids` order.
+ * The one runner a shared parity row runs on: the default runner. CI history from 2026-09-02 to
+ * 2026-11-14 showed every shared regression failing on every runner that ran its row, and almost
+ * every single-runner failure as a flake (`docs/adr/0063-one-scenario-runner.md`).
  */
-export function deriveRunnerSet<Id extends string>(ids: readonly Id[], facts: FactTable & Readonly<Record<Id, RunnerFacts>>): Id[] {
-  const all = turnPathValues(ids, facts);
-  for (let size = 1; size <= ids.length; size++) {
-    for (const set of combinations(ids, size)) if (covers(turnPathValues(set, facts), all)) return set;
-  }
-  return [...ids];
-}
+export const SCENARIO_RUNNER: RunnerId = 'claude';
 
-/** Every `size`-runner subset of `ids`, in `ids` order and in lexicographic order of positions. */
-function* combinations<Id>(ids: readonly Id[], size: number, from = 0): Generator<Id[]> {
-  if (size === 0) { yield []; return; }
-  for (let at = from; at <= ids.length - size; at++) {
-    for (const rest of combinations(ids, size - 1, at + 1)) yield [ids[at]!, ...rest];
-  }
-}
+/** The runners a shared parity row runs on. */
+export const SHARED_RUNNERS: readonly RunnerId[] = [SCENARIO_RUNNER];
 
-/** The runners a shared parity row runs on, derived from the declarations. */
-export const SHARED_RUNNERS: readonly RunnerId[] = deriveRunnerSet(RUNNER_IDS, RUNNER_FACTS);
+/** The runner a family with no session runs on. */
+export const NO_SESSION_RUNNER: RunnerId = SCENARIO_RUNNER;
 
-/** The runner a family with no session runs on: the first of the shared set. */
-export const NO_SESSION_RUNNER: RunnerId = SHARED_RUNNERS[0]!;
+const FACT_VALUES = 'workflows/turn-path-fact-values.test.ts';
+
+/**
+ * The unit tests that drive Squawk's shared code with each turn-path fact value the scenario
+ * runner does not declare, by fact and value; paths are under `packages/cezar/src`. Each file
+ * spells the value. `parity-classes.test.ts` fails when a declared value has no entry, when an
+ * entry names a value no runner declares or the scenario runner's own, or when a file is missing,
+ * is a parity file, or does not spell its value.
+ */
+export const FACT_VALUE_TESTS: Readonly<Record<TurnPathFact, Readonly<Record<string, readonly string[]>>>> = {
+  'inputDelivery.mode': { boundary: [FACT_VALUES] },
+  'inputDelivery.consumption': { unobservable: [FACT_VALUES] },
+  'inputDelivery.acknowledgement': { response: [FACT_VALUES], 'model-work': [FACT_VALUES] },
+  'inputDelivery.humanInputAtTurnEnd': { 'never-held': [FACT_VALUES], 'always-held': [FACT_VALUES] },
+  systemPromptOnResume: { 'in-thread': ['workflows/launch-system-prompt.test.ts'] },
+};
 
 export type ParityClass = 'every-runner' | 'shared' | 'no-session';
 
@@ -81,7 +81,7 @@ interface ParityFamily {
   readonly everyRunner?: Readonly<Record<string, string>>;
 }
 
-const NATIVE_ASK_SCENARIO = 'its scenario asks through the native ask on codex and opencode (nativeAsk answerable), which no runner of the shared set declares';
+const NATIVE_ASK_SCENARIO = 'its scenario asks through the native ask on codex and opencode (nativeAsk answerable), which the scenario runner does not declare';
 const SMOKE = 'per-runner smoke row';
 const PROVIDER_ERROR_START = 'its step fails through the runner\'s own provider-error path';
 
@@ -204,7 +204,7 @@ export const PARITY_FILES: ReadonlyArray<readonly [RegExp, readonly ParityFamily
 export type ScenarioClass = 'runner-code' | 'shared';
 
 const MAPPER = 'a turn shape every mapper emits alike (ui-parity holds the mappers); Squawk decides the outcome';
-const TURN_PATH = 'it differs only by a turn-path fact, which the shared runner set shows value by value';
+const TURN_PATH = 'it differs only by a turn-path fact, whose other values FACT_VALUE_TESTS drive in unit tests';
 const SQUAWK_TOOL = 'the same Squawk tool call on every wire';
 const OWN_ERROR = 'the runner maps its own provider or process failure';
 const PERMISSION = 'a native permission or approval request exists only on some wires and each answers it its own way';

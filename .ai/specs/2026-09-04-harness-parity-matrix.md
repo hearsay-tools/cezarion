@@ -202,15 +202,15 @@ Driven by `driveRun()`: a real `RunManager` run in a temp git repo, the shape
 `workflows/run.test.ts` already uses.
 
 Since hearsay-tools/cezarion#2991 a run row whose outcome Cezar decides above the seam runs on
-the derived runner set, `SHARED_RUNNERS` in `core/parity-classes.testkit.ts`: the smallest set
-that shows every declared value of each turn-path fact (`inputDelivery.mode`, `.consumption`,
-`.acknowledgement`, `.humanInputAtTurnEnd`, `systemPromptOnResume`), ties broken by
-`RUNNER_IDS` order. A row that depends on runner code stays on every runner: R1 (the smoke row),
+fewer runners. Since ADR 0063 (`docs/adr/0063-one-scenario-runner.md`) it runs on one runner,
+`SCENARIO_RUNNER` in `core/parity-classes.testkit.ts`, and every other declared value of each
+turn-path fact (`inputDelivery.mode`, `.consumption`, `.acknowledgement`, `.humanInputAtTurnEnd`,
+`systemPromptOnResume`) names its unit tests in `FACT_VALUE_TESTS`. A row that depends on runner code stays on every runner: R1 (the smoke row),
 R2 (a provider error), R3 (a native ask on codex and opencode), every row with an exemption, and every
 row whose scenario runs runner code (`provider-error`, a native ask, native subagents), which
 `core/parity-classes.test.ts` checks. A row that raises the provider error through the mock's
 failure control names `provider-error-controlled` instead, which S44 holds on every runner, so it
-runs on the derived set.
+runs on the scenario runner.
 The classification table in that file names each family's class and these rows; its guards are
 listed in `docs/areas/runners.md`.
 
@@ -293,8 +293,8 @@ The matrix IS the test. Two things about it need their own proof:
 ## Cost
 
 Tier 2 runs each run criterion on the runners its class in `core/parity-classes.testkit.ts`
-names: every `RUNNER_IDS` backend for a row that depends on runner code, the derived runner set
-for a row Cezar decides above the seam (hearsay-tools/cezarion#2991), with an additional cell for
+names: every `RUNNER_IDS` backend for a row that depends on runner code, the scenario runner
+for a row Cezar decides above the seam (hearsay-tools/cezarion#2991, ADR 0063), with an additional cell for
 each exposed ask kind in R26. Keep these offline child-process runs bounded.
 That keeps the suite inside AGENTS.md's "no server, no browser" fast-gate rule — a spawned mock CLI is
 what `workflows/run.test.ts` already does — but it is the change's whole runtime cost and it is

@@ -10,7 +10,7 @@ import { workflowDefSchema } from '../workflows/types.ts';
 // leaves the default enabled and kills that non-final step before its check.
 
 // T1, T2, T3, T5 and T6 test which deadline Squawk passes (`step.timeoutMs ?? 0`,
-// workflows/run/step-session.ts) and what a timed-out step does, and run on the shared runner set.
+// workflows/run/step-session.ts) and what a timed-out step does, and run on the scenario runner.
 // T7 is their seam row: each runner applies a set `spec.timeoutMs` in place of its own default.
 // T4 and T7 run on every runner (core/parity-classes.testkit.ts).
 // The family's class drops the cells a runner does not run before a part is chosen.

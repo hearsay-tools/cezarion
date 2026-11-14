@@ -7,5 +7,5 @@ import { describeWorkflowTimeoutParity } from './workflow-timeout-parity.testkit
 
 it('registers every workflow-timeout case exactly once across its files', () => {
   checkParityRegistration('workflow-timeout-parity', describeWorkflowTimeoutParity,
-    RUNNER_IDS.flatMap(backend => WORKFLOW_TIMEOUT_CRITERIA.filter(row => runsOn('workflow-timeout', row.id, backend)).map(row => `${backend} ${row.id}`)), 27);
+    RUNNER_IDS.flatMap(backend => WORKFLOW_TIMEOUT_CRITERIA.filter(row => runsOn('workflow-timeout', row.id, backend)).map(row => `${backend} ${row.id}`)), 17);
 });

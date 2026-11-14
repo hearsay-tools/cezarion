@@ -5,8 +5,8 @@ import type { Node } from '@babel/types';
 import { lineAt, repoRoot, type SourceRule } from './source-rule.ts';
 
 /**
- * Shared parity rows run on a derived set of runners that shows every value of each turn-path
- * fact once, not every combination of values (hearsay-tools/cezarion#2991). That holds only while
+ * Shared parity rows run on one runner, and unit tests drive every other value of each turn-path
+ * fact once, not every combination of values (hearsay-tools/cezarion#2991, docs/adr/0063-one-scenario-runner.md). That holds only while
  * no function above the seam combines two declared runner facts: such a function needs a
  * combination row on every runner.
  *
@@ -283,7 +283,7 @@ const isTest = (file: string) => /\.(?:test|e2e)\.tsx?$|\.testkit\.tsx?$/.test(f
 export function combinationFindings(file: string, source: string, exceptions: Readonly<Record<string, CombinationException>> = COMBINATION_ROWS) {
   return factCombinations(source).filter(({ name }) => exceptions[`${file}#${name}`] === undefined).map(({ name, line, facts }) => ({
     line,
-    message: `${name} touches a runner fact source and reads ${facts.join(' and ')}. Shared parity rows run on a derived runner set that shows each fact value once, not each combination: `
+    message: `${name} touches a runner fact source and reads ${facts.join(' and ')}. Shared parity rows run on one runner and unit tests drive each other fact value once, not each combination: `
       + 'split the function so each part reads one fact, or add it to COMBINATION_ROWS with a reason and, for a real combination, a parity row that runs on every runner (hearsay-tools/cezarion#2991).',
   }));
 }

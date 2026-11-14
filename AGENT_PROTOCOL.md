@@ -141,8 +141,8 @@ authority.
 
 The harness matrix drives each real runner class through its native mock. Every criterion
 holds for every runner, or carries a `PARITY_EXEMPTIONS` entry whose reason names the wire
-limitation. A row that tests Squawk's shared logic above the seam runs on the derived runner
-set instead.
+limitation. A row that tests Squawk's shared logic above the seam runs on one runner,
+`SCENARIO_RUNNER`, instead (docs/adr/0063-one-scenario-runner.md).
 
 Print every row with its exemptions:
 
@@ -174,12 +174,12 @@ Owners. Paths are relative to `packages/cezar/src/`.
 - **Scenario catalog:** `SCENARIOS` and `HARNESS_ADAPTERS` in
   `core/harness-parity-core.testkit.ts`. The steps of each scenario are in
   `packages/cezar/scripts/mock-scenario.mjs`.
-- **Row classes and the derived runner set:** `SHARED_RUNNERS` in
-  `core/parity-classes.testkit.ts`.
+- **Row classes, the scenario runner and the fact-value unit tests:** `PARITY_FAMILIES`,
+  `SCENARIO_RUNNER` and `FACT_VALUE_TESTS` in `core/parity-classes.testkit.ts`.
 - **Spec-support rows:** `SPEC_FIELD_PROBES` in `core/harness-parity-cells.testkit.ts`.
 - **Per-runner files:** `core/harness-<runner>-<part>-parity.test.ts`
   (`harnessParityFile`) and `workflows/waits-<runner>-<part>-parity.test.ts`
-  (`WAIT_PARITY_FILES`, `WAIT_PARITY_FAMILIES` in `workflows/waits-parity-catalog.testkit.ts`).
+  (`WAIT_PARITY_FILES`, `WAIT_FOLDS` in `workflows/waits-parity-catalog.testkit.ts`).
 - **Matrix guards and single-runner cells:** `core/harness-parity.test.ts` and
   `workflows/waits-parity.test.ts`.
 

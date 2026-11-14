@@ -1,5 +1,4 @@
 import { parentWithWorker, sessionOf, retryClock, nudgeNotes, nativeWire, parkedOn, waitOfKind, fireTimer, settled, prompted, inputsFor, workerParent, turnEnds, blockedDone, blockingWorker, liveRefusal, agentWaits, humanOpen, gated, workerWaits, repliesDoneAgain, replyBlockedAgain, describeWaitCells } from './waits-parity-fixture.testkit.ts';
-import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import { siblingImports } from '../core/module-imports.testkit.ts';
 import { COMPLETION_NUDGE_NOTE } from './run.ts';
 import { randomUUID } from 'node:crypto';
@@ -31,7 +30,7 @@ import { processCells } from './waits-parity-process-cells.testkit.ts';
 import { recoveryCells } from './waits-parity-recovery-cells.testkit.ts';
 import { refusalCells } from './waits-parity-refusal-cells.testkit.ts';
 import { registrationCells } from './waits-parity-registration-cells.testkit.ts';
-import { type WaitParityPart, type WaitCells, type WaitFold, foldCells, splitPart, folded, WAIT_PARITY_FILES, WAIT_PARITY_FAMILIES, ROW_FAMILIES, type FamilyPart, familyTest, WAIT_FOLDS, foldedWaitFile, FOLDED_WAIT_RUNNERS, waitPartModule, waitFoldModule } from './waits-parity-catalog.testkit.ts';
+import { type WaitParityPart, type WaitCells, type WaitFold, foldCells, folded, WAIT_PARITY_FILES, WAIT_FOLDS, foldedWaitFile, FOLDED_WAIT_RUNNERS, waitPartModule, waitFoldModule } from './waits-parity-catalog.testkit.ts';
 
 // The full registry of the wait parity cells. Only `waits-parity.test.ts` imports it: it guards the
 // catalog and runs the single-runner cells. Each per-runner file imports its part's or fold's module
@@ -70,7 +69,7 @@ function cellModules(file: string): string[] {
 }
 
 /** Whether a runner runs any cell of a part, after the wait family's class (hearsay-tools/cezarion#2991)
- *  drops the shared rows outside the derived runner set. A part with none has no file. */
+ *  drops the shared rows on every runner but the scenario runner. A part with none has no file. */
 export function partRuns(runner: RunnerId, part: WaitParityPart): boolean {
   let any = false;
   WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, (() => { any = true; }) as unknown as typeof registerTest));
@@ -78,7 +77,6 @@ export function partRuns(runner: RunnerId, part: WaitParityPart): boolean {
 }
 
 function expectPartLeaf(runner: RunnerId, part: WaitParityPart): void {
-  if (splitPart(runner, part)) return; // Full-title family coverage is checked separately below.
   if (folded(runner)) return; // Its one file is checked below.
   if (!partRuns(runner, part)) return;
   const file = WAIT_PARITY_FILES[part](runner);
@@ -86,34 +84,6 @@ function expectPartLeaf(runner: RunnerId, part: WaitParityPart): void {
   expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
   // It imports its part's module and no other cells module.
   expect(cellModules(file), file).toEqual([waitPartModule(part)]);
-}
-
-function familyCalls(): Array<{ file: string; family: keyof typeof WAIT_PARITY_FAMILIES }> {
-  return readdirSync(new URL('.', import.meta.url)).filter(file => file.endsWith('.test.ts')).flatMap(file =>
-    registrationGroups(readFileSync(new URL(`./${file}`, import.meta.url), 'utf8'), file,
-      'describeWaitParityFamily', 'WAIT_PARITY_FAMILIES', Object.keys(WAIT_PARITY_FAMILIES))
-      .map(family => ({ file, family: family as keyof typeof WAIT_PARITY_FAMILIES })));
-}
-
-function expectWaitParityFamilies(): void {
-  const found = familyCalls();
-  const calls = found.map(call => call.family);
-  expect(calls.slice().sort()).toEqual(Object.keys(WAIT_PARITY_FAMILIES).sort());
-  // A family file imports its part's cells module and no other.
-  for (const { file, family } of found) expect(cellModules(file), file).toEqual([waitPartModule(WAIT_PARITY_FAMILIES[family].part)]);
-  for (const runner of RUNNER_IDS) {
-    for (const part of Object.keys(ROW_FAMILIES) as FamilyPart[]) {
-      if (!splitPart(runner, part)) continue;
-      const expected: string[] = [], actual: string[] = [];
-      const collect = (names: string[]) => ((title: string) => { names.push(title); }) as typeof registerTest;
-      WAIT_PARITY_CELLS[part]([runner], collect(expected));
-      for (const name of calls) {
-        const scope = WAIT_PARITY_FAMILIES[name];
-        if (scope.runner === runner && scope.part === part) WAIT_PARITY_CELLS[part]([runner], familyTest(scope, collect(actual)));
-      }
-      expect(actual.sort(), `${runner} ${part}: each full row exactly once`).toEqual(expected.sort());
-    }
-  }
 }
 
 // hearsay-tools/cezarion#1531: the single-runner cells run once, on the claude wire, from
@@ -250,15 +220,14 @@ export function describeWaitParity(scope: 'once'): void {
       const parts = Object.keys(WAIT_PARITY_FILES) as WaitParityPart[];
       expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => {
         if (folded(runner)) return (Object.keys(WAIT_FOLDS) as WaitFold[]).filter(fold => foldTitles(runner, fold).length > 0).map(fold => foldedWaitFile(runner, fold));
-        return parts.filter(part => !splitPart(runner, part) && partRuns(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
+        return parts.filter(part => partRuns(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
       }).sort());
       for (const runner of RUNNER_IDS) for (const [part, file] of Object.entries(WAIT_PARITY_FILES) as Array<[WaitParityPart, (runner: RunnerId) => string]>) {
-        expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(!folded(runner) && (partRuns(runner, part) || splitPart(runner, part)));
+        expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(!folded(runner) && partRuns(runner, part));
       }
       for (const runner of FOLDED_WAIT_RUNNERS) {
-        // A folded runner splits no part by WAIT_PARITY_FAMILIES, its groups register each of its
-        // cells exactly once, and each group with cells runs from its own file.
-        expect(parts.filter(part => splitPart(runner, part)), runner).toEqual([]);
+        // A folded runner's groups register each of its cells exactly once, and each group with
+        // cells runs from its own file.
         const all: string[] = [];
         for (const part of parts) WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, ((title: string) => { all.push(title); }) as typeof registerTest));
         const grouped = (Object.keys(WAIT_FOLDS) as WaitFold[]).flatMap(fold => foldTitles(runner, fold));
@@ -292,8 +261,6 @@ export function describeWaitParity(scope: 'once'): void {
       expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U29p', 'U29q', 'U29m', 'U28w', 'U28r', 'U28p', 'U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U7a', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U19w', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27', 'R13', 'R18', 'R17']);
       for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
     });
-
-    it('registers every split row exactly once', expectWaitParityFamilies);
 
     singleRunnerCells();
   });

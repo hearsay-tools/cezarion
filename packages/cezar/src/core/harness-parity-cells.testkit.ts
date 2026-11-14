@@ -55,11 +55,11 @@ import { describeHarnessParity as describeStartupParity, STARTUP_GROUPS } from '
  *
  * Coverage rule (hearsay-tools/cezarion#2991): a fix inside a runner class extends the seam
  * contract or that runner's own rows, which run on every runner. A fix above the seam extends a
- * shared row, which runs on the derived runner set `SHARED_RUNNERS`: the smallest set that shows
- * every declared value of each turn-path fact. A new runner declares its facts and joins the set
- * when it adds a value. Each `describeRunners` group is one family in
+ * shared row, which runs on one runner, `SCENARIO_RUNNER`; every other declared value of each
+ * turn-path fact names its unit tests in `FACT_VALUE_TESTS` (docs/adr/0063-one-scenario-runner.md).
+ * Each `describeRunners` group is one family in
  * `parity-classes.testkit.ts`, and a cell registers only on the runners its row's class names.
- * Guards: `parity-classes.test.ts` (the set covers every value; every parity file has a family)
+ * Guards: `parity-classes.test.ts` (every other fact value names its unit tests; every parity file has a family)
  * and `cez/runner-fact-combination` (no workflow function touches a fact source and reads two fact keys).
  *
  * Each part's cells live in `harness-parity-<part>.cells.testkit.ts`; the seam and run tier

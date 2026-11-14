@@ -21,7 +21,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages, toolCall, gate, thenSay } from './waits-parity.testkit.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
-import { type WaitParityPart, type WaitCells, type WaitPartScope, waitPartModule, familyTest, type WaitParityFamily, type WaitFold, type WaitFoldScope, waitFoldModule, foldCells } from './waits-parity-catalog.testkit.ts';
+import { type WaitParityPart, type WaitCells, type WaitPartScope, waitPartModule, type WaitFold, type WaitFoldScope, waitFoldModule, foldCells } from './waits-parity-catalog.testkit.ts';
 import { productName } from '../home/display.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
@@ -408,17 +408,15 @@ export function describeWaitCells(register: () => void): void {
   });
 }
 
-/** The describers of a part's module. A file's runner runs the part's cells where the wait family's
- *  class runs them (core/parity-classes.testkit.ts); a family file runs one row family of them. */
+/** The describer of a part's module. A file's runner runs the part's cells where the wait family's
+ *  class runs them (core/parity-classes.testkit.ts). */
 export function waitPartDescribers(part: WaitParityPart, cells: WaitCells) {
   const describeWaitParity = (scope: WaitPartScope): void => {
     if (scope.part !== part) throw Error(`The ${part} cells cannot run the ${scope.part} part: import ${waitPartModule(scope.part)}`);
     const register = familyCells('waits', scope.runner, registerTest);
-    describeWaitCells(() => cells([scope.runner], scope.family ? familyTest(scope as WaitParityFamily, register) : register));
+    describeWaitCells(() => cells([scope.runner], register));
   };
-  /** Register a strict catalog reference, so the coverage scanner can prove every leaf call. */
-  const describeWaitParityFamily = (scope: WaitParityFamily): void => describeWaitParity(scope);
-  return { describeWaitParity, describeWaitParityFamily };
+  return { describeWaitParity };
 }
 
 /** The describer of a fold's module: a folded runner's file registers that fold's cells. */

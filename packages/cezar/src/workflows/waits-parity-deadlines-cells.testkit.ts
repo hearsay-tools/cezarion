@@ -10,7 +10,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { manager, until, store, toolGenerationOf } from './worker-wait-core.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
-// Deadline accounting is shared above the runner seam; this part runs on the derived shared set.
+// Deadline accounting is shared above the runner seam; this part runs on the scenario runner.
 export const { describeWaitParity } = waitPartDescribers('deadlines', deadlineCells);
 
 function sleeper(): number {

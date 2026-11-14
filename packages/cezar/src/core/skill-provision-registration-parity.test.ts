@@ -7,5 +7,5 @@ import { describeSkillProvisionParity } from './skill-provision-parity.testkit.t
 
 it('registers every skill-provision case exactly once across its files', () => {
   checkParityRegistration('skill-provision-parity', describeSkillProvisionParity,
-    RUNNER_IDS.flatMap(backend => SKILL_PROVISION_CRITERIA.filter(row => runsOn('skill-provision', row.id, backend)).map(row => `${backend} ${row.id}`)), 18);
+    RUNNER_IDS.flatMap(backend => SKILL_PROVISION_CRITERIA.filter(row => runsOn('skill-provision', row.id, backend)).map(row => `${backend} ${row.id}`)), 10);
 });

@@ -7,5 +7,5 @@ import { describeWorkflowStepCompletionParity } from './workflow-step-completion
 
 it('registers every workflow-step-completion case exactly once across its files', () => {
   checkParityRegistration('workflow-step-completion-parity', describeWorkflowStepCompletionParity,
-    RUNNER_IDS.flatMap(backend => STEP_COMPLETION_CRITERIA.filter(row => runsOn('workflow-step-completion', row.id, backend)).map(row => `${backend} ${row.id}`)), 15);
+    RUNNER_IDS.flatMap(backend => STEP_COMPLETION_CRITERIA.filter(row => runsOn('workflow-step-completion', row.id, backend)).map(row => `${backend} ${row.id}`)), 5);
 });

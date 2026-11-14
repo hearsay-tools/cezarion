@@ -22,12 +22,16 @@ coverage to a separate issue. Where the fix lives decides where its row runs
   (`core/seam-contract.testkit.ts`) or that runner's own rows. These run on every
   runner. Give a genuine wire gap a named executable exemption.
 - **A fix above the seam**, in Squawk's shared code, extends a shared row. A
-  shared row runs on the derived runner set: the smallest set that shows every
-  declared value of each turn-path fact (`inputDelivery.mode`, `.consumption`,
-  `.acknowledgement`, `.humanInputAtTurnEnd` and `systemPromptOnResume`).
-  Nobody picks these runners by hand.
+  shared row runs on one runner, `SCENARIO_RUNNER` (claude), as
+  [ADR 0063](../adr/0063-one-scenario-runner.md) records. Shared code sees a
+  runner through its turn-path facts (`inputDelivery.mode`, `.consumption`,
+  `.acknowledgement`, `.humanInputAtTurnEnd` and `systemPromptOnResume`). The
+  scenario runner shows one value of each. Every other declared value names the
+  unit tests that drive shared code with it, in `FACT_VALUE_TESTS`. A fix whose
+  behavior depends on such a value adds or extends one of those unit tests.
 - **A new runner** declares its facts in `RUNNER_FACTS`. When it adds a value
-  that no member of the set has, the set takes it in.
+  that no runner declared before, it also adds that value's unit tests to
+  `FACT_VALUE_TESTS`.
 
 `core/parity-classes.testkit.ts` holds the one classification table. Each parity
 family is `every-runner`, `shared` or `no-session`, from a trace of its cells.
@@ -36,14 +40,16 @@ ask, native subagents, the native timer tool, cumulative cost), is
 `every-runner`. A shared row also runs on every runner when its family lists it
 in `everyRunner`, when any runner is exempt from it, or when its cell title
 carries no row id and its kit passes no row key to `parityRunners`. A kit that
-passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the first runner of the
-set. R1 and U1 stay on every runner as smoke rows. When unsure, choose
+passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the scenario
+runner. R1 and U1 stay on every runner as smoke rows. When unsure, choose
 `every-runner` and say why in the table.
 
 Three guards hold the rule:
 
-1. `core/parity-classes.test.ts` fails when the derived set misses a declared
-   value of a turn-path fact.
+1. `core/parity-classes.test.ts` fails when a declared value of a turn-path
+   fact, other than the scenario runner's own, names no unit test in
+   `FACT_VALUE_TESTS`, or names a file that is missing, is a parity file, or
+   does not spell the value.
 2. The `cez/runner-fact-combination` lint rule fails closed. It tracks no value:
    it flags a function in `packages/cezar/src/workflows/`, nested callbacks
    included, that touches any fact source (`.inputDelivery`, `.facts`,
@@ -84,10 +90,10 @@ runner, defined once in a `*-cells.testkit.ts`, and add a guard that every runne
 with rows has its file. Split a runner's file again by row group when one runner
 alone is too slow. A runner that runs no row of a part has no file for it, so the
 file guards compute the expected files from the class table, never from
-`RUNNER_IDS` alone. Fold files that were split only for the cap once the derived
-set fits in fewer files, and measure each folded file against the CI cap first:
-`WAIT_FOLDS` in `workflows/waits-parity-catalog.testkit.ts` groups the parts of a runner
-outside the shared set into files of about 3–12 s locally.
+`RUNNER_IDS` alone. Fold files that were split only for the cap once fewer rows
+run, and measure each folded file against the CI cap first:
+`WAIT_FOLDS` in `workflows/waits-parity-catalog.testkit.ts` groups the parts of each runner
+other than the scenario runner into files of about 3–12 s locally.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
 (hearsay-tools/cezarion#1288). Squeal re-runs a test file when any file it imports changes, so

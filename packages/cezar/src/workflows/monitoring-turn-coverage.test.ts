@@ -12,5 +12,5 @@ it('registers every monitoring runner/mode/criterion exactly once across semanti
   expect([...registrations].sort()).toEqual(Object.keys(MONITORING_PARTITIONS).sort());
   const cells = monitoringCells(registrations.map(name => MONITORING_PARTITIONS[name as keyof typeof MONITORING_PARTITIONS]));
   expect([...cells].sort()).toEqual([...expectedMonitoringCells].sort());
-  expect(cells).toHaveLength(63);
+  expect(cells).toHaveLength(21);
 });
