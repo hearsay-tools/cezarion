@@ -69,6 +69,20 @@ export function waitForSettledSample<T = unknown>(
   return sample.value
 }
 
+/** A native click on a control below the fold. agent-browser refuses a target outside the
+ * viewport, and a scroll followed at once by a click races layout that still moves
+ * (hearsay-tools/squawk#3487). Scroll and read the box in one settled sample, then click. */
+export function clickInView(browser: AgentBrowser, selector: string): void {
+  waitForSettledSample<boolean>(browser, `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = el.getBoundingClientRect();
+    return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+  })()`, inView => inView)
+  browser.click(selector)
+}
+
 /** Native visibility is a measurement: a settled false remains an assertion failure. */
 export function visibilitySampleExpression(selector: string): string {
   return `(() => {
