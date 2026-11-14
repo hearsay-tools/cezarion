@@ -905,6 +905,34 @@ describe('the branch classifier (issue 08 §A)', () => {
       expect((await deleteBranches(ended, [workspace.branch])).deleted).toEqual([]);
       expect(await deleteBranches(ended, [workspace.branch], workspace.branch)).toMatchObject({ deleted: [workspace.branch] });
     });
+
+    it('keeps an ended worker family branch in use while its reflog holds a commit no other ref keeps', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const workerId = randomUUID();
+      const workspace = await createOwnedWorkspace(root, workerId, base);
+      await commit(workspace.path, 'work.txt', 'reset away');
+      await git(workspace.path, 'reset', '-q', '--hard', base);
+      await git(root, 'worktree', 'remove', workspace.path);
+      const owner = owners([runRecord(workerId, 'done', { branch: workspace.branch })])[0]!;
+      const ended = { ...input(), runs: [{ ...owner, endedWorker: true as const }] };
+      expect((await classesOf()).cls[workspace.branch]).toBe('active');
+      const { payload } = await classifyBranches(ended);
+      expect(payload.branches.find((row) => row.name === workspace.branch)?.class).toBe('active');
+      expect((await deleteBranches(ended, [workspace.branch], workspace.branch)).deleted).toEqual([]);
+      expect(await git(root, 'rev-parse', workspace.branch)).toBe(base);
+    });
+
+    it('lists the unlanded branch of a receipt with no run, and keeps its landed one for the owned removal', async () => {
+      const base = await git(root, 'rev-parse', 'HEAD');
+      const unlanded = await createOwnedWorkspace(root, randomUUID(), base);
+      await commit(unlanded.path, 'work.txt', 'unlanded');
+      await git(unlanded.path, 'checkout', '-q', '--detach');
+      const landed = await createOwnedWorkspace(root, randomUUID(), base);
+      await git(landed.path, 'checkout', '-q', '--detach');
+      const { cls } = await classesOf();
+      expect(cls).toMatchObject({ [unlanded.branch]: 'orphan', [landed.branch]: 'active' });
+      expect(await deleteBranches(input(), [unlanded.branch], unlanded.branch)).toMatchObject({ deleted: [unlanded.branch] });
+    });
   });
 });
 

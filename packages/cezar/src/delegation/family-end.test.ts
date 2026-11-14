@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -41,6 +42,14 @@ describe('releasing the branches of ended worker families', { timeout: WORKSPACE
     expect(await releaseEndedWorkerBranches(root, store, claim)).toEqual([]);
   });
 
+  it('keeps the branch while the archived root still runs', async () => {
+    const { root, workspace, store, parentId } = await reclaimedWorker(false);
+    setRunStatus(store, parentId, RUN_STATUS.running);
+    store.setArchived(parentId, true);
+    expect(await releaseEndedWorkerBranches(root, store, claim)).toEqual([]);
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+  });
+
   it('keeps a branch with commits no other ref keeps, and a run in use', async () => {
     const { root, workspace, store, workerId, parentId } = await reclaimedWorker(true);
     store.setArchived(parentId, true);
@@ -48,6 +57,19 @@ describe('releasing the branches of ended worker families', { timeout: WORKSPACE
     expect(await releaseEndedWorkerBranches(root, store, claim)).toEqual([]);
     expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
     expect(store.getRun(workerId)?.delegation).not.toHaveProperty('destroy');
+  });
+
+  it('reclaims the clean directory of a receipt whose run no longer exists, then its branch, and keeps a dirty one', async () => {
+    const { root, first } = await fixture();
+    const clean = await createOwnedWorkspace(root, randomUUID(), first);
+    const dirty = await createOwnedWorkspace(root, randomUUID(), first);
+    await writeFile(join(dirty.path, 'tracked.txt'), 'uncommitted');
+    const { store } = durableRun(root, await createOwnedWorkspace(root, randomUUID(), first));
+    expect(await releaseEndedWorkerBranches(root, store, claim)).toEqual([clean.ownerRunId]);
+    expect(existsSync(clean.path)).toBe(false);
+    expect(git(root, 'branch', '--list', clean.branch)).toBe('');
+    expect(await readFile(join(dirty.path, 'tracked.txt'), 'utf8')).toBe('uncommitted');
+    expect(git(root, 'branch', '--list', dirty.branch)).not.toBe('');
   });
 
   it('releases the baseline branch of a receipt whose run no longer exists', async () => {

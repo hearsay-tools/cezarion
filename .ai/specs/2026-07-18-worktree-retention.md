@@ -268,15 +268,20 @@ by the user or by history retention past its cap of 300 unarchived runs.
 | settled, archived | settled | C | archived | reclaimed if clean | kept | the Git view lists it `not-landed` with the worker and its commit count; a typed delete removes it |
 | settled, any | settled | U | archived with the family | kept: retention never removes a dirty directory | kept | the Worktrees panel and `hsq worker` show the path |
 | settled | destroyed | - | archived with the family | gone | gone | - |
-| - | a receipt whose run no longer exists | any | - | kept | as the archived rows | as the archived rows |
+| - | a receipt whose run no longer exists | any | - | reclaimed if clean and no process works in it | as the archived rows; a landed one goes only by the owned-workspace removal | the Git view lists an unlanded one as `orphan`; a typed delete removes it |
 
-A worker at `review` counts as settled once its parent is archived. Explicit `worker destroy` of
+A family has ended when its root is archived, settled (done, failed or cancelled) and not live;
+for the branch step, no worker of the family may be live either. A worker at `review` counts as
+settled once its family has ended. Explicit `worker destroy` of
 C or U work keeps its behaviour: it removes the work.
 
 Safety invariant: never remove a worktree or a branch holding commits that no other ref reaches,
 nor a directory with uncommitted changes, and never delete a receipt before its branch is gone
-(hearsay-tools/cezarion#2272). The compare-and-swap verifies, in one ref transaction, the branch
-tip and every ref that keeps its commits.
+(hearsay-tools/cezarion#2272). The compare-and-swap proves on every attempt, never from an earlier
+checkpoint, that the branch tip and every reflog entry are the baseline or on another ref, and
+fails closed when one ref is seen at two tips; one ref transaction then verifies the tip and those
+refs. The Git view releases a receipt-owned branch only under the same reflog proof, and its
+delete verifies those refs too.
 
 Where each part runs:
 

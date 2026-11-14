@@ -12,6 +12,7 @@ import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import type { PreviewHostLike } from '../preview/registration.ts';
+import { isEndedRoot } from './run-row.ts';
 import type { RunRecord, RunStatus, RunStore } from './store.ts';
 
 /** The "finished" status set — mirrors the statuses `RunStore.archiveFinished` sweeps. A run at the
@@ -27,9 +28,11 @@ function recencyKey(run: RunRecord): string {
 }
 
 /** Whether an owned worker's family has ended: its parent was archived, by the user or by history
- *  retention (hearsay-tools/squawk#2987). */
+ *  retention, and is settled (`isEndedRoot`, hearsay-tools/squawk#2987). */
 export function workerFamilyEnded(run: RunRecord, lookup: (id: string) => RunRecord | undefined): boolean {
-  return run.delegation?.role === 'worker' && lookup(run.delegation.parentRunId)?.archived === true;
+  if (run.delegation?.role !== 'worker') return false;
+  const parent = lookup(run.delegation.parentRunId);
+  return parent !== undefined && isEndedRoot(parent);
 }
 
 /** A run is reclaimable when it is finished, still has a materialized worktree directory, and

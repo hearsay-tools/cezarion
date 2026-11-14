@@ -26,6 +26,12 @@ export function isLiveRecord(run: RunRecord): boolean {
   return run.stopping !== undefined;
 }
 
+/** A worker family's root once the family may end (hearsay-tools/squawk#911): archived, settled
+ *  (done, failed or cancelled) and not live. A user may archive a running root; that is no end. */
+export function isEndedRoot(run: RunRecord): boolean {
+  return run.archived && (run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') && !isLiveRecord(run);
+}
+
 /**
  * Encode a record, its summary and all query columns for one upsert. data may include preserved
  * raw fields. Live process usage is attached by readers and is never persisted here.

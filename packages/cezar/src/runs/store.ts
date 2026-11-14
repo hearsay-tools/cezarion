@@ -74,7 +74,7 @@ import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop
 import { hasLegacyWaitFields, upgradeLegacyWaits, UNREADABLE_WAIT } from './legacy-waits.ts';
 export { ciWaitEntry, holdsWorkerWait, upgradeLegacyWaits, workerWaitEntry } from './legacy-waits.ts';
 import { ExitEvents } from './exit-events.ts';
-import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
+import { encodeRunRow, isEndedRoot, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
@@ -390,8 +390,8 @@ export interface BranchOwner {
   branch?: string;
   baseBranch?: string;
   pullRequestUrl?: string;
-  /** A settled owned worker whose parent is archived (hearsay-tools/squawk#911): its ownership
-   *  receipt no longer keeps its branch in use. */
+  /** A settled owned worker whose family has ended (hearsay-tools/squawk#911): its root is
+   *  archived and settled and no member is live. Its receipt alone no longer keeps its branch in use. */
   endedWorker?: true;
 }
 
@@ -1525,8 +1525,12 @@ export class RunStore extends EventEmitter {
       const parent = isLiveRecord(run) ? undefined : settledWorkerParent(run);
       if (parent) parents.set(run.id, parent);
     }
+    // The family ends with a settled archived root and no live member (live runs are all held).
+    const live = new Set([...this.held.values()].flatMap((run) => isLiveRecord(run) && run.delegation?.role === 'worker' ? [run.delegation.parentRunId] : []));
+    const ended = new Map<string, boolean>();
     for (const [id, parent] of parents) {
-      if (owners.get(parent)?.archived ?? this.getRun(parent)?.archived) owners.get(id)!.endedWorker = true;
+      if (!ended.has(parent)) { const root = this.getRun(parent); ended.set(parent, !!root && isEndedRoot(root) && !live.has(parent)); }
+      if (ended.get(parent)) owners.get(id)!.endedWorker = true;
     }
     return [...owners.values()];
   }
@@ -3213,16 +3217,15 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /** Archive a root with its workers when no member is live or mid-destroy. Best effort: a failed
-   *  write leaves the family for the next pass. */
+  /** Archive a root with its workers when no member is live or mid-destroy. Each member is marked
+   *  dirty, so the next debounced save writes the whole family in one transaction. */
   private archiveSettledFamily(root: RunRecord): void {
-    if ([root, ...this.listWorkersOf(root.id)].some(isLiveRecord)) return;
-    const staged = new Map<string, RunRecord | null>();
-    this.stageArchive(staged, root, true);
-    try { this.commitIndex(staged); } catch { return; }
-    for (const id of staged.keys()) {
-      this.compressor.enqueue(id);
-      removeAgentTmpDir(this.dataDir, id);
+    const workers = this.listWorkersOf(root.id);
+    if ([root, ...workers].some(isLiveRecord)) return;
+    for (const member of [root, ...workers.flatMap((worker) => this.record(worker.id) ?? [])]) {
+      if (member.archived) continue;
+      this.applyArchived(member, true);
+      removeAgentTmpDir(this.dataDir, member.id);
     }
   }
 

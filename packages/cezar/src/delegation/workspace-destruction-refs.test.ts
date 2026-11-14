@@ -104,6 +104,14 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
       git(root, 'update-ref', 'refs/heads/keeper', first);
     })).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
     expect(git(root, 'rev-parse', workspace.branch)).toBe(tip);
+    // The retry resumes from the checkpoint the failed delete wrote, and proves the commits again.
+    expect(JSON.parse(await readFile(receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json'), 'utf8')))
+      .toMatchObject({ sha: tip, phase: 'worktree-removed' });
+    const retry = await removeOwnedWorkspace(root, workspace);
+    expect(retry).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(retry.error).toBe(`Owned branch ${workspace.branch} holds 1 commit beyond its worker baseline; ` +
+      'keep what you need, delete the branch, then retry destroy');
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(tip);
   });
 
   it('keeps a stranded branch reset to its baseline, whose reflog still records worker commits (hearsay-tools/cezarion#905)', async () => {

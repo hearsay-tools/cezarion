@@ -109,6 +109,8 @@ export interface Classification {
   baseFullRef: string | null;
   /** Branch name → tip sha at classification time. */
   tips: Map<string, string>;
+  /** Receipt-owned branches whose receipt no longer keeps them in use (`releasedReceiptBranches`). */
+  released: ReadonlyMap<string, ReleasedBranch>;
 }
 
 /** `symbolic`: the ref is an alias (`git symbolic-ref`) for another, so its name is not what a
@@ -174,13 +176,49 @@ function runBranch(run: BranchOwner): string | undefined {
   return run.branch;
 }
 
-/** Whether an ownership receipt still keeps `branch` in use. Once every run that owns it is a
- *  worker of an ended family, it does not (hearsay-tools/squawk#911): the branch is classified like
- *  any task branch, so the Git view lists unlanded work and the sweep deletes landed work. */
-function receiptProtects(protection: { branches: ReadonlySet<string> }, runs: readonly BranchOwner[], branch: string): boolean {
-  if (!protection.branches.has(branch)) return false;
-  const owners = runs.filter((run) => runBranch(run) === branch);
-  return owners.length === 0 || !owners.every((run) => run.endedWorker);
+/** A receipt-owned branch its receipt no longer keeps in use (hearsay-tools/squawk#911), and the
+ *  refs that keep the commits its reflog recorded. */
+type ReleasedBranch = { orphan: boolean; witnesses: Array<{ ref: string; sha: string }> };
+
+/**
+ * The receipt-owned branches whose receipt no longer keeps them in use: every run that owns one is
+ * a worker of an ended family, or no run owns it (an orphan receipt), and every commit its reflog
+ * recorded is under its tip or on another ref. Those classify like any task branch, except that an
+ * orphan's landed branch stays in use: only the owned-workspace removal deletes it, after it reads
+ * the run store again. Deleting a branch drops its reflog, so a reflog commit nothing else keeps
+ * leaves the branch protected.
+ */
+async function releasedReceiptBranches(root: string, protection: { branches: ReadonlySet<string> },
+  runs: readonly BranchOwner[], heads: readonly HeadRow[]): Promise<Map<string, ReleasedBranch>> {
+  const released = new Map<string, ReleasedBranch>();
+  for (const head of heads) {
+    if (head.symbolic || !protection.branches.has(head.name)) continue;
+    const owners = runs.filter((run) => runBranch(run) === head.name);
+    if (!owners.every((run) => run.endedWorker)) continue;
+    const witnesses = await reflogWitnesses(root, head.name, head.sha);
+    if (witnesses) released.set(head.name, { orphan: owners.length === 0, witnesses });
+  }
+  return released;
+}
+
+/** An orphan receipt's landed branch stays in use: the owned-workspace removal deletes it. */
+function keepOrphanLandedBranches(drafts: Draft[], released: ReadonlyMap<string, ReleasedBranch>): void {
+  for (const d of drafts) if (released.get(d.head.name)?.orphan && (d.cls === 'merged' || d.cls === 'empty')) d.cls = 'active';
+}
+
+/** For each reflog entry of `branch` that is not under `tip`, another branch or remote-tracking ref
+ *  that contains it; null when one has none, or when one ref is seen at two tips. */
+async function reflogWitnesses(root: string, branch: string, tip: string): Promise<Array<{ ref: string; sha: string }> | null> {
+  const log = await git(root, ['reflog', 'show', '--format=%H', `refs/heads/${branch}`]);
+  if (!log.ok) return null;
+  const refs = new Map<string, string>();
+  for (const sha of new Set(log.stdout.split('\n').filter(Boolean))) {
+    if (sha === tip || (await git(root, ['merge-base', '--is-ancestor', sha, tip])).ok) continue;
+    const witness = await retainingRef((args) => git(root, args), sha, new Set([`refs/heads/${branch}`]));
+    if (!witness || (refs.has(witness.ref) && refs.get(witness.ref) !== witness.sha)) return null;
+    refs.set(witness.ref, witness.sha);
+  }
+  return [...refs].map(([ref, sha]) => ({ ref, sha }));
 }
 
 function isFinished(run: BranchOwner): boolean {
@@ -474,6 +512,8 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
     ownedCleanupProtection(root),
   ]);
   const ahead = await aheadCounts(root, heads, baseSha);
+  const released = await releasedReceiptBranches(root, protection, input.runs, heads);
+  const receiptHeld = new Set([...protection.branches].filter((name) => !released.has(name)));
 
   const runsByBranch = new Map<string, BranchOwner[]>();
   for (const run of input.runs) {
@@ -494,7 +534,7 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
       head.name === input.currentBranch ||
       head.name === base ||
       checkedOut.has(head.name) ||
-      receiptProtects(protection, input.runs, head.name) ||
+      receiptHeld.has(head.name) ||
       (task && protection.uncertain) ||
       (runs?.some(liveRun) ?? false);
     // A symbolic alias is never a task branch, whatever its name says: deleting it by name would
@@ -526,6 +566,7 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
     if (mergedByPr.has(d.head.name)) d.cls = 'merged';
     else d.cls = d.run ? 'not-landed' : 'orphan';
   }
+  keepOrphanLandedBranches(drafts, released);
   // A named branch is cleanable only as the exact merged PR a finished run recorded. Any other
   // branch stays the user's, however merged it looks.
   for (const d of named) {
@@ -571,6 +612,7 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
     baseSha,
     baseFullRef,
     tips: new Map(heads.map((h) => [h.name, h.sha])),
+    released,
   };
 }
 
@@ -595,7 +637,7 @@ async function stateKey(input: ClassifyInput): Promise<string> {
     git(input.root, ['worktree', 'list', '--porcelain']),
   ]);
   const runs = input.runs.map((r) => [
-    r.id, r.status, r.archived, r.branch, r.baseBranch, r.pullRequestUrl, r.title, input.isActive(r.id),
+    r.id, r.status, r.archived, r.branch, r.baseBranch, r.pullRequestUrl, r.title, r.endedWorker, input.isActive(r.id),
   ]);
   return createHash('sha256')
     .update(JSON.stringify([refs.stdout, worktrees.stdout, input.configuredBase, input.currentBranch, input.hasRemote, runs]))
@@ -749,7 +791,7 @@ export async function deleteBranches(
   confirm?: string,
 ): Promise<DeleteBranchesResult> {
   const names = [...new Set(requested)];
-  const { payload, tips, baseSha, baseFullRef } = await classifyBranches(input, { diffStats: false });
+  const { payload, tips, baseSha, baseFullRef, released } = await classifyBranches(input, { diffStats: false });
   const { candidates, refused } = deletionVerdicts(names, payload, tips, confirm);
   const deleted: string[] = [];
   let dropped: DeleteBranchesResult['dropped'];
@@ -762,7 +804,7 @@ export async function deleteBranches(
         const requestedRefs = new Set(candidates.map((c) => `refs/heads/${c.name}`));
         for (const candidate of candidates) {
           const { name } = candidate;
-          if (protection.uncertain || receiptProtects(protection, input.runs, name)) {
+          if (protection.uncertain || (protection.branches.has(name) && !released.has(name))) {
             refused.push({ name, reason: 'owned by a delegated workspace' });
             continue;
           }
@@ -791,6 +833,8 @@ export async function deleteBranches(
           const transaction = [
             ...(baseFullRef && baseSha ? [`verify ${baseFullRef} ${baseSha}`] : []),
             ...(witness ? [`verify ${witness.ref} ${witness.sha}`] : []),
+            // A released receipt-owned branch: the refs that keep its reflog's commits stay put too.
+            ...(released.get(name)?.witnesses ?? []).map(({ ref, sha }) => `verify ${ref} ${sha}`),
             `delete refs/heads/${name} ${candidate.tip}`,
           ].join('\n') + '\n';
           // `--no-deref`, and a symbolic ref refused outright: the transaction may only ever remove the

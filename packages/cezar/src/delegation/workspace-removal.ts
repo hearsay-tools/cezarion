@@ -68,8 +68,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   if (refusal) return { workerId: value.ownerRunId, state: 'incomplete', remaining: ['worktree', 'branch'], error: refusal };
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
-  /** The refs that keep a missing worktree's commits, verified by the branch delete. */
-  let witnesses: Array<{ ref: string; sha: string }> = [];
+  /** This attempt force-removed the worktree itself (an explicit destroy), so its branch goes too. */
+  let forced = false;
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
   // A refusal that names its blocker and the step that clears it.
   let named: string | undefined;
@@ -182,6 +182,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
         if (!(await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path])).ok) { report?.unexplained?.(); return false; }
         remaining = ['branch'];
+        forced = true;
         return true;
       }
 
@@ -206,24 +207,28 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         remaining = ['branch'];
         if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) { report?.unexplained?.(); return undefined; }
         const current = await verifyBranch(repoRoot, workspace, receipt);
-        const tips = current.log.content.toString('utf8').split('\n').filter(Boolean).map(entry => entry.split(' ')[1] ?? '');
-        const kept = await keepingRefs(current.sha, tips);
-        if (!kept) {
-          named = current.sha !== workspace.baselineSha ? await movedBranch(workspace.baselineSha, current.sha, 'its worker baseline')
-            : keepBranch('returned to its worker baseline after holding other commits');
+        if (!await keepingRefs(current)) {
+          named = await strandedName(current.sha);
           return undefined;
         }
-        witnesses = kept;
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
         return { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
       }
 
-      /** For each of `tip` and the reflog's `tips` that is not the baseline, a branch or
+      async function strandedName(tip: string): Promise<string> {
+        return tip !== workspace.baselineSha ? movedBranch(workspace.baselineSha, tip, 'its worker baseline')
+          : keepBranch('returned to its worker baseline after holding other commits');
+      }
+
+      /** For the branch tip and each reflog entry that is not the baseline, a branch or
        * remote-tracking ref that contains it, other than this branch and never an alias; undefined
-       * when one has none. A tip's ref also keeps every commit under it. */
-      async function keepingRefs(tip: string, tips: readonly string[]): Promise<Array<{ ref: string; sha: string }> | undefined> {
+       * when one has none, or when one ref is seen at two tips. A tip's ref also keeps every commit
+       * under it. */
+      async function keepingRefs(branch: { sha: string; log: { content: Buffer } }): Promise<Array<{ ref: string; sha: string }> | undefined> {
+        const tip = branch.sha;
+        const tips = branch.log.content.toString('utf8').split('\n').filter(Boolean).map(entry => entry.split(' ')[1] ?? '');
         const refs = new Map<string, string>();
         for (const sha of new Set([tip, ...tips])) {
           if (sha === workspace.baselineSha) continue;
@@ -231,7 +236,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           const listed = await mutationGit(repoRoot, ['for-each-ref', '--contains', sha, '--format=%(refname)%00%(objectname)%00%(symref)', 'refs/heads', 'refs/remotes']);
           const witness = listed.ok ? listed.stdout.split('\n').map(line => line.split('\0'))
             .find(([ref, at, symref]) => ref && at && !symref && ref !== `refs/heads/${workspace.branch}`) : undefined;
-          if (!witness) return undefined;
+          if (!witness || (refs.has(witness[0]!) && refs.get(witness[0]!) !== witness[1])) return undefined;
           refs.set(witness[0]!, witness[1]!);
         }
         return [...refs].map(([ref, sha]) => ({ ref, sha }));
@@ -248,6 +253,10 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           // hearsay-tools/squawk#910: a tip that moved after the checkpoint is named like a stranded one.
           if (current.sha !== checkpoint.sha) { named = await movedBranch(checkpoint.sha, current.sha, 'the tip destroy recorded'); return; }
           if (hash(current.log.content) !== checkpoint.logHash) return;
+          // Unless this attempt removed the worktree itself, prove again on every attempt that no work
+          // is lost (hearsay-tools/squawk#911): a checkpoint from an earlier attempt carries no proof.
+          const witnesses = forced ? [] : await keepingRefs(current);
+          if (!witnesses) { named = await strandedName(current.sha); return; }
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
           assertUnheld?.();

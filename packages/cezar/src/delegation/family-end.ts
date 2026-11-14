@@ -4,8 +4,8 @@
  * retention has reclaimed its clean directory, the owned-workspace removal deletes the worker's
  * branch through its compare-and-swap, which deletes nothing while the branch holds commits that
  * no other ref keeps. A deleted branch completes the worker's destroy, so the parent's slot is
- * free again. A receipt whose run this project no longer has gets the same removal. The branch
- * sweep runs this step. Never throws.
+ * free again. A receipt whose run this project no longer has gets the same removal, after its
+ * directory is reclaimed if clean. The branch sweep runs this step. Never throws.
  */
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,17 +15,21 @@ import { cleanupSafety, workerFamilyEnded } from '../runs/retention.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { ownedWorkspaceReceipts } from './workspace-record.ts';
+import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { releaseThenRemoveOwnedWorkspace } from './owned-workspace-release.ts';
+import { inspectGeneration } from './process-liveness.ts';
 
-export type FamilyEndStore = Pick<RunStore, 'getRun' | 'commitDelegation' | 'readWorkerExecution' |
+export type FamilyEndStore = Pick<RunStore, 'getRun' | 'listWorkersOf' | 'commitDelegation' | 'readWorkerExecution' |
   'workerResourcesSafe' | 'sourceDataDir' | 'unavailable'>;
 
 const SETTLED: ReadonlySet<string> = new Set(['done', 'failed', 'cancelled', 'review']);
 
-/** A settled worker whose family has ended, with no destroy recorded and its directory gone. */
-export function endedWorkerBranch(run: RunRecord, lookup: (id: string) => RunRecord | undefined): boolean {
+/** A settled worker whose family has ended, with no member live, no destroy recorded and its
+ *  directory gone. */
+export function endedWorkerBranch(run: RunRecord, store: Pick<FamilyEndStore, 'getRun' | 'listWorkersOf'>): boolean {
   if (run.delegation?.role !== 'worker' || run.delegation.destroy || isLiveRecord(run) || !SETTLED.has(run.status)) return false;
-  return workerFamilyEnded(run, lookup) && !existsSync(run.delegation.workspace.path);
+  return workerFamilyEnded(run, (id) => store.getRun(id)) && !existsSync(run.delegation.workspace.path) &&
+    !store.listWorkersOf(run.delegation.parentRunId).some(isLiveRecord);
 }
 
 /** Release the branch of every ended worker family in `repoRoot`. `claim` holds the worker's run
@@ -36,23 +40,36 @@ export async function releaseEndedWorkerBranches(repoRoot: string, store: Family
   // Without its runs every receipt would look orphaned.
   if (store.unavailable) return [];
   const released: string[] = [];
-  const lookup = (id: string) => store.getRun(id);
   for (const { workspace, cleaned } of await ownedWorkspaceReceipts(repoRoot).catch(() => [])) {
     const run = store.getRun(workspace.ownerRunId);
     const due = run
-      ? endedWorkerBranch(run, lookup) && JSON.stringify(run.delegation?.role === 'worker' && run.delegation.workspace) === JSON.stringify(workspace)
-      : !cleaned && !existsSync(workspace.path) && inProject(repoRoot, workspace);
+      ? endedWorkerBranch(run, store) && JSON.stringify(run.delegation?.role === 'worker' && run.delegation.workspace) === JSON.stringify(workspace)
+      : !cleaned && inProject(repoRoot, workspace) && await reclaimOrphanDirectory(repoRoot, store, workspace);
     if (due && await releaseBranch(repoRoot, store, workspace, run, claim)) released.push(workspace.ownerRunId);
   }
   return released;
 }
 
-/** Receipts live in the repository's shared Git directory: another checkout's are not this project's. */
+/** Receipts live in the repository's shared Git directory: another checkout's are not this
+ *  project's, and the read-only fallback directory's are left alone. */
 function inProject(repoRoot: string, workspace: WorkerWorkspace): boolean {
   try {
-    const root = realpathSync(repoRoot);
-    return projectPaths(root).reads.some((directory) => workspace.path === join(directory, 'worktrees', workspace.ownerRunId));
+    return workspace.path === join(projectPaths(realpathSync(repoRoot)).write, 'worktrees', workspace.ownerRunId);
   } catch { return false; }
+}
+
+/** An orphan receipt's directory goes as an archived worker's does: only when it is clean, and only
+ *  while still no run owns it and no process works in it. True once the directory is gone. */
+async function reclaimOrphanDirectory(repoRoot: string, store: FamilyEndStore, workspace: WorkerWorkspace): Promise<boolean> {
+  if (!existsSync(workspace.path)) return true;
+  const assertOrphan = () => {
+    if (store.getRun(workspace.ownerRunId)) throw new Error('The receipt has a run');
+    if (inspectGeneration({ paths: [workspace.path] }).liveness !== 'gone') throw new Error('A process may hold the directory');
+  };
+  try { assertOrphan(); } catch { return false; }
+  await releaseThenRemoveWorktree({}, workspace.ownerRunId, repoRoot, workspace.path, undefined,
+    { reclaimOwnedDirectory: true, onlyClean: true, assertCurrent: assertOrphan });
+  return !existsSync(workspace.path);
 }
 
 async function releaseBranch(repoRoot: string, store: FamilyEndStore, workspace: WorkerWorkspace,
@@ -64,7 +81,7 @@ async function releaseBranch(repoRoot: string, store: FamilyEndStore, workspace:
     // Rechecked before every destructive step: the run is still an ended worker (or still absent).
     const assertCurrent = () => {
       const current = store.getRun(workspace.ownerRunId);
-      if (run ? !current || !endedWorkerBranch(current, (id) => store.getRun(id)) : current) throw new Error('Worker changed');
+      if (run ? !current || !endedWorkerBranch(current, store) : current) throw new Error('Worker changed');
       safe();
     };
     const result = await releaseThenRemoveOwnedWorkspace({}, repoRoot, workspace, assertCurrent, assertCurrent);
